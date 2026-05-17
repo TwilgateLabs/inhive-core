@@ -23,6 +23,7 @@ import (
 	"github.com/TwilgateLabs/inhive-core/v2/db"
 	hcommon "github.com/TwilgateLabs/inhive-core/v2/hcommon"
 	hutils "github.com/TwilgateLabs/inhive-core/v2/hutils"
+	"github.com/sagernet/sing-box/daemon"
 	"github.com/sagernet/sing-box/experimental/libbox"
 	"github.com/sagernet/sing-box/log"
 	E "github.com/sagernet/sing/common/exceptions"
@@ -142,6 +143,8 @@ func StartGrpcServer(listenAddressG string, service string) (*grpc.Server, error
 	)
 	if service == "core" {
 		RegisterCoreServer(s, &CoreService{})
+		// S3.3a dual-channel: expose upstream libbox API alongside CoreServer.
+		daemon.RegisterStartedServiceServer(s, &liveStartedServiceProxy{})
 	}
 	log.Info("Server listening on %s", listenAddressG)
 	go func() {
@@ -242,6 +245,10 @@ func StartGrpcServerByMode(listenAddressG string, mode SetupMode) (*grpc.Server,
 	}
 	// Register your gRPC service here
 	RegisterCoreServer(grpcServer[mode], &CoreService{})
+	// S3.3a dual-channel: also expose upstream sing-box libbox API
+	// (daemon.StartedServiceServer) on the same listener via a proxy that
+	// delegates to `static.StartedService` once Start() has been called.
+	daemon.RegisterStartedServiceServer(grpcServer[mode], &liveStartedServiceProxy{})
 	// Listen on the provided address
 	lis, err := net.Listen("tcp", listenAddressG)
 	if err != nil {
