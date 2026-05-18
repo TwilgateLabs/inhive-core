@@ -6,7 +6,7 @@ import (
 	"fmt"
 	"runtime/debug"
 
-	hcore "github.com/TwilgateLabs/inhive-core/v2/hcore"
+	hcore "github.com/twilgate/inhive-core/v2/hcore"
 	"github.com/sagernet/sing-box/log"
 )
 

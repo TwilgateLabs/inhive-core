@@ -5,7 +5,7 @@ import (
 	"context"
 	"time"
 
-	"github.com/TwilgateLabs/inhive-core/v2/config"
+	"github.com/twilgate/inhive-core/v2/config"
 	C "github.com/sagernet/sing-box/constant"
 	"github.com/sagernet/sing-box/log"
 )

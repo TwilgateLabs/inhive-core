@@ -7,7 +7,7 @@
 package hcore
 
 import (
-	hcommon "github.com/TwilgateLabs/inhive-core/v2/hcommon"
+	hcommon "github.com/twilgate/inhive-core/v2/hcommon"
 	protoreflect "google.golang.org/protobuf/reflect/protoreflect"
 	protoimpl "google.golang.org/protobuf/runtime/protoimpl"
 	timestamppb "google.golang.org/protobuf/types/known/timestamppb"
@@ -2526,7 +2526,7 @@ const file_v2_hcore_hcore_proto_rawDesc = "" +
 	"\aSERVICE\x10\x01\x12\n" +
 	"\n" +
 	"\x06CONFIG\x10\x02BH\n" +
-	"\x1ccom.inhive.core.api.v2.hcoreZ(github.com/TwilgateLabs/inhive-core/v2/hcoreb\x06proto3"
+	"\x1ccom.inhive.core.api.v2.hcoreZ(github.com/twilgate/inhive-core/v2/hcoreb\x06proto3"
 
 var (
 	file_v2_hcore_hcore_proto_rawDescOnce sync.Once

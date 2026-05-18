@@ -7,7 +7,7 @@
 package hcore
 
 import (
-	hcommon "github.com/TwilgateLabs/inhive-core/v2/hcommon"
+	hcommon "github.com/twilgate/inhive-core/v2/hcommon"
 	protoreflect "google.golang.org/protobuf/reflect/protoreflect"
 	protoimpl "google.golang.org/protobuf/runtime/protoimpl"
 	reflect "reflect"
@@ -50,7 +50,7 @@ const file_v2_hcore_hcore_service_proto_rawDesc = "" +
 	"\x15SetSystemProxyEnabled\x12#.hcore.SetSystemProxyEnabledRequest\x1a\x11.hcommon.Response\x125\n" +
 	"\vLogListener\x12\x11.hcore.LogRequest\x1a\x11.hcore.LogMessage0\x01\x12,\n" +
 	"\x05Close\x12\x13.hcore.CloseRequest\x1a\x0e.hcommon.EmptyBH\n" +
-	"\x1ccom.inhive.core.api.v2.hcoreZ(github.com/TwilgateLabs/inhive-core/v2/hcoreb\x06proto3"
+	"\x1ccom.inhive.core.api.v2.hcoreZ(github.com/twilgate/inhive-core/v2/hcoreb\x06proto3"
 
 var file_v2_hcore_hcore_service_proto_goTypes = []any{
 	(*StartRequest)(nil),                 // 0: hcore.StartRequest

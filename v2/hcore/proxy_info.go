@@ -5,8 +5,8 @@ import (
 	"strings"
 	"time"
 
-	"github.com/TwilgateLabs/inhive-core/v2/config"
-	hcommon "github.com/TwilgateLabs/inhive-core/v2/hcommon"
+	"github.com/twilgate/inhive-core/v2/config"
+	hcommon "github.com/twilgate/inhive-core/v2/hcommon"
 	"github.com/sagernet/sing-box/adapter"
 	"github.com/sagernet/sing-box/common/monitoring"
 	G "github.com/sagernet/sing-box/protocol/group"

@@ -7,8 +7,8 @@ import (
 	"os"
 	"path/filepath"
 
-	"github.com/TwilgateLabs/inhive-core/v2/config"
-	hcore "github.com/TwilgateLabs/inhive-core/v2/hcore"
+	"github.com/twilgate/inhive-core/v2/config"
+	hcore "github.com/twilgate/inhive-core/v2/hcore"
 	"github.com/sagernet/sing-box/experimental/libbox"
 	"github.com/sagernet/sing-box/log"
 	"github.com/sagernet/sing-box/option"

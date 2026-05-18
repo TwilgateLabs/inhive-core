@@ -26,7 +26,7 @@ import (
 	"net/http"
 	"time"
 
-	"github.com/TwilgateLabs/inhive-core/v2/config"
+	"github.com/twilgate/inhive-core/v2/config"
 	"github.com/sagernet/sing-box/include"
 	"github.com/sagernet/sing-box/option"
 	"golang.org/x/net/proxy"

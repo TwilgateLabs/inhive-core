@@ -2,7 +2,7 @@ syntax = "proto3";
 import "v2/hcommon/common.proto";
 package hcore;
 
-option go_package = "github.com/TwilgateLabs/inhive-core/v2/hcore";
+option go_package = "github.com/twilgate/inhive-core/v2/hcore";
 option java_package = "com.inhive.core.api.v2.hcore";
 import "v2/hcore/hcore.proto";
 

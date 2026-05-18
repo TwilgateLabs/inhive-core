@@ -13,7 +13,7 @@ import (
 	"github.com/sagernet/wireguard-go/warpobf"
 
 	// "github.com/bepass-org/wireguard-go/warp"
-	"github.com/TwilgateLabs/inhive-core/v2/db"
+	"github.com/twilgate/inhive-core/v2/db"
 
 	"github.com/sagernet/sing-box/option"
 	T "github.com/sagernet/sing-box/option"

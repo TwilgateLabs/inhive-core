@@ -7,9 +7,9 @@ import (
 	"runtime"
 	"time"
 
-	"github.com/TwilgateLabs/inhive-core/v2/config"
-	"github.com/TwilgateLabs/inhive-core/v2/db"
-	hcommon "github.com/TwilgateLabs/inhive-core/v2/hcommon"
+	"github.com/twilgate/inhive-core/v2/config"
+	"github.com/twilgate/inhive-core/v2/db"
+	hcommon "github.com/twilgate/inhive-core/v2/hcommon"
 	"github.com/sagernet/sing-box/adapter"
 	"github.com/sagernet/sing-box/protocol/group"
 

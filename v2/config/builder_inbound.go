@@ -10,7 +10,7 @@ import (
 
 	"time"
 
-	"github.com/TwilgateLabs/inhive-core/v2/hutils"
+	"github.com/twilgate/inhive-core/v2/hutils"
 	C "github.com/sagernet/sing-box/constant"
 	"github.com/sagernet/sing-box/option"
 	"github.com/sagernet/sing/common/json/badoption"

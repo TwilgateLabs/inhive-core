@@ -4,7 +4,7 @@ import (
 	"fmt"
 	"runtime/debug"
 
-	hcore "github.com/TwilgateLabs/inhive-core/v2/hcore"
+	hcore "github.com/twilgate/inhive-core/v2/hcore"
 
 	_ "github.com/sagernet/gomobile"
 	"github.com/sagernet/sing-box/experimental/libbox"

@@ -1,7 +1,7 @@
 syntax = "proto3";
 
 package profile;
-option go_package = "github.com/TwilgateLabs/inhive-core/v2/profile";
+option go_package = "github.com/twilgate/inhive-core/v2/profile";
 option java_package = "com.inhive.core.api.v2.profile";
 /**
  * This proto file defines the ProfileService with RPC methods 

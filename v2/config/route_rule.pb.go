@@ -452,7 +452,7 @@ const file_v2_config_route_rule_proto_rawDesc = "" +
 	"\x03dns\x10\x04\x12\x0e\n" +
 	"\n" +
 	"bittorrent\x10\x05BJ\n" +
-	"\x1dcom.inhive.core.api.v2.configZ)github.com/TwilgateLabs/inhive-core/v2/configb\x06proto3"
+	"\x1dcom.inhive.core.api.v2.configZ)github.com/twilgate/inhive-core/v2/configb\x06proto3"
 
 var (
 	file_v2_config_route_rule_proto_rawDescOnce sync.Once

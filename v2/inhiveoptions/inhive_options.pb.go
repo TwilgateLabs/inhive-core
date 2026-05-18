@@ -1282,7 +1282,7 @@ const file_v2_inhiveoptions_inhive_options_proto_rawDesc = "" +
 	"\vprefer_ipv6\x10\x02\x12\r\n" +
 	"\tipv4_only\x10\x03\x12\r\n" +
 	"\tipv6_only\x10\x04BX\n" +
-	"$com.inhive.core.api.v2.inhiveoptionsZ0github.com/TwilgateLabs/inhive-core/v2/inhiveoptionsb\x06proto3"
+	"$com.inhive.core.api.v2.inhiveoptionsZ0github.com/twilgate/inhive-core/v2/inhiveoptionsb\x06proto3"
 
 var (
 	file_v2_inhiveoptions_inhive_options_proto_rawDescOnce sync.Once

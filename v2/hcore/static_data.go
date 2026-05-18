@@ -6,7 +6,7 @@ import (
 	"sync"
 	"time"
 
-	"github.com/TwilgateLabs/inhive-core/v2/config"
+	"github.com/twilgate/inhive-core/v2/config"
 	"github.com/sagernet/sing-box/common/monitoring"
 	"github.com/sagernet/sing-box/daemon"
 	"github.com/sagernet/sing-box/experimental/libbox"

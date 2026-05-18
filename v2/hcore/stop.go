@@ -5,8 +5,8 @@ import (
 	"context"
 	"fmt"
 
-	"github.com/TwilgateLabs/inhive-core/v2/config"
-	hcommon "github.com/TwilgateLabs/inhive-core/v2/hcommon"
+	"github.com/twilgate/inhive-core/v2/config"
+	hcommon "github.com/twilgate/inhive-core/v2/hcommon"
 )
 
 func (s *CoreService) Stop(ctx context.Context, empty *hcommon.Empty) (resp *CoreInfoResponse, err error) {

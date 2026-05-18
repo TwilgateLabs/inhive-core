@@ -4,9 +4,9 @@ package hcore
 import (
 	"context"
 
-	"github.com/TwilgateLabs/inhive-core/v2/config"
-	"github.com/TwilgateLabs/inhive-core/v2/hcommon"
-	"github.com/TwilgateLabs/inhive-core/v2/service_manager"
+	"github.com/twilgate/inhive-core/v2/config"
+	"github.com/twilgate/inhive-core/v2/hcommon"
+	"github.com/twilgate/inhive-core/v2/service_manager"
 )
 
 var (

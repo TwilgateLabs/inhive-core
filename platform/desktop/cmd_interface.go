@@ -10,7 +10,7 @@ import (
 	"runtime/debug"
 	"unsafe"
 
-	"github.com/TwilgateLabs/inhive-core/cmd"
+	"github.com/twilgate/inhive-core/cmd"
 	"github.com/sagernet/sing-box/log"
 )
 

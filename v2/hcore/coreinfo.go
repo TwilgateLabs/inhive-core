@@ -4,7 +4,7 @@ package hcore
 import (
 	"fmt"
 
-	hcommon "github.com/TwilgateLabs/inhive-core/v2/hcommon"
+	hcommon "github.com/twilgate/inhive-core/v2/hcommon"
 	"google.golang.org/grpc"
 )
 

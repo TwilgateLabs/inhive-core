@@ -8,7 +8,7 @@ package hcore
 
 import (
 	context "context"
-	hcommon "github.com/TwilgateLabs/inhive-core/v2/hcommon"
+	hcommon "github.com/twilgate/inhive-core/v2/hcommon"
 	grpc "google.golang.org/grpc"
 	codes "google.golang.org/grpc/codes"
 	status "google.golang.org/grpc/status"

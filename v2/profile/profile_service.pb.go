@@ -7,7 +7,7 @@
 package profile
 
 import (
-	hcommon "github.com/TwilgateLabs/inhive-core/v2/hcommon"
+	hcommon "github.com/twilgate/inhive-core/v2/hcommon"
 	protoreflect "google.golang.org/protobuf/reflect/protoreflect"
 	protoimpl "google.golang.org/protobuf/runtime/protoimpl"
 	reflect "reflect"
@@ -312,7 +312,7 @@ const file_v2_profile_profile_service_proto_rawDesc = "" +
 	"\n" +
 	"AddProfile\x12\x1a.profile.AddProfileRequest\x1a\x18.profile.ProfileResponse\x12;\n" +
 	"\rDeleteProfile\x12\x17.profile.ProfileRequest\x1a\x11.hcommon.ResponseBL\n" +
-	"\x1ecom.inhive.core.api.v2.profileZ*github.com/TwilgateLabs/inhive-core/v2/profileb\x06proto3"
+	"\x1ecom.inhive.core.api.v2.profileZ*github.com/twilgate/inhive-core/v2/profileb\x06proto3"
 
 var (
 	file_v2_profile_profile_service_proto_rawDescOnce sync.Once

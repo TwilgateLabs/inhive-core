@@ -172,7 +172,7 @@ const file_v2_hcommon_common_proto_rawDesc = "" +
 	"\n" +
 	"\x06FAILED\x10\x01\x12\r\n" +
 	"\tAUTH_NEED\x10\x02BL\n" +
-	"\x1ecom.inhive.core.api.v2.hcommonZ*github.com/TwilgateLabs/inhive-core/v2/hcommonb\x06proto3"
+	"\x1ecom.inhive.core.api.v2.hcommonZ*github.com/twilgate/inhive-core/v2/hcommonb\x06proto3"
 
 var (
 	file_v2_hcommon_common_proto_rawDescOnce sync.Once

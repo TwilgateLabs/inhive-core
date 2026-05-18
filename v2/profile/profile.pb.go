@@ -7,7 +7,7 @@
 package profile
 
 import (
-	inhiveoptions "github.com/TwilgateLabs/inhive-core/v2/inhiveoptions"
+	inhiveoptions "github.com/twilgate/inhive-core/v2/inhiveoptions"
 	protoreflect "google.golang.org/protobuf/reflect/protoreflect"
 	protoimpl "google.golang.org/protobuf/runtime/protoimpl"
 	reflect "reflect"
@@ -271,7 +271,7 @@ const file_v2_profile_profile_proto_rawDesc = "" +
 	"webPageUrl\x12\x1f\n" +
 	"\vsupport_url\x18\x06 \x01(\tR\n" +
 	"supportUrlBL\n" +
-	"\x1ecom.inhive.core.api.v2.profileZ*github.com/TwilgateLabs/inhive-core/v2/profileb\x06proto3"
+	"\x1ecom.inhive.core.api.v2.profileZ*github.com/twilgate/inhive-core/v2/profileb\x06proto3"
 
 var (
 	file_v2_profile_profile_proto_rawDescOnce sync.Once

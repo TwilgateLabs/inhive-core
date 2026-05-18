@@ -1,6 +1,6 @@
 syntax = "proto3";
 package config;
-option go_package = "github.com/TwilgateLabs/inhive-core/v2/config";
+option go_package = "github.com/twilgate/inhive-core/v2/config";
 option java_package = "com.inhive.core.api.v2.config";
 message RouteRule {
   repeated Rule rules = 1 [json_name = "rules"];

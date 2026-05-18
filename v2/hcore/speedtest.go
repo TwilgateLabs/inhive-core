@@ -22,7 +22,7 @@ import (
 
 	"github.com/sagernet/sing-box/adapter"
 	"github.com/sagernet/sing/common/ntp"
-	"github.com/TwilgateLabs/inhive-core/v2/config"
+	"github.com/twilgate/inhive-core/v2/config"
 	E "github.com/sagernet/sing/common/exceptions"
 	M "github.com/sagernet/sing/common/metadata"
 )

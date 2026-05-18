@@ -5,8 +5,8 @@ import (
 	"log"
 	"time"
 
-	"github.com/TwilgateLabs/inhive-core/v2/hcommon"
-	hcore "github.com/TwilgateLabs/inhive-core/v2/hcore"
+	"github.com/twilgate/inhive-core/v2/hcommon"
+	hcore "github.com/twilgate/inhive-core/v2/hcore"
 
 	"github.com/spf13/cobra"
 	"google.golang.org/grpc"

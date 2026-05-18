@@ -10,7 +10,7 @@ import (
 	"os"
 	"time"
 
-	"github.com/TwilgateLabs/inhive-core/v2/config"
+	"github.com/twilgate/inhive-core/v2/config"
 	"golang.org/x/net/proxy"
 
 	"github.com/sagernet/sing-box/daemon"

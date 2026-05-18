@@ -3,7 +3,7 @@ package cmd
 import (
 	"os"
 
-	"github.com/TwilgateLabs/inhive-core/v2/hutils"
+	"github.com/twilgate/inhive-core/v2/hutils"
 	"github.com/spf13/cobra"
 )
 

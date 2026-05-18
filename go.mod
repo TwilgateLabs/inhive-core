@@ -1,4 +1,4 @@
-module github.com/TwilgateLabs/inhive-core
+module github.com/twilgate/inhive-core
 
 go 1.26.1
 
