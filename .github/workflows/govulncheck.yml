@@ -1,0 +1,57 @@
+# govulncheck — Go-specific vuln scan with call-graph reachability analysis.
+#
+# Complements osv-scanner.yml:
+#   - OSV-Scanner flags any CVE in declared deps (lockfile-level).
+#   - govulncheck only fails on vulns actually REACHABLE from main() via static analysis.
+#
+# Why both: OSV catches everything (lower false-neg, higher noise); govulncheck
+# tells which findings actually matter for our binary's attack surface.
+#
+# Schedule offset Mon 04:37 UTC (vs OSV @ 04:23) — separate alerts, no concurrent log noise.
+#
+# Action pin discipline (per _actions_pin_summary_2026_05_19.md):
+#   - actions/checkout@v4.3.1 — same SHA as build.yml
+#   - actions/setup-go@v5.6.0 — same SHA as build.yml
+#   - govulncheck installed via `go install golang.org/x/vuln/cmd/govulncheck@v1.1.4` (pinned tag)
+
+name: govulncheck
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+    branches: [main]
+  schedule:
+    - cron: '37 4 * * 1'
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  scan:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Rewrite SSH to HTTPS for submodules
+        run: git config --global url."https://github.com/".insteadOf "git@github.com:"
+
+      - name: Checkout
+        uses: actions/checkout@34e114876b0b11c390a56381ad16ebd13914f8d5  # v4.3.1
+        with:
+          submodules: recursive
+
+      - name: Setup Go
+        uses: actions/setup-go@40f1582b2485089dde7abd97c1529aa768e1baff  # v5.6.0
+        with:
+          go-version: '1.26.3'
+
+      - name: Install govulncheck
+        run: go install golang.org/x/vuln/cmd/govulncheck@v1.1.4
+
+      - name: Download dependencies
+        run: go mod download
+
+      - name: Run govulncheck
+        # Same package exclusion as build.yml — cmd/bydll needs DLL, platform/desktop needs CGO headers.
+        run: |
+          govulncheck $(go list ./... | grep -v -E '(cmd/bydll|platform/desktop|profile/test)')
