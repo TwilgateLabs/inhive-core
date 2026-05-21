@@ -11,8 +11,11 @@
 #
 # Submodules note: root go.mod uses `replace` for ./sing-box. OSV-Scanner parses go.mod
 # directly (no `go list` call graph), so submodule contents aren't required for dep version lookup.
-# If we ever need transitive scanning of submodule deps, swap to the unified workflow with
-# explicit `actions/checkout@... with: submodules: recursive` step.
+#
+# Scope restriction: explicit --lockfile flags instead of --recursive. Reason: --recursive
+# picks up `sing-box/replace/tailscale/client/web/yarn.lock` (vendored Tailscale web UI npm deps,
+# 30+ npm vulns 2026-05-21). That code is dead — Tailscale web UI is not compiled into our
+# DLL/AAR/Framework. Tracked in feedback_security_supply_chain.md as known dead surface.
 
 name: OSV-Scanner
 
@@ -37,11 +40,10 @@ jobs:
     if: ${{ github.event_name == 'push' || github.event_name == 'schedule' || github.event_name == 'workflow_dispatch' }}
     uses: "google/osv-scanner-action/.github/workflows/osv-scanner-reusable.yml@9a498708959aeaef5ef730655706c5a1df1edbc2"  # v2.3.8
     with:
-      # Recursive scan finds: go.mod (root), xray2sing/go.mod.
-      # sing-box/ and maybenot/ are submodules — skip via --skip-git rules in lockfile if noise.
+      # Explicit Go lockfiles only — skip submodule/vendored npm/yarn deps (Tailscale web UI).
       scan-args: |-
-        --recursive
-        ./
+        --lockfile=go.mod
+        --lockfile=xray2sing/go.mod
     permissions:
       security-events: write
       contents: read
@@ -52,8 +54,8 @@ jobs:
     uses: "google/osv-scanner-action/.github/workflows/osv-scanner-reusable-pr.yml@9a498708959aeaef5ef730655706c5a1df1edbc2"  # v2.3.8
     with:
       scan-args: |-
-        --recursive
-        ./
+        --lockfile=go.mod
+        --lockfile=xray2sing/go.mod
     permissions:
       security-events: write
       contents: read
