@@ -112,4 +112,4 @@ make ios
 
 ## License
 
-[GPL-3.0-or-later](LICENSE.md) — based on [Hiddify](https://github.com/hiddify/hiddify-core) open-source project.
+[GPL-3.0-or-later](LICENSE.md) — open-source project.
