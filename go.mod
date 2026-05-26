@@ -164,7 +164,6 @@ require (
 	github.com/tailscale/netlink v1.1.1-0.20240822203006-4d49adab4de7 // indirect
 	github.com/tailscale/peercred v0.0.0-20250107143737-35a0c7bd7edc // indirect
 	github.com/tailscale/web-client-prebuilt v0.0.0-20250124233751-d4cd19a26976 // indirect
-	github.com/tevino/abool v1.2.0 // indirect
 	github.com/tidwall/gjson v1.18.0 // indirect
 	github.com/tidwall/match v1.2.0 // indirect
 	github.com/tidwall/pretty v1.2.1 // indirect
@@ -277,3 +276,7 @@ replace github.com/Psiphon-Labs/psiphon-tls => ./sing-box/replace/psiphon-tls
 replace github.com/openlibrecommunity/olcrtc => github.com/TwilgateLabs/inhive-olcrtc v0.0.2-inhive
 
 replace github.com/zarazaex69/j => github.com/TwilgateLabs/inhive-j-deps v0.0.1-inhive
+
+replace github.com/amnezia-vpn/amneziawg-go => github.com/amnezia-vpn/amneziawg-go v0.2.18
+
+replace gvisor.dev/gvisor => gvisor.dev/gvisor v0.0.0-20240503213918-b7c924bc64f8
