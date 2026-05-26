@@ -11,8 +11,9 @@ shipped standalone).
 
 ### Added
 
-- **olcrtc Phase 1**: stealth tunnel outbound `type: olcrtc` for emergency RU LTE whitelist scenarios (`with_olcrtc` build tag, default-on). Vendored `github.com/openlibrecommunity/olcrtc@587c13e` (post-merge master). Outbound is registered always; stub returns clear error if built without the tag.
-- **olcrtc Phase 2 (generic mode switch infra)** on `feature/phase2-mode-switch`: new gRPC `SwitchMode(int32 mode)` RPC + `ModeStateListener` server stream. URLTest health watcher (sliding window 10, threshold 7+ consecutive failures or 70%+ rate, debounce 30s) emits "switch recommended" events. Core only signals state — hard cross-mode switch is the main app's job (NE Provider restart). Branch not yet merged.
+- **olcrtc Phase 1**: stealth tunnel outbound `type: olcrtc` for emergency RU LTE whitelist scenarios (`with_olcrtc` build tag, default-on). Outbound is registered always; stub returns clear error if built without the tag.
+- **olcrtc Phase 2 (generic mode switch infra)**: new gRPC `SwitchMode(int32 mode)` RPC + `ModeStateListener` server stream. URLTest health watcher (sliding window 10, threshold 7+ consecutive failures or 70%+ rate, debounce 30s) emits "switch recommended" events. Core only signals state — hard cross-mode switch is the main app's job (NE Provider restart).
+- **olcrtc Phase 2.5 (fork + H-1 rewrite + SEC-2/3 hardening)**: Forked `openlibrecommunity/olcrtc` → `TwilgateLabs/inhive-olcrtc` (`v0.0.1-inhive`) with `internal/client` promoted to `pkg/olcrtc/client` so VPN outbound embedders can access the multiplexing client API. `core/sing-box/protocol/olcrtc/outbound.go` rewritten to use `client.RunWithReady` + local SOCKS5 detour (Pattern A — same approach as naive outbound), fixing H-1 traffic cross-contamination. Schema in `option/olcrtc.go` extended with `ChannelID` (UUID-validated), `KeyHex` (64 hex chars), `Transport`, `SocksAddr/User/Pass`. SEC-2 hard-pins `transport=datachannel` (blocks video transport DoS surface); SEC-3 defaults `dns_server=9.9.9.9:53` (Quad9 — protects telemetry beacon endpoint from DNS poisoning).
 
 ### Known issues
 
