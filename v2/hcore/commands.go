@@ -301,14 +301,12 @@ func (h *InhiveInstance) ModeStateListener(stream grpc.ServerStreamingServer[Mod
 		return E.New("modeStateObserver not initialised")
 	}
 	events := static.modeStateObserver.Subscribe(8)
-	defer func() {
-		// Defensive: Unsubscribe is keyed by channel identity; the
-		// Broadcaster also auto-closes subscribers when its context dies,
-		// but doing it explicitly avoids leaking when the gRPC client
-		// disconnects mid-session.
-		// Note: subscriber chan is read-only; we hand it back as-is.
-	}()
-	_ = events
+	// Explicit unsubscribe on client disconnect. Without this, a churn of
+	// gRPC clients reconnecting (e.g. NE provider restarts during a
+	// Mode-1↔2 transition) would leak subscriber slots in the broadcaster's
+	// internal map. Broadcaster auto-closes on its own context cancel, but
+	// that's process-lifetime — we want per-stream cleanup.
+	defer static.modeStateObserver.Unsubscribe(events)
 
 	// Initial snapshot — current desired mode, no error.
 	if err := stream.Send(&ModeStateResponse{
