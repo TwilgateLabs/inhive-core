@@ -69,6 +69,10 @@ func Setup(params *SetupRequest, platformInterface libbox.PlatformInterface) err
 	sUserID = os.Getuid()
 	sGroupID = os.Getgid()
 
+	// Heartbeat: post-mortem trail for silent process death. sync.Once so
+	// repeated Setup() (mode OLD + GRPC) don't spawn duplicate goroutines.
+	startHeartbeatOnce.Do(func() { go heartbeatLoop(sWorkingPath) })
+
 	// Audit Q1.3-fix: restore CWD = workingDir on mobile platforms.
 	// sing-box upstream resolves embedded geosite/geoip/rule-set paths
 	// against CWD; without Chdir each lookup falls back to slow paths,
@@ -303,5 +307,29 @@ func CloseGrpcServer(mode SetupMode) {
 	if server, ok := grpcServer[mode]; ok && server != nil {
 		server.Stop()
 		delete(grpcServer, mode)
+	}
+}
+
+var startHeartbeatOnce sync.Once
+
+// heartbeatLoop writes runtime stats once per minute. File handle is held
+// until process exit (matches stderr redirect lifecycle); rotation is out
+// of scope. All errors are silent — diagnostic must never crash the host.
+func heartbeatLoop(workingDir string) {
+	defer config.DeferPanicToError("heartbeat", func(err error) {
+		Log(LogLevel_ERROR, LogType_CORE, err.Error())
+	})
+	f, err := os.OpenFile(workingDir+"/data/heartbeat.log", os.O_WRONLY|os.O_CREATE|os.O_APPEND, 0644)
+	if err != nil {
+		return
+	}
+	fmt.Fprintf(f, "==== heartbeat start %s os=%s arch=%s go=%s pid=%d ====\n",
+		time.Now().UTC().Format(time.RFC3339), runtime.GOOS, runtime.GOARCH, runtime.Version(), os.Getpid())
+	var m runtime.MemStats
+	ticker := time.NewTicker(time.Minute)
+	for range ticker.C {
+		runtime.ReadMemStats(&m)
+		fmt.Fprintf(f, "%s gor=%d heap=%dMB\n",
+			time.Now().UTC().Format(time.RFC3339), runtime.NumGoroutine(), m.HeapAlloc/(1024*1024))
 	}
 }
