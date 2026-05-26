@@ -16,9 +16,9 @@ shipped standalone).
 - **olcrtc Phase 2.5 (fork + H-1 rewrite + SEC-2/3 hardening)**: Forked `openlibrecommunity/olcrtc` → `TwilgateLabs/inhive-olcrtc` with `internal/client` promoted to `pkg/olcrtc/client` so VPN outbound embedders can access the multiplexing client API. `core/sing-box/protocol/olcrtc/outbound.go` rewritten to use `client.RunWithReady` + local SOCKS5 detour (Pattern A — same approach as naive outbound), fixing H-1 traffic cross-contamination. Schema in `option/olcrtc.go` extended with `ChannelID` (UUID-validated), `KeyHex` (64 hex chars), `Transport`, `SocksAddr/User/Pass`. SEC-2 hard-pins `transport=datachannel` (blocks video transport DoS surface); SEC-3 defaults `dns_server=9.9.9.9:53` (Quad9 — protects telemetry beacon endpoint from DNS poisoning).
 - **olcrtc Phase 2.5 Этап 4 (fork hardening)**: Bumped `TwilgateLabs/inhive-olcrtc` to `v0.0.2-inhive` (scrubbed hostile Russian comments in vp8channel; gutted `sendTelemetry()` body to defeat DNS-poisoning side-channel beacon — SEC-3 server-side and SEC-6). Added `replace github.com/zarazaex69/j => github.com/TwilgateLabs/inhive-j-deps v0.0.1-inhive` (force-disabled `InsecureSkipVerify` in XMPP dial paths regardless of caller flag — SEC-5 MITM defense). No outbound code change; same call paths now traverse hardened transports.
 
-### Known issues
+### Fixed
 
-- Full `-buildmode=c-shared` build with `with_gvisor` fails on `gvisor.dev/gvisor@v0.0.0-20250606233247-e3c4c4cad86f` due to mixed-package `bridge_test.go` under `pkg/tcpip/stack/` (Go 1.26 stricter mixed-package detection). Pre-existing on `main` independent of Phase 2. Tracked separately.
+- **gvisor / amneziawg c-shared build break**: `make windows`/`make macos` failed with `bridge_test.go` mixed-package error after Phase 1 `go mod tidy` transitively bumped amneziawg-go v0.2.18 → v1.0.4 (which requires the new gvisor API). Pinned amneziawg-go back to v0.2.18 via `replace` directive and pinned gvisor to v0.0.0-20240503... (last clean version before `bridge_test.go` was added). Full c-shared build now Exit 0 with production tags.
 
 ## [2026-05-20]
 
