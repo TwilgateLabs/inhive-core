@@ -9,7 +9,14 @@ shipped standalone).
 
 ## [Unreleased]
 
-(no pending changes — next significant work tracked in `inhive-memory/audit_2026_05_19/02_architectural_assessment.md`)
+### Added
+
+- **olcrtc Phase 1**: stealth tunnel outbound `type: olcrtc` for emergency RU LTE whitelist scenarios (`with_olcrtc` build tag, default-on). Vendored `github.com/openlibrecommunity/olcrtc@587c13e` (post-merge master). Outbound is registered always; stub returns clear error if built without the tag.
+- **olcrtc Phase 2 (generic mode switch infra)** on `feature/phase2-mode-switch`: new gRPC `SwitchMode(int32 mode)` RPC + `ModeStateListener` server stream. URLTest health watcher (sliding window 10, threshold 7+ consecutive failures or 70%+ rate, debounce 30s) emits "switch recommended" events. Core only signals state — hard cross-mode switch is the main app's job (NE Provider restart). Branch not yet merged.
+
+### Known issues
+
+- Full `-buildmode=c-shared` build with `with_gvisor` fails on `gvisor.dev/gvisor@v0.0.0-20250606233247-e3c4c4cad86f` due to mixed-package `bridge_test.go` under `pkg/tcpip/stack/` (Go 1.26 stricter mixed-package detection). Pre-existing on `main` independent of Phase 2. Tracked separately.
 
 ## [2026-05-20]
 
