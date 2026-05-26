@@ -183,6 +183,14 @@ func StartService(ctx context.Context, in *StartRequest) (coreResponse *CoreInfo
 		}
 	}
 
+	// Phase 2 mode watcher — observes Mode 1 carousel health and emits
+	// Mode-2 recommendations on the ModeStateListener stream. Bound to the
+	// daemon context so it dies with the engine; Stop() also cancels it
+	// explicitly so we don't rely on goroutine-after-shutdown semantics.
+	if boxCtx := static.Context(); boxCtx != nil {
+		startModeWatcher(boxCtx, static)
+	}
+
 	WriteSharedLog("StartService: returning STARTED")
 	return SetCoreStatus(CoreStates_STARTED, MessageType_EMPTY, ""), nil
 }

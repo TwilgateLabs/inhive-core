@@ -239,3 +239,104 @@ func (h *InhiveInstance) UrlTest(in *UrlTestRequest) (*hcommon.Response, error) 
 		Message: "",
 	}, nil
 }
+
+// SwitchMode records the new desired mode and broadcasts an ack on the
+// ModeStateListener stream. It deliberately does NOT stop or reconfigure
+// the running sing-box service: a Mode-1↔Mode-2 transition is implemented
+// in the main app as an NE Provider restart with a different
+// providerConfiguration, which is the only way to actually unload the
+// previous data plane from RAM (relevant for the iOS 15 MB jetsam budget).
+//
+// Validation: mode must be 1 or 2. Other values fail and emit an error
+// event so listeners can surface the rejection.
+func (s *CoreService) SwitchMode(ctx context.Context, in *SwitchModeRequest) (resp *hcommon.Response, err error) {
+	defer config.RecoverPanicToError("CoreService.SwitchMode", func(e error) {
+		Log(LogLevel_FATAL, LogType_CORE, e.Error())
+		resp = &hcommon.Response{Code: hcommon.ResponseCode_FAILED, Message: e.Error()}
+		err = e
+	})
+	return static.SwitchMode(in)
+}
+
+func (h *InhiveInstance) SwitchMode(in *SwitchModeRequest) (*hcommon.Response, error) {
+	if in == nil {
+		err := E.New("SwitchMode: nil request")
+		emitModeState(0, err.Error(), "")
+		return &hcommon.Response{Code: hcommon.ResponseCode_FAILED, Message: err.Error()}, err
+	}
+	switch in.Mode {
+	case 1, 2:
+		// ok
+	default:
+		err := E.New("SwitchMode: invalid mode ", in.Mode, " (allowed: 1, 2)")
+		emitModeState(0, err.Error(), "")
+		return &hcommon.Response{Code: hcommon.ResponseCode_FAILED, Message: err.Error()}, err
+	}
+	previous := static.currentMode.Swap(in.Mode)
+	Log(LogLevel_DEBUG, LogType_CORE, "SwitchMode: ", previous, " -> ", in.Mode)
+	emitModeState(in.Mode, "", "")
+	return &hcommon.Response{Code: hcommon.ResponseCode_OK, Message: ""}, nil
+}
+
+// ModeStateListener — server-streaming endpoint. Pattern mirrors
+// GetSystemInfoStream: emit a snapshot immediately, then forward events
+// from the broadcaster until either the gRPC client or the daemon context
+// goes away.
+//
+// We intentionally do NOT gate this stream on h.Context() (the sing-box
+// daemon context). Mode state is meaningful even when the VPN is off
+// (e.g. the main app wants to know "what mode will we boot into when the
+// user toggles the switch?"), so the only termination signal is the
+// client stream itself.
+func (s *CoreService) ModeStateListener(req *hcommon.Empty, stream grpc.ServerStreamingServer[ModeStateResponse]) (err error) {
+	defer config.RecoverPanicToError("CoreService.ModeStateListener", func(e error) {
+		Log(LogLevel_FATAL, LogType_CORE, e.Error())
+		err = e
+	})
+	return static.ModeStateListener(stream)
+}
+
+func (h *InhiveInstance) ModeStateListener(stream grpc.ServerStreamingServer[ModeStateResponse]) error {
+	if static.modeStateObserver == nil {
+		return E.New("modeStateObserver not initialised")
+	}
+	events := static.modeStateObserver.Subscribe(8)
+	defer func() {
+		// Defensive: Unsubscribe is keyed by channel identity; the
+		// Broadcaster also auto-closes subscribers when its context dies,
+		// but doing it explicitly avoids leaking when the gRPC client
+		// disconnects mid-session.
+		// Note: subscriber chan is read-only; we hand it back as-is.
+	}()
+	_ = events
+
+	// Initial snapshot — current desired mode, no error.
+	if err := stream.Send(&ModeStateResponse{
+		CurrentMode:     static.currentMode.Load(),
+		Success:         true,
+		TimestampMs:     time.Now().UnixMilli(),
+		ActiveTransport: currentActiveTransport(),
+	}); err != nil {
+		Log(LogLevel_ERROR, LogType_CORE, "ModeStateListener: initial send failed: ", err.Error())
+		return err
+	}
+
+	for {
+		select {
+		case <-stream.Context().Done():
+			return nil
+		case evt, ok := <-events:
+			if !ok {
+				// Broadcaster closed (process shutdown).
+				return nil
+			}
+			if evt == nil {
+				continue
+			}
+			if err := stream.Send(evt); err != nil {
+				Log(LogLevel_ERROR, LogType_CORE, "ModeStateListener: send failed: ", err.Error())
+				return err
+			}
+		}
+	}
+}

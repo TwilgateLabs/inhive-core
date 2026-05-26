@@ -26,6 +26,9 @@ func Stop() (coreResponse *CoreInfoResponse, err error) {
 	defer static.lock.Unlock()
 
 	SetCoreStatus(CoreStates_STOPPING, MessageType_EMPTY, "")
+	// Tear down Phase 2 watcher before the daemon — once box.Outbound() is
+	// gone, monitoring.Get(ctx) panics through the broadcaster.
+	stopModeWatcher()
 	ss := static.StartedService
 	if ss == nil {
 		return SetCoreStatus(CoreStates_STOPPED, MessageType_ALREADY_STOPPED, ""), nil
