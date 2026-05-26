@@ -100,7 +100,7 @@ require (
 	github.com/noql-net/certpool v0.0.0-20250128174907-b15afbea6eae // indirect
 	github.com/nxadm/tail v1.4.8 // indirect
 	github.com/openai/openai-go/v3 v3.26.0 // indirect
-	github.com/openlibrecommunity/olcrtc v0.0.0-20260525150125-587c13e9618d // indirect
+	github.com/openlibrecommunity/olcrtc v0.0.1-inhive // indirect
 	github.com/pion/datachannel v1.6.0 // indirect
 	github.com/pion/dtls/v3 v3.1.2 // indirect
 	github.com/pion/ice/v4 v4.2.5 // indirect
@@ -273,3 +273,5 @@ replace github.com/sagernet/tailscale => ./sing-box/replace/tailscale
 replace github.com/Psiphon-Labs/quic-go => ./sing-box/replace/psiphon-quic-go
 
 replace github.com/Psiphon-Labs/psiphon-tls => ./sing-box/replace/psiphon-tls
+
+replace github.com/openlibrecommunity/olcrtc => github.com/TwilgateLabs/inhive-olcrtc v0.0.1-inhive
