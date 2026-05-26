@@ -25,8 +25,7 @@ var File_v2_hcore_hcore_service_proto protoreflect.FileDescriptor
 
 const file_v2_hcore_hcore_service_proto_rawDesc = "" +
 	"\n" +
-	"\x1cv2/hcore/hcore_service.proto\x12\x05hcore\x1a\x17v2/hcommon/common.proto\x1a\x14v2/hcore/hcore.proto2\xd6\n" +
-	"\n" +
+	"\x1cv2/hcore/hcore_service.proto\x12\x05hcore\x1a\x17v2/hcommon/common.proto\x1a\x14v2/hcore/hcore.proto2\xd2\v\n" +
 	"\x04Core\x125\n" +
 	"\x05Start\x12\x13.hcore.StartRequest\x1a\x17.hcore.CoreInfoResponse\x12=\n" +
 	"\x10CoreInfoListener\x12\x0e.hcommon.Empty\x1a\x17.hcore.CoreInfoResponse0\x01\x12;\n" +
@@ -49,7 +48,10 @@ const file_v2_hcore_hcore_service_proto_rawDesc = "" +
 	"\x14GetSystemProxyStatus\x12\x0e.hcommon.Empty\x1a\x18.hcore.SystemProxyStatus\x12O\n" +
 	"\x15SetSystemProxyEnabled\x12#.hcore.SetSystemProxyEnabledRequest\x1a\x11.hcommon.Response\x125\n" +
 	"\vLogListener\x12\x11.hcore.LogRequest\x1a\x11.hcore.LogMessage0\x01\x12,\n" +
-	"\x05Close\x12\x13.hcore.CloseRequest\x1a\x0e.hcommon.EmptyBH\n" +
+	"\x05Close\x12\x13.hcore.CloseRequest\x1a\x0e.hcommon.Empty\x129\n" +
+	"\n" +
+	"SwitchMode\x12\x18.hcore.SwitchModeRequest\x1a\x11.hcommon.Response\x12?\n" +
+	"\x11ModeStateListener\x12\x0e.hcommon.Empty\x1a\x18.hcore.ModeStateResponse0\x01BH\n" +
 	"\x1ccom.inhive.core.api.v2.hcoreZ(github.com/twilgate/inhive-core/v2/hcoreb\x06proto3"
 
 var file_v2_hcore_hcore_service_proto_goTypes = []any{
@@ -66,16 +68,18 @@ var file_v2_hcore_hcore_service_proto_goTypes = []any{
 	(*SetSystemProxyEnabledRequest)(nil), // 10: hcore.SetSystemProxyEnabledRequest
 	(*LogRequest)(nil),                   // 11: hcore.LogRequest
 	(*CloseRequest)(nil),                 // 12: hcore.CloseRequest
-	(*CoreInfoResponse)(nil),             // 13: hcore.CoreInfoResponse
-	(*OutboundGroupList)(nil),            // 14: hcore.OutboundGroupList
-	(*SystemInfo)(nil),                   // 15: hcore.SystemInfo
-	(*hcommon.Response)(nil),             // 16: hcommon.Response
-	(*ParseResponse)(nil),                // 17: hcore.ParseResponse
-	(*BootstrapFetchResponse)(nil),       // 18: hcore.BootstrapFetchResponse
-	(*SpeedTestResponse)(nil),            // 19: hcore.SpeedTestResponse
-	(*WarpGenerationResponse)(nil),       // 20: hcore.WarpGenerationResponse
-	(*SystemProxyStatus)(nil),            // 21: hcore.SystemProxyStatus
-	(*LogMessage)(nil),                   // 22: hcore.LogMessage
+	(*SwitchModeRequest)(nil),            // 13: hcore.SwitchModeRequest
+	(*CoreInfoResponse)(nil),             // 14: hcore.CoreInfoResponse
+	(*OutboundGroupList)(nil),            // 15: hcore.OutboundGroupList
+	(*SystemInfo)(nil),                   // 16: hcore.SystemInfo
+	(*hcommon.Response)(nil),             // 17: hcommon.Response
+	(*ParseResponse)(nil),                // 18: hcore.ParseResponse
+	(*BootstrapFetchResponse)(nil),       // 19: hcore.BootstrapFetchResponse
+	(*SpeedTestResponse)(nil),            // 20: hcore.SpeedTestResponse
+	(*WarpGenerationResponse)(nil),       // 21: hcore.WarpGenerationResponse
+	(*SystemProxyStatus)(nil),            // 22: hcore.SystemProxyStatus
+	(*LogMessage)(nil),                   // 23: hcore.LogMessage
+	(*ModeStateResponse)(nil),            // 24: hcore.ModeStateResponse
 }
 var file_v2_hcore_hcore_service_proto_depIdxs = []int32{
 	0,  // 0: hcore.Core.Start:input_type -> hcore.StartRequest
@@ -100,30 +104,34 @@ var file_v2_hcore_hcore_service_proto_depIdxs = []int32{
 	10, // 19: hcore.Core.SetSystemProxyEnabled:input_type -> hcore.SetSystemProxyEnabledRequest
 	11, // 20: hcore.Core.LogListener:input_type -> hcore.LogRequest
 	12, // 21: hcore.Core.Close:input_type -> hcore.CloseRequest
-	13, // 22: hcore.Core.Start:output_type -> hcore.CoreInfoResponse
-	13, // 23: hcore.Core.CoreInfoListener:output_type -> hcore.CoreInfoResponse
-	14, // 24: hcore.Core.OutboundsInfo:output_type -> hcore.OutboundGroupList
-	14, // 25: hcore.Core.MainOutboundsInfo:output_type -> hcore.OutboundGroupList
-	15, // 26: hcore.Core.GetSystemInfo:output_type -> hcore.SystemInfo
-	15, // 27: hcore.Core.GetSystemInfoStream:output_type -> hcore.SystemInfo
-	16, // 28: hcore.Core.Setup:output_type -> hcommon.Response
-	17, // 29: hcore.Core.Parse:output_type -> hcore.ParseResponse
-	18, // 30: hcore.Core.BootstrapFetch:output_type -> hcore.BootstrapFetchResponse
-	13, // 31: hcore.Core.ChangeInhiveSettings:output_type -> hcore.CoreInfoResponse
-	13, // 32: hcore.Core.StartService:output_type -> hcore.CoreInfoResponse
-	13, // 33: hcore.Core.Stop:output_type -> hcore.CoreInfoResponse
-	13, // 34: hcore.Core.Restart:output_type -> hcore.CoreInfoResponse
-	16, // 35: hcore.Core.SelectOutbound:output_type -> hcommon.Response
-	16, // 36: hcore.Core.UrlTest:output_type -> hcommon.Response
-	16, // 37: hcore.Core.UrlTestActive:output_type -> hcommon.Response
-	19, // 38: hcore.Core.SpeedTest:output_type -> hcore.SpeedTestResponse
-	20, // 39: hcore.Core.GenerateWarpConfig:output_type -> hcore.WarpGenerationResponse
-	21, // 40: hcore.Core.GetSystemProxyStatus:output_type -> hcore.SystemProxyStatus
-	16, // 41: hcore.Core.SetSystemProxyEnabled:output_type -> hcommon.Response
-	22, // 42: hcore.Core.LogListener:output_type -> hcore.LogMessage
-	1,  // 43: hcore.Core.Close:output_type -> hcommon.Empty
-	22, // [22:44] is the sub-list for method output_type
-	0,  // [0:22] is the sub-list for method input_type
+	13, // 22: hcore.Core.SwitchMode:input_type -> hcore.SwitchModeRequest
+	1,  // 23: hcore.Core.ModeStateListener:input_type -> hcommon.Empty
+	14, // 24: hcore.Core.Start:output_type -> hcore.CoreInfoResponse
+	14, // 25: hcore.Core.CoreInfoListener:output_type -> hcore.CoreInfoResponse
+	15, // 26: hcore.Core.OutboundsInfo:output_type -> hcore.OutboundGroupList
+	15, // 27: hcore.Core.MainOutboundsInfo:output_type -> hcore.OutboundGroupList
+	16, // 28: hcore.Core.GetSystemInfo:output_type -> hcore.SystemInfo
+	16, // 29: hcore.Core.GetSystemInfoStream:output_type -> hcore.SystemInfo
+	17, // 30: hcore.Core.Setup:output_type -> hcommon.Response
+	18, // 31: hcore.Core.Parse:output_type -> hcore.ParseResponse
+	19, // 32: hcore.Core.BootstrapFetch:output_type -> hcore.BootstrapFetchResponse
+	14, // 33: hcore.Core.ChangeInhiveSettings:output_type -> hcore.CoreInfoResponse
+	14, // 34: hcore.Core.StartService:output_type -> hcore.CoreInfoResponse
+	14, // 35: hcore.Core.Stop:output_type -> hcore.CoreInfoResponse
+	14, // 36: hcore.Core.Restart:output_type -> hcore.CoreInfoResponse
+	17, // 37: hcore.Core.SelectOutbound:output_type -> hcommon.Response
+	17, // 38: hcore.Core.UrlTest:output_type -> hcommon.Response
+	17, // 39: hcore.Core.UrlTestActive:output_type -> hcommon.Response
+	20, // 40: hcore.Core.SpeedTest:output_type -> hcore.SpeedTestResponse
+	21, // 41: hcore.Core.GenerateWarpConfig:output_type -> hcore.WarpGenerationResponse
+	22, // 42: hcore.Core.GetSystemProxyStatus:output_type -> hcore.SystemProxyStatus
+	17, // 43: hcore.Core.SetSystemProxyEnabled:output_type -> hcommon.Response
+	23, // 44: hcore.Core.LogListener:output_type -> hcore.LogMessage
+	1,  // 45: hcore.Core.Close:output_type -> hcommon.Empty
+	17, // 46: hcore.Core.SwitchMode:output_type -> hcommon.Response
+	24, // 47: hcore.Core.ModeStateListener:output_type -> hcore.ModeStateResponse
+	24, // [24:48] is the sub-list for method output_type
+	0,  // [0:24] is the sub-list for method input_type
 	0,  // [0:0] is the sub-list for extension type_name
 	0,  // [0:0] is the sub-list for extension extendee
 	0,  // [0:0] is the sub-list for field type_name

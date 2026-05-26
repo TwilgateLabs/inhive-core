@@ -42,6 +42,8 @@ const (
 	Core_SetSystemProxyEnabled_FullMethodName = "/hcore.Core/SetSystemProxyEnabled"
 	Core_LogListener_FullMethodName           = "/hcore.Core/LogListener"
 	Core_Close_FullMethodName                 = "/hcore.Core/Close"
+	Core_SwitchMode_FullMethodName            = "/hcore.Core/SwitchMode"
+	Core_ModeStateListener_FullMethodName     = "/hcore.Core/ModeStateListener"
 )
 
 // CoreClient is the client API for Core service.
@@ -76,6 +78,19 @@ type CoreClient interface {
 	SetSystemProxyEnabled(ctx context.Context, in *SetSystemProxyEnabledRequest, opts ...grpc.CallOption) (*hcommon.Response, error)
 	LogListener(ctx context.Context, in *LogRequest, opts ...grpc.CallOption) (grpc.ServerStreamingClient[LogMessage], error)
 	Close(ctx context.Context, in *CloseRequest, opts ...grpc.CallOption) (*hcommon.Empty, error)
+	// Phase 2 — generic mode switching.
+	//
+	// SwitchMode records the new desired mode + broadcasts an ack event on the
+	// ModeStateListener stream. It does NOT itself stop/start the VPN service.
+	// Hard cross-mode switching (sing-box ⇄ olcrtc) is the main app's job
+	// (restart NE with new providerConfiguration); soft within-mode rotation
+	// (urltest carousel inside Mode 1) keeps using the existing Selector path.
+	SwitchMode(ctx context.Context, in *SwitchModeRequest, opts ...grpc.CallOption) (*hcommon.Response, error)
+	// ModeStateListener streams initial snapshot + incremental events.
+	// First emission is always the current mode (no events yet). Subsequent
+	// events fire on: SwitchMode RPC, watcher-detected health regression
+	// (Mode 1 → recommend Mode 2), and explicit recovery acks.
+	ModeStateListener(ctx context.Context, in *hcommon.Empty, opts ...grpc.CallOption) (grpc.ServerStreamingClient[ModeStateResponse], error)
 }
 
 type coreClient struct {
@@ -351,6 +366,35 @@ func (c *coreClient) Close(ctx context.Context, in *CloseRequest, opts ...grpc.C
 	return out, nil
 }
 
+func (c *coreClient) SwitchMode(ctx context.Context, in *SwitchModeRequest, opts ...grpc.CallOption) (*hcommon.Response, error) {
+	cOpts := append([]grpc.CallOption{grpc.StaticMethod()}, opts...)
+	out := new(hcommon.Response)
+	err := c.cc.Invoke(ctx, Core_SwitchMode_FullMethodName, in, out, cOpts...)
+	if err != nil {
+		return nil, err
+	}
+	return out, nil
+}
+
+func (c *coreClient) ModeStateListener(ctx context.Context, in *hcommon.Empty, opts ...grpc.CallOption) (grpc.ServerStreamingClient[ModeStateResponse], error) {
+	cOpts := append([]grpc.CallOption{grpc.StaticMethod()}, opts...)
+	stream, err := c.cc.NewStream(ctx, &Core_ServiceDesc.Streams[5], Core_ModeStateListener_FullMethodName, cOpts...)
+	if err != nil {
+		return nil, err
+	}
+	x := &grpc.GenericClientStream[hcommon.Empty, ModeStateResponse]{ClientStream: stream}
+	if err := x.ClientStream.SendMsg(in); err != nil {
+		return nil, err
+	}
+	if err := x.ClientStream.CloseSend(); err != nil {
+		return nil, err
+	}
+	return x, nil
+}
+
+// This type alias is provided for backwards compatibility with existing code that references the prior non-generic stream type by name.
+type Core_ModeStateListenerClient = grpc.ServerStreamingClient[ModeStateResponse]
+
 // CoreServer is the server API for Core service.
 // All implementations must embed UnimplementedCoreServer
 // for forward compatibility.
@@ -383,6 +427,19 @@ type CoreServer interface {
 	SetSystemProxyEnabled(context.Context, *SetSystemProxyEnabledRequest) (*hcommon.Response, error)
 	LogListener(*LogRequest, grpc.ServerStreamingServer[LogMessage]) error
 	Close(context.Context, *CloseRequest) (*hcommon.Empty, error)
+	// Phase 2 — generic mode switching.
+	//
+	// SwitchMode records the new desired mode + broadcasts an ack event on the
+	// ModeStateListener stream. It does NOT itself stop/start the VPN service.
+	// Hard cross-mode switching (sing-box ⇄ olcrtc) is the main app's job
+	// (restart NE with new providerConfiguration); soft within-mode rotation
+	// (urltest carousel inside Mode 1) keeps using the existing Selector path.
+	SwitchMode(context.Context, *SwitchModeRequest) (*hcommon.Response, error)
+	// ModeStateListener streams initial snapshot + incremental events.
+	// First emission is always the current mode (no events yet). Subsequent
+	// events fire on: SwitchMode RPC, watcher-detected health regression
+	// (Mode 1 → recommend Mode 2), and explicit recovery acks.
+	ModeStateListener(*hcommon.Empty, grpc.ServerStreamingServer[ModeStateResponse]) error
 	mustEmbedUnimplementedCoreServer()
 }
 
@@ -458,6 +515,12 @@ func (UnimplementedCoreServer) LogListener(*LogRequest, grpc.ServerStreamingServ
 }
 func (UnimplementedCoreServer) Close(context.Context, *CloseRequest) (*hcommon.Empty, error) {
 	return nil, status.Error(codes.Unimplemented, "method Close not implemented")
+}
+func (UnimplementedCoreServer) SwitchMode(context.Context, *SwitchModeRequest) (*hcommon.Response, error) {
+	return nil, status.Error(codes.Unimplemented, "method SwitchMode not implemented")
+}
+func (UnimplementedCoreServer) ModeStateListener(*hcommon.Empty, grpc.ServerStreamingServer[ModeStateResponse]) error {
+	return status.Error(codes.Unimplemented, "method ModeStateListener not implemented")
 }
 func (UnimplementedCoreServer) mustEmbedUnimplementedCoreServer() {}
 func (UnimplementedCoreServer) testEmbeddedByValue()              {}
@@ -841,6 +904,35 @@ func _Core_Close_Handler(srv interface{}, ctx context.Context, dec func(interfac
 	return interceptor(ctx, in, info, handler)
 }
 
+func _Core_SwitchMode_Handler(srv interface{}, ctx context.Context, dec func(interface{}) error, interceptor grpc.UnaryServerInterceptor) (interface{}, error) {
+	in := new(SwitchModeRequest)
+	if err := dec(in); err != nil {
+		return nil, err
+	}
+	if interceptor == nil {
+		return srv.(CoreServer).SwitchMode(ctx, in)
+	}
+	info := &grpc.UnaryServerInfo{
+		Server:     srv,
+		FullMethod: Core_SwitchMode_FullMethodName,
+	}
+	handler := func(ctx context.Context, req interface{}) (interface{}, error) {
+		return srv.(CoreServer).SwitchMode(ctx, req.(*SwitchModeRequest))
+	}
+	return interceptor(ctx, in, info, handler)
+}
+
+func _Core_ModeStateListener_Handler(srv interface{}, stream grpc.ServerStream) error {
+	m := new(hcommon.Empty)
+	if err := stream.RecvMsg(m); err != nil {
+		return err
+	}
+	return srv.(CoreServer).ModeStateListener(m, &grpc.GenericServerStream[hcommon.Empty, ModeStateResponse]{ServerStream: stream})
+}
+
+// This type alias is provided for backwards compatibility with existing code that references the prior non-generic stream type by name.
+type Core_ModeStateListenerServer = grpc.ServerStreamingServer[ModeStateResponse]
+
 // Core_ServiceDesc is the grpc.ServiceDesc for Core service.
 // It's only intended for direct use with grpc.RegisterService,
 // and not to be introspected or modified (even as a copy)
@@ -916,6 +1008,10 @@ var Core_ServiceDesc = grpc.ServiceDesc{
 			MethodName: "Close",
 			Handler:    _Core_Close_Handler,
 		},
+		{
+			MethodName: "SwitchMode",
+			Handler:    _Core_SwitchMode_Handler,
+		},
 	},
 	Streams: []grpc.StreamDesc{
 		{
@@ -941,6 +1037,11 @@ var Core_ServiceDesc = grpc.ServiceDesc{
 		{
 			StreamName:    "LogListener",
 			Handler:       _Core_LogListener_Handler,
+			ServerStreams: true,
+		},
+		{
+			StreamName:    "ModeStateListener",
+			Handler:       _Core_ModeStateListener_Handler,
 			ServerStreams: true,
 		},
 	},

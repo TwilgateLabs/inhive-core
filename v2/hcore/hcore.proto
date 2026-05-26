@@ -246,6 +246,39 @@ message SetSystemProxyEnabledRequest {
   bool is_enabled = 1;
 }
 
+// Phase 2 — generic mode switching (olcrtc Wave 18).
+//
+// Modes are intentionally typed as int32 (not enum) so additional modes can
+// be added without breaking older clients that haven't regenerated stubs.
+// Current allocation: 1 = primary (sing-box urltest carousel),
+//                     2 = stealth fallback (e.g. olcrtc).
+// Core does NOT itself perform a hard switch; on iOS the NE Provider must be
+// restarted by the main app with a different providerConfiguration. Core's
+// role is twofold: track desired mode + emit recommend-switch events from
+// URLTest health.
+message SwitchModeRequest {
+  // Target mode. 1 or 2 in the current allocation; anything else is rejected
+  // by the handler with FAILED. Sent by the main app as a manual override or
+  // as the executed-acknowledgement after acting on a recommendation event.
+  int32 mode = 1;
+}
+
+message ModeStateResponse {
+  // The mode that core currently considers "desired". After SwitchMode is
+  // accepted this updates immediately; the main app reconciles by
+  // restarting NE. Equal to recommended_mode on emergency recommendations.
+  int32 current_mode = 1;
+  // True for snapshots / acks, false when accompanied by a non-empty error.
+  bool success = 2;
+  // Non-empty when the event represents a failure (invalid mode, etc.).
+  string error = 3;
+  // Unix milliseconds — set by core, monotonic across a session.
+  int64 timestamp_ms = 4;
+  // Best-effort label of the currently routed transport (e.g. an outbound
+  // tag or `"olcrtc"` in Mode 2). Empty if not determinable.
+  string active_transport = 5;
+}
+
 enum LogLevel {
   TRACE = 0; 
   DEBUG = 1;

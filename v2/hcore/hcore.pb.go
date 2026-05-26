@@ -2155,6 +2155,149 @@ func (x *SetSystemProxyEnabledRequest) GetIsEnabled() bool {
 	return false
 }
 
+// Phase 2 — generic mode switching (olcrtc Wave 18).
+//
+// Modes are intentionally typed as int32 (not enum) so additional modes can
+// be added without breaking older clients that haven't regenerated stubs.
+// Current allocation: 1 = primary (sing-box urltest carousel),
+//
+//	2 = stealth fallback (e.g. olcrtc).
+//
+// Core does NOT itself perform a hard switch; on iOS the NE Provider must be
+// restarted by the main app with a different providerConfiguration. Core's
+// role is twofold: track desired mode + emit recommend-switch events from
+// URLTest health.
+type SwitchModeRequest struct {
+	state protoimpl.MessageState `protogen:"open.v1"`
+	// Target mode. 1 or 2 in the current allocation; anything else is rejected
+	// by the handler with FAILED. Sent by the main app as a manual override or
+	// as the executed-acknowledgement after acting on a recommendation event.
+	Mode          int32 `protobuf:"varint,1,opt,name=mode,proto3" json:"mode,omitempty"`
+	unknownFields protoimpl.UnknownFields
+	sizeCache     protoimpl.SizeCache
+}
+
+func (x *SwitchModeRequest) Reset() {
+	*x = SwitchModeRequest{}
+	mi := &file_v2_hcore_hcore_proto_msgTypes[26]
+	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+	ms.StoreMessageInfo(mi)
+}
+
+func (x *SwitchModeRequest) String() string {
+	return protoimpl.X.MessageStringOf(x)
+}
+
+func (*SwitchModeRequest) ProtoMessage() {}
+
+func (x *SwitchModeRequest) ProtoReflect() protoreflect.Message {
+	mi := &file_v2_hcore_hcore_proto_msgTypes[26]
+	if x != nil {
+		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+		if ms.LoadMessageInfo() == nil {
+			ms.StoreMessageInfo(mi)
+		}
+		return ms
+	}
+	return mi.MessageOf(x)
+}
+
+// Deprecated: Use SwitchModeRequest.ProtoReflect.Descriptor instead.
+func (*SwitchModeRequest) Descriptor() ([]byte, []int) {
+	return file_v2_hcore_hcore_proto_rawDescGZIP(), []int{26}
+}
+
+func (x *SwitchModeRequest) GetMode() int32 {
+	if x != nil {
+		return x.Mode
+	}
+	return 0
+}
+
+type ModeStateResponse struct {
+	state protoimpl.MessageState `protogen:"open.v1"`
+	// The mode that core currently considers "desired". After SwitchMode is
+	// accepted this updates immediately; the main app reconciles by
+	// restarting NE. Equal to recommended_mode on emergency recommendations.
+	CurrentMode int32 `protobuf:"varint,1,opt,name=current_mode,json=currentMode,proto3" json:"current_mode,omitempty"`
+	// True for snapshots / acks, false when accompanied by a non-empty error.
+	Success bool `protobuf:"varint,2,opt,name=success,proto3" json:"success,omitempty"`
+	// Non-empty when the event represents a failure (invalid mode, etc.).
+	Error string `protobuf:"bytes,3,opt,name=error,proto3" json:"error,omitempty"`
+	// Unix milliseconds — set by core, monotonic across a session.
+	TimestampMs int64 `protobuf:"varint,4,opt,name=timestamp_ms,json=timestampMs,proto3" json:"timestamp_ms,omitempty"`
+	// Best-effort label of the currently routed transport (e.g. an outbound
+	// tag or `"olcrtc"` in Mode 2). Empty if not determinable.
+	ActiveTransport string `protobuf:"bytes,5,opt,name=active_transport,json=activeTransport,proto3" json:"active_transport,omitempty"`
+	unknownFields   protoimpl.UnknownFields
+	sizeCache       protoimpl.SizeCache
+}
+
+func (x *ModeStateResponse) Reset() {
+	*x = ModeStateResponse{}
+	mi := &file_v2_hcore_hcore_proto_msgTypes[27]
+	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+	ms.StoreMessageInfo(mi)
+}
+
+func (x *ModeStateResponse) String() string {
+	return protoimpl.X.MessageStringOf(x)
+}
+
+func (*ModeStateResponse) ProtoMessage() {}
+
+func (x *ModeStateResponse) ProtoReflect() protoreflect.Message {
+	mi := &file_v2_hcore_hcore_proto_msgTypes[27]
+	if x != nil {
+		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+		if ms.LoadMessageInfo() == nil {
+			ms.StoreMessageInfo(mi)
+		}
+		return ms
+	}
+	return mi.MessageOf(x)
+}
+
+// Deprecated: Use ModeStateResponse.ProtoReflect.Descriptor instead.
+func (*ModeStateResponse) Descriptor() ([]byte, []int) {
+	return file_v2_hcore_hcore_proto_rawDescGZIP(), []int{27}
+}
+
+func (x *ModeStateResponse) GetCurrentMode() int32 {
+	if x != nil {
+		return x.CurrentMode
+	}
+	return 0
+}
+
+func (x *ModeStateResponse) GetSuccess() bool {
+	if x != nil {
+		return x.Success
+	}
+	return false
+}
+
+func (x *ModeStateResponse) GetError() string {
+	if x != nil {
+		return x.Error
+	}
+	return ""
+}
+
+func (x *ModeStateResponse) GetTimestampMs() int64 {
+	if x != nil {
+		return x.TimestampMs
+	}
+	return 0
+}
+
+func (x *ModeStateResponse) GetActiveTransport() string {
+	if x != nil {
+		return x.ActiveTransport
+	}
+	return ""
+}
+
 type LogMessage struct {
 	state         protoimpl.MessageState `protogen:"open.v1"`
 	Level         LogLevel               `protobuf:"varint,1,opt,name=level,proto3,enum=hcore.LogLevel" json:"level,omitempty"`
@@ -2167,7 +2310,7 @@ type LogMessage struct {
 
 func (x *LogMessage) Reset() {
 	*x = LogMessage{}
-	mi := &file_v2_hcore_hcore_proto_msgTypes[26]
+	mi := &file_v2_hcore_hcore_proto_msgTypes[28]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -2179,7 +2322,7 @@ func (x *LogMessage) String() string {
 func (*LogMessage) ProtoMessage() {}
 
 func (x *LogMessage) ProtoReflect() protoreflect.Message {
-	mi := &file_v2_hcore_hcore_proto_msgTypes[26]
+	mi := &file_v2_hcore_hcore_proto_msgTypes[28]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -2192,7 +2335,7 @@ func (x *LogMessage) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use LogMessage.ProtoReflect.Descriptor instead.
 func (*LogMessage) Descriptor() ([]byte, []int) {
-	return file_v2_hcore_hcore_proto_rawDescGZIP(), []int{26}
+	return file_v2_hcore_hcore_proto_rawDescGZIP(), []int{28}
 }
 
 func (x *LogMessage) GetLevel() LogLevel {
@@ -2232,7 +2375,7 @@ type LogRequest struct {
 
 func (x *LogRequest) Reset() {
 	*x = LogRequest{}
-	mi := &file_v2_hcore_hcore_proto_msgTypes[27]
+	mi := &file_v2_hcore_hcore_proto_msgTypes[29]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -2244,7 +2387,7 @@ func (x *LogRequest) String() string {
 func (*LogRequest) ProtoMessage() {}
 
 func (x *LogRequest) ProtoReflect() protoreflect.Message {
-	mi := &file_v2_hcore_hcore_proto_msgTypes[27]
+	mi := &file_v2_hcore_hcore_proto_msgTypes[29]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -2257,7 +2400,7 @@ func (x *LogRequest) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use LogRequest.ProtoReflect.Descriptor instead.
 func (*LogRequest) Descriptor() ([]byte, []int) {
-	return file_v2_hcore_hcore_proto_rawDescGZIP(), []int{27}
+	return file_v2_hcore_hcore_proto_rawDescGZIP(), []int{29}
 }
 
 func (x *LogRequest) GetLevel() LogLevel {
@@ -2275,7 +2418,7 @@ type StopRequest struct {
 
 func (x *StopRequest) Reset() {
 	*x = StopRequest{}
-	mi := &file_v2_hcore_hcore_proto_msgTypes[28]
+	mi := &file_v2_hcore_hcore_proto_msgTypes[30]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -2287,7 +2430,7 @@ func (x *StopRequest) String() string {
 func (*StopRequest) ProtoMessage() {}
 
 func (x *StopRequest) ProtoReflect() protoreflect.Message {
-	mi := &file_v2_hcore_hcore_proto_msgTypes[28]
+	mi := &file_v2_hcore_hcore_proto_msgTypes[30]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -2300,7 +2443,7 @@ func (x *StopRequest) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use StopRequest.ProtoReflect.Descriptor instead.
 func (*StopRequest) Descriptor() ([]byte, []int) {
-	return file_v2_hcore_hcore_proto_rawDescGZIP(), []int{28}
+	return file_v2_hcore_hcore_proto_rawDescGZIP(), []int{30}
 }
 
 var File_v2_hcore_hcore_proto protoreflect.FileDescriptor
@@ -2474,7 +2617,15 @@ const file_v2_hcore_hcore_proto_rawDesc = "" +
 	"\faccess_token\x18\x03 \x01(\tR\vaccessToken\"=\n" +
 	"\x1cSetSystemProxyEnabledRequest\x12\x1d\n" +
 	"\n" +
-	"is_enabled\x18\x01 \x01(\bR\tisEnabled\"\xa1\x01\n" +
+	"is_enabled\x18\x01 \x01(\bR\tisEnabled\"'\n" +
+	"\x11SwitchModeRequest\x12\x12\n" +
+	"\x04mode\x18\x01 \x01(\x05R\x04mode\"\xb4\x01\n" +
+	"\x11ModeStateResponse\x12!\n" +
+	"\fcurrent_mode\x18\x01 \x01(\x05R\vcurrentMode\x12\x18\n" +
+	"\asuccess\x18\x02 \x01(\bR\asuccess\x12\x14\n" +
+	"\x05error\x18\x03 \x01(\tR\x05error\x12!\n" +
+	"\ftimestamp_ms\x18\x04 \x01(\x03R\vtimestampMs\x12)\n" +
+	"\x10active_transport\x18\x05 \x01(\tR\x0factiveTransport\"\xa1\x01\n" +
 	"\n" +
 	"LogMessage\x12%\n" +
 	"\x05level\x18\x01 \x01(\x0e2\x0f.hcore.LogLevelR\x05level\x12\"\n" +
@@ -2541,7 +2692,7 @@ func file_v2_hcore_hcore_proto_rawDescGZIP() []byte {
 }
 
 var file_v2_hcore_hcore_proto_enumTypes = make([]protoimpl.EnumInfo, 5)
-var file_v2_hcore_hcore_proto_msgTypes = make([]protoimpl.MessageInfo, 29)
+var file_v2_hcore_hcore_proto_msgTypes = make([]protoimpl.MessageInfo, 31)
 var file_v2_hcore_hcore_proto_goTypes = []any{
 	(CoreStates)(0),                      // 0: hcore.CoreStates
 	(MessageType)(0),                     // 1: hcore.MessageType
@@ -2574,27 +2725,29 @@ var file_v2_hcore_hcore_proto_goTypes = []any{
 	(*SpeedTestResponse)(nil),            // 28: hcore.SpeedTestResponse
 	(*GenerateWarpConfigRequest)(nil),    // 29: hcore.GenerateWarpConfigRequest
 	(*SetSystemProxyEnabledRequest)(nil), // 30: hcore.SetSystemProxyEnabledRequest
-	(*LogMessage)(nil),                   // 31: hcore.LogMessage
-	(*LogRequest)(nil),                   // 32: hcore.LogRequest
-	(*StopRequest)(nil),                  // 33: hcore.StopRequest
-	(*timestamppb.Timestamp)(nil),        // 34: google.protobuf.Timestamp
-	(hcommon.ResponseCode)(0),            // 35: hcommon.ResponseCode
+	(*SwitchModeRequest)(nil),            // 31: hcore.SwitchModeRequest
+	(*ModeStateResponse)(nil),            // 32: hcore.ModeStateResponse
+	(*LogMessage)(nil),                   // 33: hcore.LogMessage
+	(*LogRequest)(nil),                   // 34: hcore.LogRequest
+	(*StopRequest)(nil),                  // 35: hcore.StopRequest
+	(*timestamppb.Timestamp)(nil),        // 36: google.protobuf.Timestamp
+	(hcommon.ResponseCode)(0),            // 37: hcommon.ResponseCode
 }
 var file_v2_hcore_hcore_proto_depIdxs = []int32{
 	0,  // 0: hcore.CoreInfoResponse.core_state:type_name -> hcore.CoreStates
 	1,  // 1: hcore.CoreInfoResponse.message_type:type_name -> hcore.MessageType
 	2,  // 2: hcore.CloseRequest.mode:type_name -> hcore.SetupMode
 	2,  // 3: hcore.SetupRequest.mode:type_name -> hcore.SetupMode
-	34, // 4: hcore.OutboundInfo.url_test_time:type_name -> google.protobuf.Timestamp
+	36, // 4: hcore.OutboundInfo.url_test_time:type_name -> google.protobuf.Timestamp
 	11, // 5: hcore.OutboundInfo.ipinfo:type_name -> hcore.IpInfo
 	10, // 6: hcore.OutboundGroup.items:type_name -> hcore.OutboundInfo
 	12, // 7: hcore.OutboundGroupList.items:type_name -> hcore.OutboundGroup
 	14, // 8: hcore.WarpGenerationResponse.account:type_name -> hcore.WarpAccount
 	15, // 9: hcore.WarpGenerationResponse.config:type_name -> hcore.WarpWireguardConfig
-	35, // 10: hcore.ParseResponse.response_code:type_name -> hcommon.ResponseCode
+	37, // 10: hcore.ParseResponse.response_code:type_name -> hcommon.ResponseCode
 	3,  // 11: hcore.LogMessage.level:type_name -> hcore.LogLevel
 	4,  // 12: hcore.LogMessage.type:type_name -> hcore.LogType
-	34, // 13: hcore.LogMessage.time:type_name -> google.protobuf.Timestamp
+	36, // 13: hcore.LogMessage.time:type_name -> google.protobuf.Timestamp
 	3,  // 14: hcore.LogRequest.level:type_name -> hcore.LogLevel
 	15, // [15:15] is the sub-list for method output_type
 	15, // [15:15] is the sub-list for method input_type
@@ -2615,7 +2768,7 @@ func file_v2_hcore_hcore_proto_init() {
 			GoPackagePath: reflect.TypeOf(x{}).PkgPath(),
 			RawDescriptor: unsafe.Slice(unsafe.StringData(file_v2_hcore_hcore_proto_rawDesc), len(file_v2_hcore_hcore_proto_rawDesc)),
 			NumEnums:      5,
-			NumMessages:   29,
+			NumMessages:   31,
 			NumExtensions: 0,
 			NumServices:   0,
 		},
