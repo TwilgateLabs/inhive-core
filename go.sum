@@ -28,8 +28,6 @@ github.com/OneOfOne/xxhash v1.2.2 h1:KMrpdQIwFcEqXDklaen+P1axHaj9BSKzvpUUfnHldSE
 github.com/OneOfOne/xxhash v1.2.2/go.mod h1:HSdplMjZKSmBqAxg5vPj2TmRDmfkzw+cTzAElWljhcU=
 github.com/TwilgateLabs/inhive-j-deps v0.0.1-inhive h1:Ub0IjiK06hW0whFWFyEUw92QT0IPyqLKzDVn4P0RyxU=
 github.com/TwilgateLabs/inhive-j-deps v0.0.1-inhive/go.mod h1:7/ypJTenOIPx23fpo5uF7l4u+rxZqg9cFbTL/N77Ktc=
-github.com/TwilgateLabs/inhive-olcrtc v0.0.3-inhive h1:mbwKZE03lBWlGTNcN8PMNP5hsRlt8XHUPKfo+hlMuC8=
-github.com/TwilgateLabs/inhive-olcrtc v0.0.3-inhive/go.mod h1:i4BS3uBXxu4rxjDIcmAU05sWkv2AVs1wgnv/TElTjME=
 github.com/ajg/form v1.5.1 h1:t9c7v8JUKu/XxOGBU0yjNpaMloxGEJhUkqFRq0ibGeU=
 github.com/ajg/form v1.5.1/go.mod h1:uL1WgH+h2mgNtvBq0339dVnzXdBETtL2LeUXaIv25UY=
 github.com/akutz/memconn v0.1.0 h1:NawI0TORU4hcOMsMr11g7vwlCdkYeLKXBcxWu2W/P8A=
