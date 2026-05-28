@@ -84,3 +84,5 @@ patches preserved across upstream merges via `git merge` strategy (not rebase
 — see `feedback_build_singbox_merge.md`).
 
 Foundation decisions: see [ADR-001 .. ADR-014](https://github.com/twilgate/inhive-memory/tree/main/docs/adr) for architectural rationale.
+
+- **dead-end combos walked back** (2026-05-28 evening): pushed `7bc78559` (blocking + 120s) and `3eea0a2a` (non-blocking + 120s + app tag fix) hoping to support iPhone XR + Megafon LTE — both made things worse. `7bc78559` blocked sing-box service init for 120s on slow handshakes → iOS NE killed the tunnel before init finished, breaking even Reality/Naive. `3eea0a2a` re-introduced the iOS phantom (gstatic probe routes through olcrtc fine, user traffic dies in incomplete handshake). Reverted both — `core/main` HEAD now back on `bb159078` (blocking, 30s timeout), the only known-stable combo. iPhone XR + Megafon LTE remains broken; the right fix lives in pion (TURN-over-TCP / ICE-TCP-only build) — see Wave 19 backlog.
