@@ -18,6 +18,7 @@ shipped standalone).
 
 ### Fixed
 
+- **iOS phantom connected** (2026-05-28): rolled back sing-box submodule to `bb159078` — reverts `2e288c2d feat(olcrtc): make Start() non-blocking`. On iOS NE Provider, non-blocking Start let `sing-box` service init complete before olcrtc client finished its WebRTC handshake — TUN routes applied while DialContext was still waiting on readyCh (up to 30s), iOS app-level DNS/HTTP timeouts (5–10s) fired first, traffic died with status bar VPN ON. Verified fixed on iPhone 14 — real IP exits through NL olcrtc joiner, not selector fallback to LV. Multi-room pool failover (the feature `2e288c2d` enabled) is still broken until a non-race approach lands (e.g. parallel Start with per-outbound timeout that doesn't block service init).
 - **gvisor / amneziawg c-shared build break**: `make windows`/`make macos` failed with `bridge_test.go` mixed-package error after Phase 1 `go mod tidy` transitively bumped amneziawg-go v0.2.18 → v1.0.4 (which requires the new gvisor API). Pinned amneziawg-go back to v0.2.18 via `replace` directive and pinned gvisor to v0.0.0-20240503... (last clean version before `bridge_test.go` was added). Full c-shared build now Exit 0 with production tags.
 
 ## [2026-05-20]
