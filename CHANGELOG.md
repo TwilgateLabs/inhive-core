@@ -9,6 +9,10 @@ shipped standalone).
 
 ## [Unreleased]
 
+### Fixed
+
+- **olcrtc lazy non-primary**: a dead/unreachable olcrtc outbound no longer crashes the whole sing-box instance at startup. olcrtc was the only eager-blocking outbound (it joins a Jitsi room on `Start()`, 30s timeout); any failure aborted the entire box (so a single down Stealth endpoint took out Reality/Naive too). Now the selected (`primary`) olcrtc stays blocking-ready (anti-phantom), while non-selected ones defer their join to first dial (lazy) — a dead unselected endpoint can no longer strand the tunnel. (branches `fix/olcrtc-lazy-nonprimary`; verified on build 40 punching through Megafon LTE.)
+
 ### Added
 
 - **olcrtc Phase 1**: stealth tunnel outbound `type: olcrtc` for emergency RU LTE whitelist scenarios (`with_olcrtc` build tag, default-on). Outbound is registered always; stub returns clear error if built without the tag.
