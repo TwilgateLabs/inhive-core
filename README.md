@@ -73,14 +73,14 @@ Install via the universal installer script — it auto-detects OpenWrt and confi
 - [x] Go 1.26 TLS compatibility (removed psiphon, fixed WireGuard deprecated warnings)
 - [x] UTProto outbound — FakeTLS transport (MTProto-derived) — developed in-house
 - [x] UTProto URI scheme: `utproto://SECRET@HOST:PORT?tls_domain=DOMAIN&vless_uuid=UUID&vless_port=PORT#Name`
-- [x] Android build target — gomobile AAR with 3 ABIs (arm64-v8a + armeabi-v7a + x86_64)
-- [x] iOS build target — XCFramework with arm64-device + arm64-simulator slices
+- [x] Android library — gomobile AAR, 3 ABIs (arm64-v8a + armeabi-v7a + x86_64)
+- [x] iOS library — XCFramework with arm64-device + arm64-simulator slices
 
 ### Planned
-- [ ] macOS build target — XCFramework with macOS slice for native Flutter macOS apps
-- [ ] Linux build target — shared library for Flutter desktop integration
+- [ ] macOS library — XCFramework with macOS slice for native Flutter macOS apps
+- [ ] Linux library — shared object (`.so`) for Flutter desktop integration
 
-> **Note:** Client-app roadmap (UI, TUN integration, Split tunnel, platform clients) is tracked in [twilgate/inhive-app](https://github.com/twilgate/inhive-app). This repository covers only the Go core / proxy engine.
+> **Note:** This is the Go core / proxy engine only — it builds into a library (`.dll` / `.aar` / `.xcframework`) consumed by the client apps. The client app itself (UI, TUN integration, split tunnel, platform clients) is a separate product — get it at [app.inhive.ru](https://app.inhive.ru).
 
 ---
 
