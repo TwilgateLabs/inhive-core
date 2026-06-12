@@ -19,9 +19,20 @@ func MieruSingbox(uri string) (*T.Outbound, error) {
 	// mierus://baozi:manlianpenfen@1.2.3.4?handshake-mode=HANDSHAKE_NO_WAIT&mtu=1400&multiplexing=MULTIPLEXING_HIGH&port=6666&port=9998-9999&port=6489&port=4896&profile=default&protocol=TCP&protocol=TCP&protocol=UDP&protocol=UDP
 	// https://github.com/enfein/mieru/blob/main/docs/client-install.md#simple-sharing-link
 	protocols := strings.Split(getOneOfN(decoded, "", "protocol"), ",")
-	ports := strings.Split(getOneOfN(decoded, "", "port"), ",")
-	if len(protocols) == len(ports)+1 {
-		ports = append([]string{fmt.Sprintf("%d", u.Port)}, ports...)
+	// Port may live only in the authority (mierus://a:b@host:6666?protocol=TCP)
+	// with no ?port= query. In that case fill one authority port per protocol;
+	// otherwise sing-box fails with "either port or port_range must be set".
+	var ports []string
+	if portParam := getOneOfN(decoded, "", "port"); portParam == "" && u.Port != 0 {
+		ports = make([]string, len(protocols))
+		for i := range ports {
+			ports[i] = fmt.Sprintf("%d", u.Port)
+		}
+	} else {
+		ports = strings.Split(portParam, ",")
+		if len(protocols) == len(ports)+1 {
+			ports = append([]string{fmt.Sprintf("%d", u.Port)}, ports...)
+		}
 	}
 	if len(protocols) != len(ports) {
 		return nil, E.New("the number of protocols must be the same as the number of ports")
@@ -49,7 +60,7 @@ func MieruSingbox(uri string) (*T.Outbound, error) {
 			Password:      u.Password,
 			PortBindings:  transports,
 			Multiplexing:  getOneOfN(decoded, "", "multiplexing"),
-			HandshakeMode: getOneOfN(decoded, "", "handshakemode"),
+			HandshakeMode: getOneOfN(decoded, "", "handshake-mode", "handshakemode"),
 		},
 	}
 

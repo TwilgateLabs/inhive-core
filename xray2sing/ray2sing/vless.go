@@ -16,16 +16,8 @@ func VlessSingbox(vlessURL string) (*T.Outbound, error) {
 		return nil, err
 	}
 
+	// Reality is now set inside getTLSOptions (shared by vless/vmess/trojan/naive).
 	tlsOptions := getTLSOptions(decoded)
-	if tlsOptions.TLS != nil {
-		if security := decoded["security"]; security == "reality" {
-			tlsOptions.TLS.Reality = &T.OutboundRealityOptions{
-				Enabled:   true,
-				PublicKey: decoded["pbk"],
-				ShortID:   decoded["sid"],
-			}
-		}
-	}
 
 	packetEncoding := decoded["packetencoding"]
 	if packetEncoding == "" {

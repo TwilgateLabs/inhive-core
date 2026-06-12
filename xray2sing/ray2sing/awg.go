@@ -280,11 +280,21 @@ func AWGSingbox(raw string) (*T.Endpoint, error) {
 	if pk == "" {
 		pk = u.Username
 	}
+	// Guard against the malformed query form pk=KEY@host:port where '@host:port'
+	// leaks into the private_key value (and leaves peer.Address/Port empty).
+	if i := strings.IndexByte(pk, '@'); i >= 0 {
+		pk = pk[:i]
+	}
 	if pk == "" {
 		return nil, errors.New("missing private_key")
 	}
 	if peer.PublicKey == "" {
 		return nil, errors.New("missing peer_public_key")
+	}
+	// Without a valid peer endpoint the tunnel is dead — fail loudly instead of
+	// emitting a config with an empty endpoint.
+	if peer.Address == "" || peer.Port == 0 {
+		return nil, errors.New("missing peer endpoint (host:port)")
 	}
 	opts := T.AwgEndpointOptions{
 
@@ -318,9 +328,11 @@ func AWGSingbox(raw string) (*T.Endpoint, error) {
 		}
 	}
 	var out *T.Endpoint
-	isAwg := opts.Jc+opts.Jmin+opts.Jmax+opts.S1+opts.S2+opts.S3+opts.S4 == 0 && opts.H1+opts.H2+opts.H3+opts.H4+opts.I1+opts.I2+opts.I3+opts.I4 == ""
+	// isPlainWG is true when NO AmneziaWG obfs params are present — i.e. this is a
+	// plain WireGuard endpoint and must NOT be emitted as type "awg".
+	isPlainWG := opts.Jc+opts.Jmin+opts.Jmax+opts.S1+opts.S2+opts.S3+opts.S4 == 0 && opts.H1+opts.H2+opts.H3+opts.H4+opts.I1+opts.I2+opts.I3+opts.I4 == ""
 
-	if true || isAwg {
+	if isPlainWG {
 		wgopts := T.WireGuardEndpointOptions{
 			PrivateKey: opts.PrivateKey,
 			Address:    opts.Address,
@@ -334,8 +346,12 @@ func AWGSingbox(raw string) (*T.Endpoint, error) {
 					PersistentKeepaliveInterval: peer.PersistentKeepaliveInterval,
 				},
 			},
-			MTU:   uint32(toInt(getOneOfN(u.Params, "1280", "mtu"))),
-			Noise: getWireGuardNoise(u.Params, isAwg),
+			// Only set MTU when explicitly given; let sing-box apply its native
+			// WG default otherwise (do not pin 1280).
+			Noise: getWireGuardNoise(u.Params, false),
+		}
+		if mtu := getOneOfN(u.Params, "", "mtu"); mtu != "" {
+			wgopts.MTU = uint32(toInt(mtu))
 		}
 		if reservedStr, ok := u.Params["reserved"]; ok {
 			reservedParts := strings.Split(reservedStr, ",")

@@ -23,6 +23,13 @@ func SocksSingbox(url string) (*T.Outbound, error) {
 	if version, err := getOneOf(u.Params, "v", "ver", "version"); err == nil {
 		opts.Version = version
 	}
+	// Tunnel UDP over the TCP stream only on explicit ?uot=1. Forcing it on by
+	// default would break SOCKS servers that natively support UDP ASSOCIATE.
+	if toBool(getOneOfN(u.Params, "", "uot"), false) {
+		opts.UDPOverTCP = &T.UDPOverTCPOptions{
+			Enabled: true,
+		}
+	}
 	// if net, err := getOneOf(u.Params, "net", "network"); err == nil {
 	// 	out.SocksOptions.Network= net
 	// }

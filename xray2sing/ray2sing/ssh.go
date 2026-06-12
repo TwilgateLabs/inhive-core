@@ -31,6 +31,11 @@ func SSHSingbox(sshURL string) (*T.Outbound, error) {
 	}
 
 	hostkeys := strings.Split(decoded["hk"], ",")
+	// strings.Split("", ",") == [""], which sing-box treats as a non-empty list
+	// and fails to parse ("parse host key nil"). Nil it out for accept-any.
+	if len(hostkeys) == 1 && hostkeys[0] == "" {
+		hostkeys = nil
+	}
 
 	result := T.Outbound{
 		Type: "ssh",

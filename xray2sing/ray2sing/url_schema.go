@@ -47,7 +47,11 @@ func ParseUrl(inputURL string, defaultPort uint16) (*UrlSchema, error) {
 		Name:     parsedURL.Fragment,
 		Params:   make(map[string]string),
 	}
-	if isBase64CharsOnly(data.Username) {
+	// The base64 "method:password" userinfo form is SIP002 (shadowsocks) only.
+	// For trojan/vless the userinfo is the password / UUID as a whole and may
+	// legitimately be pure base64 charset (e.g. "YTpi" decodes to "a:b"), so
+	// splitting it there destroys real credentials. Gate the heuristic on ss://.
+	if data.Scheme == "ss" && isBase64CharsOnly(data.Username) {
 		userInfo, err := decodeBase64IfNeeded(data.Username)
 
 		// fmt.Print(userInfo)
@@ -65,7 +69,51 @@ func ParseUrl(inputURL string, defaultPort uint16) (*UrlSchema, error) {
 		data.Params[normalizeStr(key)] = strings.Join(values, ",")
 	}
 
+	// parsedURL.Query() follows HTML-form semantics and turns '+' into a space.
+	// Reality keys (pbk/sid/spx) are standard base64 where '+' is significant,
+	// and many panels emit them non-url-safe. Re-read those from the raw query
+	// with PathUnescape (which decodes %XX but keeps '+' literal) so the public
+	// key/short id survive intact.
+	overrideRawQueryParams(data.Params, parsedURL.RawQuery, "pbk", "sid", "spx")
+
 	return data, nil
+}
+
+// overrideRawQueryParams re-reads the listed query keys straight from the raw
+// query string, preserving literal '+' (unlike url.Values which maps it to a
+// space). Used for base64-valued params where '+' is part of the alphabet.
+func overrideRawQueryParams(params map[string]string, rawQuery string, keys ...string) {
+	if rawQuery == "" {
+		return
+	}
+	want := make(map[string]bool, len(keys))
+	for _, k := range keys {
+		want[normalizeStr(k)] = true
+	}
+	for _, pair := range strings.Split(rawQuery, "&") {
+		if pair == "" {
+			continue
+		}
+		eq := strings.IndexByte(pair, '=')
+		if eq < 0 {
+			continue
+		}
+		rawKey, rawVal := pair[:eq], pair[eq+1:]
+		key, err := url.PathUnescape(rawKey)
+		if err != nil {
+			key = rawKey
+		}
+		nKey := normalizeStr(key)
+		if !want[nKey] {
+			continue
+		}
+		// PathUnescape decodes %XX but leaves '+' untouched.
+		val, err := url.PathUnescape(rawVal)
+		if err != nil {
+			val = rawVal
+		}
+		params[nKey] = val
+	}
 }
 
 func normalizeStr(ss string) string {
