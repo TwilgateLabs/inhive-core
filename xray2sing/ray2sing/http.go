@@ -20,16 +20,19 @@ func HttpSingbox(url string) (*T.Outbound, error) {
 		Tag:     u.Name,
 		Options: &opts,
 	}
-	if _, err := getOneOf(u.Params, "tls", "sni", "insecure"); err == nil {
-		opts.OutboundTLSOptionsContainer.TLS = &T.OutboundTLSOptions{
-			Enabled: true,
+	// Enable TLS only when tls is explicitly truthy (tls/1/true) or an SNI is
+	// given. A bare tls=none/0/false must NOT wrap a plaintext HTTP proxy in TLS.
+	tlsVal := getOneOfN(u.Params, "", "tls")
+	sni := getOneOfN(u.Params, "", "sni")
+	if tlsVal == "tls" || tlsVal == "1" || tlsVal == "true" || sni != "" {
+		tlsOpts := &T.OutboundTLSOptions{
+			Enabled:    true,
+			ServerName: sni,
 		}
-	}
-	if sni, err := getOneOf(u.Params, "sni"); err == nil {
-		opts.OutboundTLSOptionsContainer.TLS.ServerName = sni
-	}
-	if insecure, err := getOneOf(u.Params, "insecure"); err == nil {
-		opts.OutboundTLSOptionsContainer.TLS.Insecure = insecure != "0"
+		if insecure, err := getOneOf(u.Params, "insecure"); err == nil {
+			tlsOpts.Insecure = toBool(insecure, false)
+		}
+		opts.OutboundTLSOptionsContainer.TLS = tlsOpts
 	}
 	if path, err := getOneOf(u.Params, "path"); err == nil {
 		opts.Path = path

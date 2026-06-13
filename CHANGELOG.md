@@ -9,6 +9,15 @@ shipped standalone).
 
 ## [Unreleased]
 
+### Fixed
+
+- **Subscription translation hardening — ~33 fixes** (2026-06-13): a systematic scan of `xray2sing` (the `vless://`/`vmess://`/`trojan://`/`hysteria2://`/`ss://`/... → sing-box converter) found a whole class of "parameter lost / wrong default → silently broken outbound" bugs (valid JSON, dead connection). All confirmed by running `Ray2Singbox` + `libbox.CheckConfig`. Highlights:
+  - **Whole nodes were dropped to null**: `net=h2` (HTTP/2 transport — aliased to `http`) and `net=splithttp` (old name for `xhttp`, still emitted by marzban/old x-ui — aliased to `xhttp`) hit `unknown transport type` and the outbound vanished from the subscription.
+  - **Reality** was only applied to `vless`/`naive` — moved into `getTLSOptions` so `vmess`/`trojan` + Reality work too. `+` in `pbk`/`sid` no longer decodes to a space (broke every Reality key with a `+`); base64 userinfo split is gated to `ss://` so it no longer eats trojan passwords / vless UUIDs; `xvmess://`/`svmess://` no longer dropped.
+  - **xhttp/transport ALPN**: `xhttp` now defaults `alpn=h2` (Xray xhttp negotiates HTTP/2; empty ALPN fell back to HTTP/1.1 and the handshake silently died — this was the whitelist-bypass-configs-work-in-Happ-but-not-here bug); `grpc`/`quic`/`ws`/`httpupgrade` keep an explicit user ALPN instead of clobbering it. gRPC `service-name`/`grpc-service-name` (dashed keys) now read. SNI falls back to `host` (not the nonexistent `add`) for vless/trojan domain-fronting. `nosni=0` no longer wrongly disables SNI. vmess defaults `fp=chrome` (was sending the detectable Go-default ClientHello).
+  - **Per-protocol**: hysteria `obfsParam`/`pinSHA256`, hysteria2 `obfs-password` + port-hopping, tuic `congestion_control`/`udp_relay_mode`, shadowsocks SIP003 plugin split + legacy whole-base64, naive (strip ALPN/insecure/disable_sni that sing-box rejects) + `naive+quic`, mieru port-from-authority + handshake, AmneziaWG obfuscation params (were always emitting plain WG) + `pk@host` guard, WARP license/reserved, ssh empty host_key, http `tls=none` no longer force-enables TLS, socks/http `udp_over_tcp`. Files across `core/xray2sing/ray2sing/`.
+- **olcrtc lazy non-primary**: a dead/unreachable olcrtc outbound no longer crashes the whole sing-box instance at startup. olcrtc was the only eager-blocking outbound (it joins a Jitsi room on `Start()`, 30s timeout); any failure aborted the entire box (so a single down Stealth endpoint took out Reality/Naive too). Now the selected (`primary`) olcrtc stays blocking-ready (anti-phantom), while non-selected ones defer their join to first dial (lazy) — a dead unselected endpoint can no longer strand the tunnel. (branches `fix/olcrtc-lazy-nonprimary`; verified on build 40 punching through Megafon LTE.)
+
 ### Added
 
 - **olcrtc Phase 1**: stealth tunnel outbound `type: olcrtc` for emergency RU LTE whitelist scenarios (`with_olcrtc` build tag, default-on). Outbound is registered always; stub returns clear error if built without the tag.

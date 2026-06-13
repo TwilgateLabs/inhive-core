@@ -2,8 +2,11 @@ package ray2sing
 
 import (
 	"strconv"
+	"strings"
+	"time"
 
 	T "github.com/sagernet/sing-box/option"
+	"github.com/sagernet/sing/common/json/badoption"
 )
 
 func HysteriaSingbox(hysteriaURL string) (*T.Outbound, error) {
@@ -19,7 +22,7 @@ func HysteriaSingbox(hysteriaURL string) (*T.Outbound, error) {
 				Enabled:    true,
 				DisableSNI: isIPOnly(SNI),
 				ServerName: SNI,
-				Insecure:   u.Params["insecure"] == "1",
+				Insecure:   u.Params["insecure"] == "1" || getOneOfN(u.Params, "", "pinsha256") != "",
 			},
 		},
 	}
@@ -41,7 +44,13 @@ func HysteriaSingbox(hysteriaURL string) (*T.Outbound, error) {
 		opts.DownMbps = downMbps
 	}
 
-	opts.Obfs = u.Params["obfsParam"]
+	opts.Obfs = getOneOfN(u.Params, "", "obfsparam", "obfs")
+
+	// port hopping (mport/ports) — sing-box hysteria v1 supports server_ports
+	if mp := getOneOfN(u.Params, "", "mport", "ports"); mp != "" {
+		opts.ServerPorts = badoption.Listable[string]{strings.ReplaceAll(mp, "-", ":")}
+		opts.HopInterval = badoption.Duration(30 * time.Second)
+	}
 	// opts.TurnRelay, err = u.GetRelayOptions()
 	if err != nil {
 		return nil, err

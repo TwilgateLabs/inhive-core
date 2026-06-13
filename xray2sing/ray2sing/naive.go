@@ -19,15 +19,15 @@ func NaiveSingbox(vlessURL string) (*T.Outbound, error) {
 	}
 
 	// fmt.Printf("Port %v deco=%v", port, decoded)
+	// Reality is now set inside getTLSOptions (shared by vless/vmess/trojan/naive).
 	tlsOptions := getTLSOptions(decoded)
+	// sing-box naive outbound rejects alpn/insecure/disable_sni on the TLS block
+	// (it negotiates ALPN itself inside cronet). Zero them out after getTLSOptions
+	// or the whole outbound fails to build.
 	if tlsOptions.TLS != nil {
-		if security := decoded["security"]; security == "reality" {
-			tlsOptions.TLS.Reality = &T.OutboundRealityOptions{
-				Enabled:   true,
-				PublicKey: decoded["pbk"],
-				ShortID:   decoded["sid"],
-			}
-		}
+		tlsOptions.TLS.ALPN = nil
+		tlsOptions.TLS.Insecure = false
+		tlsOptions.TLS.DisableSNI = false
 	}
 	uot := T.UDPOverTCPOptions{
 		Enabled: getOneOfN(decoded, "", "uot") != "false" && getOneOfN(decoded, "", "uot") != "0",
@@ -43,7 +43,7 @@ func NaiveSingbox(vlessURL string) (*T.Outbound, error) {
 			Password:                    u.Password,
 			InsecureConcurrency:         toInt(getOneOfN(decoded, "0", "insecure_concurrency")),
 			ExtraHeaders:                GetHttpHeaders(getOneOfN(decoded, "", "header")),
-			QUIC:                        getOneOfN(decoded, "", "quic") != "",
+			QUIC:                        u.Scheme == "naive+quic" || getOneOfN(decoded, "", "quic") != "",
 			QUICCongestionControl:       getOneOfN(decoded, "", "quic_congestion_control"),
 			OutboundTLSOptionsContainer: tlsOptions,
 			UDPOverTCP:                  &uot,

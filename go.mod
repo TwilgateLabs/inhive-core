@@ -273,9 +273,9 @@ replace github.com/Psiphon-Labs/quic-go => ./sing-box/replace/psiphon-quic-go
 
 replace github.com/Psiphon-Labs/psiphon-tls => ./sing-box/replace/psiphon-tls
 
-replace github.com/openlibrecommunity/olcrtc => github.com/TwilgateLabs/inhive-olcrtc v0.0.3-inhive
+replace github.com/openlibrecommunity/olcrtc => github.com/TwilgateLabs/inhive-olcrtc v0.0.4-inhive
 
-replace github.com/zarazaex69/j => github.com/TwilgateLabs/inhive-j-deps v0.0.1-inhive
+replace github.com/zarazaex69/j => github.com/TwilgateLabs/inhive-j-deps v0.0.2-inhive
 
 replace github.com/amnezia-vpn/amneziawg-go => github.com/amnezia-vpn/amneziawg-go v0.2.18
 

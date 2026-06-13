@@ -62,6 +62,11 @@ func VmessSingbox(vmessURL string) (*T.Outbound, error) {
 	if packetEncoding == "" {
 		packetEncoding = "xudp"
 	}
+	// vmess base64 JSON carries no fingerprint field; default to chrome so the
+	// TLS ClientHello isn't the trivially-detectable Go-default stack (DPI).
+	if decoded["tls"] == "tls" && decoded["fp"] == "" {
+		decoded["fp"] = "chrome"
+	}
 	return &T.Outbound{
 		Tag:  decoded["ps"],
 		Type: "vmess",

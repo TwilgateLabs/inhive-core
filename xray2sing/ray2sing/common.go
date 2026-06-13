@@ -25,11 +25,18 @@ type ParserFunc func(string) (*option.Outbound, error)
 type EndpointParserFunc func(string) (*T.Endpoint, error)
 
 func getTLSOptions(decoded map[string]string) T.OutboundTLSOptionsContainer {
-	if !(decoded["tls"] == "tls" || decoded["security"] == "tls" || decoded["security"] == "reality") {
+	if !(decoded["tls"] == "tls" || decoded["tls"] == "reality" || decoded["security"] == "tls" || decoded["security"] == "reality") {
 		return T.OutboundTLSOptionsContainer{TLS: nil}
 	}
 
 	serverName := decoded["sni"]
+	if serverName == "" {
+		// vless/trojan URIs have no "add" key; their CDN/front host lives in
+		// "host". Prefer host over add so TLS SNI matches the front domain
+		// (CDN / nginx-stream SNI routing) instead of the raw IP. Fall back to
+		// add (vmess) only when host is absent.
+		serverName = getOneOfN(decoded, "", "host")
+	}
 	if serverName == "" {
 		serverName = decoded["add"]
 	}
@@ -49,7 +56,7 @@ func getTLSOptions(decoded map[string]string) T.OutboundTLSOptionsContainer {
 	}
 
 	fp := decoded["fp"]
-	if fp == "" && decoded["security"] == "reality" {
+	if fp == "" && (decoded["security"] == "reality" || decoded["tls"] == "reality") {
 		fp = "chrome"
 	}
 	insecure, err := getOneOf(decoded, "insecure", "allowinsecure")
@@ -60,7 +67,7 @@ func getTLSOptions(decoded map[string]string) T.OutboundTLSOptionsContainer {
 		Enabled:    true,
 		ServerName: serverName,
 		Insecure:   insecure == "true" || insecure == "1",
-		DisableSNI: getOneOfN(decoded, "", "nosni") != "",
+		DisableSNI: toBool(getOneOfN(decoded, "", "nosni"), false),
 		ECH:        ECHOpts,
 		TLSTricks:  getTricksOptions(decoded),
 	}
@@ -80,12 +87,24 @@ func getTLSOptions(decoded map[string]string) T.OutboundTLSOptionsContainer {
 			tlsOptions.ALPN = []string{"h2", "http/1.1"}
 		} else {
 			tlsOptions.ALPN = strings.Split(alpn, ",")
-			if getALPNversion(tlsOptions.ALPN) == 3 && getOneOfN(decoded, "", "type") == "xhttp" || getOneOfN(decoded, "", "net") == "xhttp" {
-				tlsOptions.UTLS = nil //TODO utls quic has bug
+			isXhttp := getOneOfN(decoded, "", "type") == "xhttp" || getOneOfN(decoded, "", "net") == "xhttp"
+			if getALPNversion(tlsOptions.ALPN) == 3 && isXhttp {
+				tlsOptions.UTLS = nil //TODO utls quic has bug (h3 only)
 			}
 		}
 
 	}
+
+	// Reality lives here so every protocol (vless/vmess/trojan/naive) gets it.
+	// vless/naive carry it as security=reality; vmess JSON uses tls=reality.
+	if decoded["security"] == "reality" || decoded["tls"] == "reality" {
+		tlsOptions.Reality = &option.OutboundRealityOptions{
+			Enabled:   true,
+			PublicKey: decoded["pbk"],
+			ShortID:   decoded["sid"],
+		}
+	}
+
 	return T.OutboundTLSOptionsContainer{
 		TLS: tlsOptions,
 	}
@@ -161,7 +180,10 @@ func getTransportOptions(decoded map[string]string) (*option.V2RayTransportOptio
 		net = decoded["type"]
 	}
 	if path == "" {
-		path = decoded["servicename"]
+		// gRPC service name arrives under several key spellings. getOneOfN
+		// normalizes the lookup (normalizeStr maps '-'/'_' -> space), so
+		// "service-name"/"grpc-service-name" match the stored "service name".
+		path = getOneOfN(decoded, "", "servicename", "service-name", "grpc-service-name")
 	}
 	if net == "raw" || net == "" {
 		net = "tcp"
@@ -169,6 +191,18 @@ func getTransportOptions(decoded map[string]string) (*option.V2RayTransportOptio
 	// fmoption.Printf("\n\nheaderType:%s, net:%s, type:%s\n\n", decoded["headerType"], net, decoded["type"])
 	if (decoded["type"] == "http" || decoded["headertype"] == "http") && net == "tcp" {
 		net = "http"
+	}
+	// net=h2 is the legacy alias for the HTTP/2 transport. sing-box has no "h2"
+	// transport type; the generic "http" transport negotiates HTTP/2 over TLS
+	// (getTLSOptions sets the h2 ALPN). Without this the whole outbound is
+	// dropped ("unknown transport type: h2").
+	if net == "h2" {
+		net = "http"
+	}
+	// splithttp is the old name for xhttp (still emitted by marzban / old x-ui).
+	// Route it through the existing xhttp case (which defaults ALPN to h2).
+	if net == "splithttp" {
+		net = "xhttp"
 	}
 
 	switch net {
@@ -188,7 +222,9 @@ func getTransportOptions(decoded map[string]string) (*option.V2RayTransportOptio
 		}
 		transportOptions.HTTPOptions.Path = httpPath
 	case "httpupgrade":
-		decoded["alpn"] = "http/1.1"
+		if decoded["alpn"] == "" {
+			decoded["alpn"] = "http/1.1"
+		}
 		transportOptions.Type = C.V2RayTransportTypeHTTPUpgrade
 		if host != "" {
 			transportOptions.HTTPUpgradeOptions.Headers = badoption.HTTPHeader{"Host": {host}}
@@ -216,8 +252,9 @@ func getTransportOptions(decoded map[string]string) (*option.V2RayTransportOptio
 			transportOptions.HTTPUpgradeOptions.Path = pathURL.String()
 		}
 	case "ws":
-		decoded["alpn"] = "http/1.1"
-
+		if decoded["alpn"] == "" {
+			decoded["alpn"] = "http/1.1"
+		}
 		transportOptions.Type = C.V2RayTransportTypeWebsocket
 		if host != "" {
 			transportOptions.WebsocketOptions.Headers = badoption.HTTPHeader{"Host": {host}}
@@ -245,7 +282,11 @@ func getTransportOptions(decoded map[string]string) (*option.V2RayTransportOptio
 			transportOptions.WebsocketOptions.Path = pathURL.String()
 		}
 	case "grpc":
-		decoded["alpn"] = "h2"
+		// gRPC runs over HTTP/2; default ALPN to h2 only when the user did not
+		// supply one (mirror the xhttp case) instead of clobbering a custom alpn.
+		if decoded["alpn"] == "" {
+			decoded["alpn"] = "h2"
+		}
 		transportOptions.Type = C.V2RayTransportTypeGRPC
 		transportOptions.GRPCOptions = option.V2RayGRPCOptions{
 			ServiceName:         path,
@@ -254,10 +295,22 @@ func getTransportOptions(decoded map[string]string) (*option.V2RayTransportOptio
 			PermitWithoutStream: false,
 		}
 	case "quic":
-		decoded["alpn"] = "h3"
+		// QUIC negotiates HTTP/3; default ALPN to h3 only when the user did not
+		// supply one (mirror the xhttp case) instead of clobbering a custom alpn.
+		if decoded["alpn"] == "" {
+			decoded["alpn"] = "h3"
+		}
 		transportOptions.Type = C.V2RayTransportTypeQUIC
 
 	case "xhttp":
+		// XHTTP/SplitHTTP servers (Xray default) negotiate HTTP/2 via ALPN.
+		// Many subscription URLs omit `alpn`, which left NextProtos empty →
+		// decideHTTPVersion fell back to HTTP/1.1 and the connection died.
+		// Default to h2 (mirrors the grpc/quic cases above); keep an
+		// explicit user alpn (e.g. h3) if provided.
+		if decoded["alpn"] == "" {
+			decoded["alpn"] = "h2"
+		}
 		transportOptions.Type = C.V2RayTransportTypeXHTTP
 		transportOptions.XHTTPOptions = option.V2RayXHTTPOptions{
 			Mode: getOneOfN(decoded, "auto", "mode"),
@@ -326,6 +379,19 @@ func getTransportOptions(decoded map[string]string) (*option.V2RayTransportOptio
 
 			}
 
+		}
+
+		// Standalone xhttp query key: headers (JSON object). These are otherwise
+		// only read from the `extra` JSON blob, so a URL that supplies headers as
+		// a plain query param (custom CDN Host/UA) lost them. Only fill when the
+		// extra block did not already set them.
+		if transportOptions.XHTTPOptions.Headers == nil {
+			if hdrs := getOneOfN(decoded, "", "headers"); hdrs != "" {
+				var hdrMap map[string]string
+				if err := json.Unmarshal([]byte(hdrs), &hdrMap); err == nil {
+					transportOptions.XHTTPOptions.Headers = hdrMap
+				}
+			}
 		}
 
 		// 	var extraConfig option.V2RayXHTTPBaseOptions
@@ -486,7 +552,9 @@ func toFloatN(s string) *float64 {
 	return &i
 }
 func toUInt16(s string, defaultPort uint16) uint16 {
-	val, err := strconv.ParseInt(s, 10, 17)
+	// bitSize 16 (unsigned) rejects negatives and values >65535 -> defaultPort.
+	// The old bitSize 17 let "-1" parse and wrap to garbage instead.
+	val, err := strconv.ParseUint(s, 10, 16)
 	if err != nil {
 		// fmoption.Printf("err %v", err)
 		// handle the error appropriately; here we return 0
@@ -496,7 +564,7 @@ func toUInt16(s string, defaultPort uint16) uint16 {
 }
 
 func toInt16(s string, defaultPort int16) int16 {
-	val, err := strconv.ParseInt(s, 10, 17)
+	val, err := strconv.ParseInt(s, 10, 16)
 	if err != nil {
 		// fmoption.Printf("err %v", err)
 		// handle the error appropriately; here we return 0

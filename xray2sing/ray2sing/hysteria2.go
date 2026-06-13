@@ -1,7 +1,11 @@
 package ray2sing
 
 import (
+	"strings"
+	"time"
+
 	T "github.com/sagernet/sing-box/option"
+	"github.com/sagernet/sing/common/json/badoption"
 )
 
 func Hysteria2Singbox(hysteria2Url string) (*T.Outbound, error) {
@@ -15,7 +19,7 @@ func Hysteria2Singbox(hysteria2Url string) (*T.Outbound, error) {
 	if obfs, ok := decoded["obfs"]; ok && obfs != "" {
 		ObfsOpts = &T.Hysteria2Obfs{
 			Type:     obfs,
-			Password: decoded["obfs-password"],
+			Password: getOneOfN(decoded, "", "obfs-password", "obfs_password", "obfspassword"),
 		}
 	}
 
@@ -41,24 +45,32 @@ func Hysteria2Singbox(hysteria2Url string) (*T.Outbound, error) {
 	if u.Password != "" {
 		pass += ":" + u.Password
 	}
-	result := T.Outbound{
-		Type: "hysteria2",
-		Tag:  u.Name,
-		Options: &T.Hysteria2OutboundOptions{
-			ServerOptions: u.GetServerOption(),
-			Obfs:          ObfsOpts,
-			Password:      pass,
-			OutboundTLSOptionsContainer: T.OutboundTLSOptionsContainer{
-				TLS: &T.OutboundTLSOptions{
-					Enabled:    true,
-					Insecure:   decoded["insecure"] == "1",
-					DisableSNI: isIPOnly(SNI),
-					ServerName: SNI,
-					ECH:        ECHOpts,
-				},
+	h2opts := &T.Hysteria2OutboundOptions{
+		ServerOptions: u.GetServerOption(),
+		Obfs:          ObfsOpts,
+		Password:      pass,
+		OutboundTLSOptionsContainer: T.OutboundTLSOptionsContainer{
+			TLS: &T.OutboundTLSOptions{
+				Enabled:    true,
+				Insecure:   decoded["insecure"] == "1",
+				DisableSNI: isIPOnly(SNI),
+				ServerName: SNI,
+				ECH:        ECHOpts,
 			},
-			// TurnRelay: turnRelay,
 		},
+		// TurnRelay: turnRelay,
+	}
+
+	// port hopping (mport/ports) — sing-box expects '443:500'
+	if mp := getOneOfN(decoded, "", "mport", "ports"); mp != "" {
+		h2opts.ServerPorts = badoption.Listable[string]{strings.ReplaceAll(mp, "-", ":")}
+		h2opts.HopInterval = badoption.Duration(30 * time.Second)
+	}
+
+	result := T.Outbound{
+		Type:    "hysteria2",
+		Tag:     u.Name,
+		Options: h2opts,
 	}
 
 	return &result, nil

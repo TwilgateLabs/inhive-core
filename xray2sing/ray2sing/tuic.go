@@ -33,8 +33,8 @@ func TuicSingbox(tuicUrl string) (*T.Outbound, error) {
 			ServerOptions:     u.GetServerOption(),
 			UUID:              u.Username,
 			Password:          u.Password,
-			CongestionControl: decoded["congestioncontrol"],
-			UDPRelayMode:      decoded["udprelaymode"],
+			CongestionControl: getOneOfN(decoded, "", "congestion_control", "congestioncontrol"),
+			UDPRelayMode:      getOneOfN(decoded, "", "udp_relay_mode", "udprelaymode"),
 			ZeroRTTHandshake:  false,
 			Heartbeat:         badoption.Duration(10 * time.Second),
 			OutboundTLSOptionsContainer: T.OutboundTLSOptionsContainer{
