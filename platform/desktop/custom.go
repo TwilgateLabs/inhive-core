@@ -11,9 +11,11 @@ import (
 	"fmt"
 	"runtime"
 	"runtime/debug"
+	"strconv"
 	"unsafe"
 
 	hcore "github.com/twilgate/inhive-core/v2/hcore"
+	ray2sing "github.com/twilgate/xray2sing/ray2sing"
 	"github.com/sagernet/sing-box/experimental/libbox"
 	"github.com/sagernet/sing-box/log"
 )
@@ -56,6 +58,33 @@ func setup(baseDir *C.char, workingDir *C.char, tempDir *C.char, mode C.int, lis
 
 	err := hcore.Setup(&params, nil)
 	return emptyOrErrorC(err)
+}
+
+// parse converts subscription content (base64 list / newline-separated share-link
+// URIs / Xray-or-sing-box JSON) into a sing-box config JSON via the canonical
+// xray2sing parser — the SINGLE source of truth, mirroring the gomobile
+// MobileParse export (platform/mobile/mobile.go). Pure function: no setup() or
+// running engine required (Ray2Singbox uses libbox.BaseContext internally), so
+// the Flutter app can call it on Windows before the VPN is up. Returns marshaled
+// {"outbounds":[...],"endpoints":[...]}. On error returns a JSON object with a
+// single "__parse_error__" key (C ABI has no exceptions); the Dart side checks
+// for that key. Caller must freeString the result.
+//
+//export parse
+func parse(content *C.char) (result *C.char) {
+	defer func() {
+		if r := recover(); r != nil {
+			msg := fmt.Sprintf("parse panic: %v\n%s", r, string(debug.Stack()))
+			log.Error(msg)
+			result = C.CString(`{"__parse_error__":` + strconv.Quote(msg) + `}`)
+		}
+	}()
+	out, err := ray2sing.Ray2Singbox(libbox.BaseContext(nil), C.GoString(content), false)
+	if err != nil {
+		log.Error("parse: " + err.Error())
+		return C.CString(`{"__parse_error__":` + strconv.Quote(err.Error()) + `}`)
+	}
+	return C.CString(string(out))
 }
 
 //export freeString
