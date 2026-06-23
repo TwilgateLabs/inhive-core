@@ -5,6 +5,7 @@ import (
 	"runtime/debug"
 
 	hcore "github.com/twilgate/inhive-core/v2/hcore"
+	ray2sing "github.com/twilgate/xray2sing/ray2sing"
 
 	_ "github.com/sagernet/gomobile"
 	"github.com/sagernet/sing-box/experimental/libbox"
@@ -40,6 +41,30 @@ func Setup(opt *SetupOptions, platformInterface libbox.PlatformInterface) (err e
 	}, platformInterface)
 
 	// return hcore.Start(17078)
+}
+
+// Parse converts subscription content (base64 list / newline-separated share-link
+// URIs / Xray-or-sing-box JSON) into a sing-box config JSON via the canonical
+// xray2sing parser — the SINGLE source of truth for URI→outbound conversion,
+// with full protocol knowledge (xhttp obfs, reality, vision, etc).
+//
+// Returns marshaled sing-box Options JSON: {"outbounds":[...], "endpoints":[...]}.
+// The Flutter app calls this IN-PROCESS (the standalone main-process core is
+// already MobileSetup'd at launch — no running NE/VPN required) and merges the
+// returned outbounds into its own config skeleton (inbounds/route/dns/policy).
+// This replaces the Dart-side reimplementation (singbox_config_builder) so the
+// two parsers can no longer drift. Added 2026-06-23.
+func Parse(content string) (configJSON string, err error) {
+	defer func() {
+		if r := recover(); r != nil {
+			err = fmt.Errorf("mobile.Parse panic: %v\n%s", r, string(debug.Stack()))
+		}
+	}()
+	out, e := ray2sing.Ray2Singbox(libbox.BaseContext(nil), content, false)
+	if e != nil {
+		return "", e
+	}
+	return string(out), nil
 }
 
 func Start(configPath string, configContent string) (err error) {

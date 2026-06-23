@@ -9,6 +9,10 @@ shipped standalone).
 
 ## [Unreleased]
 
+### Added (2026-06-24 — parser consolidation)
+
+- **`MobileParse` gomobile export** (`platform/mobile/mobile.go`): pure function that converts subscription content → sing-box config JSON via the canonical `xray2sing.Ray2Singbox`. No `MobileSetup`/running engine required (uses `libbox.BaseContext`). This lets the Flutter app call the **single source-of-truth** Go parser in-process instead of its lossy Dart reimplementation (`singbox_config_builder`), so the two parsers can no longer drift — the root cause of the `truesight` xhttp-obfs gap surviving even after the protocol-parity wave landed in Go. Wired on iOS first (Swift `parseConfig` channel); Android/Windows still route through the Dart builder pending their own channel.
+
 ### Added (2026-06-23 — protocol-parity wave)
 
 - **XHTTP/SplitHTTP CDN-bypass obfuscation** (the `truesight`-class bug): upstream Xray's xhttp obfs knobs were unported, so a config that dials in Happ/Xray (`uplinkHTTPMethod=GET`, `xPaddingMethod=tokenish`, `seqKey`/`sessionKey` placement, `queryInHeader`) silently degraded against a server that requires them. Added the full **client-side** obfs to `transport/v2rayxhttp` + `option/v2ray_transport.go`: `uplinkHTTPMethod`, `seqKey/seqPlacement`, `sessionID*` (+ `sessionKey`/`sessionPlacement` aliases), `xPaddingMethod` (`repeat-x`/`tokenish`), `xPaddingObfsMode/Key/Header/Placement` (incl. `queryInHeader`). All opt-in — the default-unset path is **byte-identical** to before (`x_padding`=repeat-X in query, path-based session/seq, POST uplink). Server-side not implemented (we only need to speak their protocol). Caveat: `tokenish` padding is a flat base62 token, not yet iteratively HPACK/QPACK-Huffman-length-matched.

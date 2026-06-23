@@ -15,5 +15,6 @@ data
 **/*.syso
 node_modules
 *.db
-*.jsonpackage-lock.json
+package-lock.json
 .secrets/
+scratch/
