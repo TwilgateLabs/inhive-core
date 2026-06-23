@@ -30,27 +30,66 @@ func ShadowsocksSingbox(shadowsocksUrl string) (*T.Outbound, error) {
 
 	// SIP003 plugin: "name;opt1=v1;opt2=v2" — split name from options on first ';'.
 	// sing-box registers the plugin by bare name ("obfs-local"/"v2ray-plugin"),
-	// so the whole string must not be passed as the plugin name.
+	// so the whole string must not be passed as the plugin name. SIP002 mandates
+	// backslash-escaping of ; : = \ inside option values, so split on the first
+	// UNESCAPED ';' to avoid truncating an opt value that legitimately contains
+	// an escaped ';' (e.g. obfs-host=a\;b). sing-box's sip003 layer unescapes.
 	plugin := decoded["plugin"]
 	pluginOptions := ""
-	if i := strings.Index(plugin, ";"); i >= 0 {
+	if i := indexUnescaped(plugin, ';'); i >= 0 {
 		pluginOptions = plugin[i+1:]
 		plugin = plugin[:i]
 	}
 
+	options := &T.ShadowsocksOutboundOptions{
+		ServerOptions: u.GetServerOption(),
+		Method:        defaultMethod,
+		Password:      pass,
+		Plugin:        plugin,
+		PluginOptions: pluginOptions,
+	}
+
+	// UDP-over-TCP: tunnel UDP over the TCP stream on explicit ?uot=1 (mirror
+	// socks.go). uot-version selects v1/v2. The runtime gives UoT precedence
+	// over multiplex and refuses to build both (outbound.go:65-71), so only
+	// wire up multiplex when UoT is not enabled.
+	if toBool(getOneOfN(decoded, "", "uot", "udp-over-tcp"), false) {
+		options.UDPOverTCP = &T.UDPOverTCPOptions{
+			Enabled: true,
+			Version: uint8(toInt(getOneOfN(decoded, "", "uot-version"))),
+		}
+	} else {
+		options.Multiplex = getMuxOptions(decoded)
+	}
+
 	result := T.Outbound{
-		Type: "shadowsocks",
-		Tag:  u.Name,
-		Options: &T.ShadowsocksOutboundOptions{
-			ServerOptions: u.GetServerOption(),
-			Method:        defaultMethod,
-			Password:      pass,
-			Plugin:        plugin,
-			PluginOptions: pluginOptions,
-		},
+		Type:    "shadowsocks",
+		Tag:     u.Name,
+		Options: options,
 	}
 
 	return &result, nil
+}
+
+// indexUnescaped returns the index of the first occurrence of sep in s that is
+// not preceded by an odd run of backslashes (i.e. not backslash-escaped per
+// SIP002), or -1 if there is none.
+func indexUnescaped(s string, sep byte) int {
+	backslashes := 0
+	for i := 0; i < len(s); i++ {
+		switch s[i] {
+		case '\\':
+			backslashes++
+		case sep:
+			if backslashes%2 == 0 {
+				return i
+			}
+			backslashes = 0
+		default:
+			backslashes = 0
+		}
+	}
+	return -1
 }
 
 // normalizeLegacyShadowsocks converts the legacy whole-base64 ss:// form

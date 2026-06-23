@@ -37,15 +37,23 @@ func SSHSingbox(sshURL string) (*T.Outbound, error) {
 		hostkeys = nil
 	}
 
+	hostKeyAlgorithms := strings.Split(decoded["hka"], ",")
+	if len(hostKeyAlgorithms) == 1 && hostKeyAlgorithms[0] == "" {
+		hostKeyAlgorithms = nil
+	}
+
 	result := T.Outbound{
 		Type: "ssh",
 		Tag:  u.Name,
 		Options: &T.SSHOutboundOptions{
-			ServerOptions: u.GetServerOption(),
-			User:          u.Username,
-			Password:      u.Password,
-			PrivateKey:    privkeys,
-			HostKey:       hostkeys,
+			ServerOptions:        u.GetServerOption(),
+			User:                 u.Username,
+			Password:             u.Password,
+			PrivateKey:           privkeys,
+			PrivateKeyPassphrase: decoded["pk_passphrase"],
+			HostKey:              hostkeys,
+			HostKeyAlgorithms:    hostKeyAlgorithms,
+			ClientVersion:        decoded["client_version"],
 			UDPOverTCP: &T.UDPOverTCPOptions{
 				Enabled: true,
 			},

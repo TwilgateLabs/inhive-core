@@ -61,6 +61,9 @@ func MieruSingbox(uri string) (*T.Outbound, error) {
 			PortBindings:  transports,
 			Multiplexing:  getOneOfN(decoded, "", "multiplexing"),
 			HandshakeMode: getOneOfN(decoded, "", "handshake-mode", "handshakemode"),
+			// Official mieru sharing-link param (range 1280-1400). Left 0 when
+			// absent so the outbound keeps the library default.
+			MTU: int32(toInt(getOneOfN(decoded, "", "mtu"))),
 		},
 	}
 

@@ -1,7 +1,6 @@
 package ray2sing
 
 import (
-	"context"
 	"encoding/json"
 	"fmt"
 	"reflect"
@@ -36,7 +35,11 @@ func CheckUrlAndJson(url string, expectedJSON string, t *testing.T) {
 
 func json2map_prettystr(injson string) ([]T.Outbound, string, error) {
 	var conf T.Options
-	if err := conf.UnmarshalJSONContext(context.Background(), []byte(injson)); err != nil {
+	// Must carry the inbound/outbound options registry (via libbox.BaseContext),
+	// same as the parse path above — plain context.Background() makes outbound
+	// option unmarshal fail with "missing outbound options registry in context"
+	// on current sing-box. (Restored 2026-06-23.)
+	if err := conf.UnmarshalJSONContext(libbox.BaseContext(nil), []byte(injson)); err != nil {
 		return conf.Outbounds, "", err
 	}
 	if len(conf.Outbounds) == 0 {

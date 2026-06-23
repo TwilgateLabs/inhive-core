@@ -53,6 +53,19 @@ func getTLSOptions(decoded map[string]string) T.OutboundTLSOptionsContainer {
 			}
 			ECHOpts.Config = badoption.Listable[string]{valECH}
 		}
+		// InHive: opt-in forced HTTPS-RR ECH query. When echForceQuery=1 (or an
+		// explicit query_server_name is given) and no inline ech= blob was
+		// supplied, set QueryServerName so the runtime fetches the ECHConfigList
+		// via a DNS HTTPS record (option+runtime already plumbed). The query
+		// name defaults to the SNI/front host. Absent => QueryServerName stays
+		// empty (byte-identical: inline-blob or no-ECH behavior unchanged).
+		if len(ECHOpts.Config) == 0 {
+			if qsn := getOneOfN(decoded, "", "query_server_name", "echqueryservername"); qsn != "" {
+				ECHOpts.QueryServerName = qsn
+			} else if toBool(getOneOfN(decoded, "", "echforcequery", "ech_force_query"), false) {
+				ECHOpts.QueryServerName = serverName
+			}
+		}
 	}
 
 	fp := decoded["fp"]
@@ -76,6 +89,20 @@ func getTLSOptions(decoded map[string]string) T.OutboundTLSOptionsContainer {
 			Enabled:     true,
 			Fingerprint: fp,
 		}
+	}
+
+	// InHive: opt-in TLS min/max version pinning from the URI (Xray minVersion/
+	// maxVersion). Values pass through verbatim to the already-supported
+	// OutboundTLSOptions fields (runtime applies them on the std-TLS path).
+	// Absent keys => empty strings => the stdlib default range (byte-identical).
+	// NOTE: curvePreferences/cipherSuites are intentionally NOT read here — the
+	// uTLS path drops CurvePreferences and these keys are virtually absent from
+	// share links; deferred to avoid a half-working knob.
+	if mv := getOneOfN(decoded, "", "minversion", "min_version"); mv != "" {
+		tlsOptions.MinVersion = mv
+	}
+	if mv := getOneOfN(decoded, "", "maxversion", "max_version"); mv != "" {
+		tlsOptions.MaxVersion = mv
 	}
 
 	if alpn, ok := decoded["alpn"]; ok && alpn != "" {
@@ -213,6 +240,12 @@ func getTransportOptions(decoded map[string]string) (*option.V2RayTransportOptio
 		if decoded["security"] != "tls" {
 			transportOptions.HTTPOptions.Method = "GET"
 		}
+		// InHive: opt-in custom HTTP method from the URI (overrides the GET/PUT
+		// default). Covers both net=h2 and the tcp+header.type=http obfs case
+		// (Xray RAW request.method). Absent => the existing default is kept.
+		if m := getOneOfN(decoded, "", "method", "http_method"); m != "" {
+			transportOptions.HTTPOptions.Method = m
+		}
 		if host != "" {
 			transportOptions.HTTPOptions.Host = badoption.Listable[string]{host}
 		}
@@ -221,6 +254,22 @@ func getTransportOptions(decoded map[string]string) (*option.V2RayTransportOptio
 			httpPath = "/"
 		}
 		transportOptions.HTTPOptions.Path = httpPath
+		// InHive: opt-in custom request headers (JSON object), mirroring the
+		// xhttp `headers` query key. Covers HTTP/2 per-node camouflage headers
+		// and the tcp+header.type=http obfs (Accept/Connection/Pragma/...).
+		// vmess nested header.request.headers is forwarded into decoded by
+		// vmess.go (separate wave) as the same JSON-object string. Absent =>
+		// Headers stays nil (byte-identical).
+		if hdrs := getOneOfN(decoded, "", "headers"); hdrs != "" {
+			var hdrMap map[string]string
+			if jerr := json.Unmarshal([]byte(hdrs), &hdrMap); jerr == nil && len(hdrMap) > 0 {
+				h := badoption.HTTPHeader{}
+				for k, v := range hdrMap {
+					h[k] = badoption.Listable[string]{v}
+				}
+				transportOptions.HTTPOptions.Headers = h
+			}
+		}
 	case "httpupgrade":
 		if decoded["alpn"] == "" {
 			decoded["alpn"] = "http/1.1"
@@ -237,18 +286,21 @@ func getTransportOptions(decoded map[string]string) (*option.V2RayTransportOptio
 			if err != nil {
 				return &option.V2RayTransportOptions{}, err
 			}
-			// pathQuery := pathURL.Query()
-			// transportOptions.HTTPUpgradeOptions.MaxEarlyData = 0
-			// transportOptions.HTTPUpgradeOptions.EarlyDataHeaderName = "Sec-WebSocket-Protocol"
-			// maxEarlyDataString := pathQuery.Get("ed")
-			// if maxEarlyDataString != "" {
-			// 	maxEarlyDate, err := strconv.ParseUint(maxEarlyDataString, 10, 32)
-			// 	if err == nil {
-			// 		// transportOptions.HTTPUpgradeOptions.MaxEarlyData = uint32(maxEarlyDate)
-			// 		pathQuery.Del("ed")
-			// 		pathURL.RawQuery = pathQuery.Encode()
-			// 	}
-			// }
+			// InHive: HTTPUpgrade early data (?ed=N). When the path carries an
+			// ed= query, extract it into MaxEarlyData and STRIP it from the path
+			// so the request line no longer mismatches server routing. Unlike
+			// WebSocket (which uses the Sec-WebSocket-Protocol header by
+			// default), httpupgrade early data is path-based, so
+			// EarlyDataHeaderName is left empty. When ed is absent the path is
+			// emitted unchanged and MaxEarlyData stays 0 — byte-identical.
+			pathQuery := pathURL.Query()
+			if maxEarlyDataString := pathQuery.Get("ed"); maxEarlyDataString != "" {
+				if maxEarlyData, perr := strconv.ParseUint(maxEarlyDataString, 10, 32); perr == nil {
+					transportOptions.HTTPUpgradeOptions.MaxEarlyData = uint32(maxEarlyData)
+					pathQuery.Del("ed")
+					pathURL.RawQuery = pathQuery.Encode()
+				}
+			}
 			transportOptions.HTTPUpgradeOptions.Path = pathURL.String()
 		}
 	case "ws":
@@ -258,6 +310,13 @@ func getTransportOptions(decoded map[string]string) (*option.V2RayTransportOptio
 		transportOptions.Type = C.V2RayTransportTypeWebsocket
 		if host != "" {
 			transportOptions.WebsocketOptions.Headers = badoption.HTTPHeader{"Host": {host}}
+		}
+		// InHive: opt-in periodic WebSocket ping keepalive (Xray heartbeatPeriod,
+		// bare seconds). Absent key => zero => no ping ticker (byte-identical).
+		if v := getOneOfN(decoded, "", "heartbeatperiod", "heartbeat_period", "heartbeat"); v != "" {
+			if n := toInt(v); n > 0 {
+				transportOptions.WebsocketOptions.HeartbeatPeriod = badoption.Duration(time.Duration(n) * time.Second)
+			}
 		}
 		if path != "" {
 			if !strings.HasPrefix(path, "/") {
@@ -288,12 +347,46 @@ func getTransportOptions(decoded map[string]string) (*option.V2RayTransportOptio
 			decoded["alpn"] = "h2"
 		}
 		transportOptions.Type = C.V2RayTransportTypeGRPC
-		transportOptions.GRPCOptions = option.V2RayGRPCOptions{
+		grpcOpts := option.V2RayGRPCOptions{
 			ServiceName:         path,
 			IdleTimeout:         badoption.Duration(15 * time.Second),
 			PingTimeout:         badoption.Duration(15 * time.Second),
 			PermitWithoutStream: false,
 		}
+		// InHive: opt-in gRPC keepalive/CDN-fronting knobs from the URI. Each
+		// guard leaves the existing 15s/false defaults untouched when the key
+		// is absent, so output stays byte-identical for plain grpc nodes.
+		//
+		// idle_timeout / health_check_timeout arrive as bare seconds in share
+		// links; map health_check_timeout -> PingTimeout (its keepalive ack
+		// timeout), idle_timeout -> IdleTimeout (the keepalive ping interval).
+		if v := getOneOfN(decoded, "", "idle_timeout", "idletimeout"); v != "" {
+			if n := toInt(v); n > 0 {
+				grpcOpts.IdleTimeout = badoption.Duration(time.Duration(n) * time.Second)
+			}
+		}
+		if v := getOneOfN(decoded, "", "health_check_timeout", "healthchecktimeout"); v != "" {
+			if n := toInt(v); n > 0 {
+				grpcOpts.PingTimeout = badoption.Duration(time.Duration(n) * time.Second)
+			}
+		}
+		if v := getOneOfN(decoded, "", "permit_without_stream", "permitwithoutstream"); v != "" {
+			grpcOpts.PermitWithoutStream = toBool(v, false)
+		}
+		// Authority overrides the HTTP/2 :authority pseudo-header for CDN
+		// fronting where the routing host differs from the TLS SNI.
+		grpcOpts.Authority = getOneOfN(decoded, "", "authority")
+		// UserAgent overrides the gRPC client User-Agent.
+		grpcOpts.UserAgent = getOneOfN(decoded, "", "user_agent", "useragent")
+		// NOTE: gRPC multiMode (mode=multi / multiMode=true → TunMulti stream)
+		// is DEFERRED. Faithful support needs the multi-frame MultiHunk conn
+		// codec (a new protobuf message + stream desc + codec), not just a
+		// stream-path branch — a path-only change mis-frames the wire. The
+		// cheap, high-value knobs (authority/user_agent/timeouts) are handled
+		// above; multiMode awaits the codec port. mode is intentionally NOT
+		// read here so a mode=gun (default) or mode=multi URI is parsed as the
+		// standard single-frame gun transport (current behavior).
+		transportOptions.GRPCOptions = grpcOpts
 	case "quic":
 		// QUIC negotiates HTTP/3; default ALPN to h3 only when the user did not
 		// supply one (mirror the xhttp case) instead of clobbering a custom alpn.
@@ -445,6 +538,14 @@ func getTransportOptions(decoded map[string]string) (*option.V2RayTransportOptio
 
 		// res["extra"] = extraConfig
 		// }
+
+	case "kcp", "mkcp":
+		// InHive: mKCP is not implemented by sing-box (and never was) — the
+		// full kcp transport (seed + header obfs + mtu/tti/congestion) would be
+		// a large from-scratch port. Return an explicit, diagnosable error so a
+		// kcp node degrades clearly instead of surfacing the generic "unknown
+		// transport type" as if it were a parser bug. DEFERRED: full kcp port.
+		return nil, E.New("mKCP transport not supported by InHive core")
 
 	default:
 		return nil, E.New("unknown transport type: " + net)

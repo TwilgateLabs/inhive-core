@@ -22,7 +22,7 @@ func HysteriaSingbox(hysteriaURL string) (*T.Outbound, error) {
 				Enabled:    true,
 				DisableSNI: isIPOnly(SNI),
 				ServerName: SNI,
-				Insecure:   u.Params["insecure"] == "1" || getOneOfN(u.Params, "", "pinsha256") != "",
+				Insecure:   u.Params["insecure"] == "1",
 			},
 		},
 	}
@@ -30,6 +30,12 @@ func HysteriaSingbox(hysteriaURL string) (*T.Outbound, error) {
 		Type:    u.Scheme,
 		Tag:     u.Name,
 		Options: &opts,
+	}
+
+	// alpn is an official Hysteria1 URI param (default "hysteria"); a custom
+	// value must reach TLS.ALPN or the QUIC client falls back to DefaultALPN.
+	if alpn := getOneOfN(u.Params, "", "alpn"); alpn != "" {
+		opts.TLS.ALPN = strings.Split(alpn, ",")
 	}
 
 	opts.AuthString = u.Params["auth"]

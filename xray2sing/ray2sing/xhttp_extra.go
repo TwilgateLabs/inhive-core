@@ -1,12 +1,34 @@
 package ray2sing
 
 import (
+	"encoding/json"
+
 	"github.com/sagernet/sing-box/option"
 )
 
 type XHTTPExtra struct {
 	option.V2RayXHTTPBaseOptions
 	DownloadSettings *DownloadSettings `json:"downloadSettings,omitempty"`
+}
+
+// UnmarshalJSON parses the XHTTP `extra` object. The obfs fields (uplinkHTTPMethod,
+// seqKey/seqPlacement, sessionIDKey/sessionIDPlacement, xPadding*) auto-flow from the
+// embedded V2RayXHTTPBaseOptions. After unmarshalling we fold the sessionKey /
+// sessionPlacement JSON aliases (used by the trigger config and other Happ exports) into
+// the canonical SessionID* fields. Unknown / server-only keys are ignored by default.
+//
+// A type alias breaks the method set so the standard decoder is used (no recursion); the
+// embedded base options have no UnmarshalJSON, so DownloadSettings is preserved.
+func (x *XHTTPExtra) UnmarshalJSON(data []byte) error {
+	type plain XHTTPExtra
+	if err := json.Unmarshal(data, (*plain)(x)); err != nil {
+		return err
+	}
+	x.V2RayXHTTPBaseOptions.NormalizeXHTTPObfsAliases()
+	if x.DownloadSettings != nil {
+		x.DownloadSettings.V2RayXHTTPBaseOptions.NormalizeXHTTPObfsAliases()
+	}
+	return nil
 }
 
 type DownloadSettings struct {

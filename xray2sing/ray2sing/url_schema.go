@@ -56,8 +56,12 @@ func ParseUrl(inputURL string, defaultPort uint16) (*UrlSchema, error) {
 
 		// fmt.Print(userInfo)
 		if err == nil && isValidChar(userInfo) {
-			// If decoding is successful, use the decoded string
-			userDetails := strings.Split(userInfo, ":")
+			// Split on the FIRST colon only: SS-2022 (2022-blake3-*) passwords are
+			// themselves base64 and contain ':' (method:uPSK:iPSK, or a single PSK
+			// with '/' '+' '='), so strings.Split + len==2 dropped the whole decode
+			// → method silently became "none". SplitN(2) keeps method = part[0],
+			// password = everything after the first ':'. (Audit 2026-06-23.)
+			userDetails := strings.SplitN(userInfo, ":", 2)
 			if len(userDetails) == 2 {
 				data.Username = userDetails[0]
 				data.Password = userDetails[1]

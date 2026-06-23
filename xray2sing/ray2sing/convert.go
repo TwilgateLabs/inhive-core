@@ -16,29 +16,37 @@ import (
 )
 
 var configTypes = map[string]ParserFunc{
-	"vmess://":     VmessSingbox,
-	"vless://":     VlessSingbox,
-	"trojan://":    TrojanSingbox,
-	"svmess://":    VmessSingbox,
-	"svless://":    VlessSingbox,
-	"strojan://":   TrojanSingbox,
-	"ss://":        ShadowsocksSingbox,
-	"tuic://":      TuicSingbox,
-	"hysteria://":  HysteriaSingbox,
-	"hysteria2://": Hysteria2Singbox,
-	"hy2://":       Hysteria2Singbox,
-	"ssh://":       SSHSingbox,
+	"vmess://":       VmessSingbox,
+	"vless://":       VlessSingbox,
+	"trojan://":      TrojanSingbox,
+	"svmess://":      VmessSingbox,
+	"svless://":      VlessSingbox,
+	"strojan://":     TrojanSingbox,
+	"ss://":          ShadowsocksSingbox,
+	"tuic://":        TuicSingbox,
+	"hysteria://":    HysteriaSingbox,
+	"hysteria2://":   Hysteria2Singbox,
+	"hy2://":         Hysteria2Singbox,
+	"ssh://":         SSHSingbox,
 	"naive://":       NaiveSingbox,
 	"naive+https://": NaiveSingbox,
 	"naive+quic://":  NaiveSingbox,
 
-	"ssconf://":  BeepassSingbox,
-	"direct://":  DirectSingbox,
-	"socks://":   SocksSingbox,
-	"phttp://":   HttpSingbox,
-	"phttps://":  HttpsSingbox,
-	"http://":    HttpSingbox,
-	"https://":   HttpsSingbox,
+	"ssconf://": BeepassSingbox,
+	"direct://": DirectSingbox,
+	// anytls/shadowtls: community share-link schemes (NekoBox/sublink-worker
+	// convention); dialers already registered in sing-box. Added 2026-06-23.
+	"anytls://":    AnyTLSSingbox,
+	"shadowtls://": ShadowTLSSingbox,
+	"socks://":     SocksSingbox,
+	"socks4://":    SocksSingbox,
+	"socks4a://":   SocksSingbox,
+	"socks5://":    SocksSingbox,
+	"socks5h://":   SocksSingbox,
+	"phttp://":     HttpSingbox,
+	"phttps://":    HttpsSingbox,
+	"http://":      HttpSingbox,
+	"https://":     HttpsSingbox,
 	// x-prefixed URL schemes: 2026-04-20 dehiddification — переиспользуем native
 	// sing-box парсеры вместо xray stub (у sing-box 1.12+ есть TLS Fragment,
 	// XTLS Vision, uTLS, Reality — всё что нужно для xray-совместимых URI).
@@ -58,6 +66,7 @@ var endpointParsers = map[string]EndpointParserFunc{
 	"awg://":       AWGSingbox,
 	"[Interface]":  AWGSingboxTxt,
 }
+
 // xrayConfigTypes — legacy map для случаев когда подписка явно требует xray format.
 // После дегиддификации 2026-04-20 — все парсятся через native sing-box types
 // (sing-box имеет все xray-compatible фичи: TLS Fragment, XTLS Vision, uTLS).
@@ -136,6 +145,22 @@ func processSingleConfig(config string, useXrayWhenPossible bool) (outend *OutEn
 }
 
 func GenerateConfigLite(input string, useXrayWhenPossible bool) (*option.Options, error) {
+
+	// JSON-container subscriptions (Happ / v2rayN Xray JSON, sing-box full
+	// config, SIP008 server lists) import as ZERO nodes through the text/base64
+	// share-link path, because expandDecodedConfig splits on newlines and shreds
+	// a JSON body. Sniff the first non-space byte: '{' or '[' means JSON, which
+	// we transcode back into share-link URIs and feed through the SAME pipeline
+	// (so the per-protocol URI parsers stay the single source of truth). This is
+	// strictly ADDITIVE — anything that is not a JSON object/array falls through
+	// to the existing text/base64 handling unchanged.
+	//
+	// NOTE: ingestJSON intentionally ingests ONLY proxy outbounds/servers and
+	// DROPS any embedded "dns"/"routing"/"rules" (InHive owns DNS + routing
+	// centrally for leak protection). See json_ingest.go for the rationale.
+	if uris, ok := ingestJSON(input); ok {
+		input = uris
+	}
 
 	configArray := expandDecodedConfig(input)
 

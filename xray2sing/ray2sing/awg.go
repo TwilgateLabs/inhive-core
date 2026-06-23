@@ -18,12 +18,26 @@ func AWGSingboxTxt(content string) (*T.Endpoint, error) {
 	var (
 		privateKey                         string
 		addresses                          []netip.Prefix
+		mtu                                uint32
 		jc, jmin, jmax                     int
 		s1, s2, s3, s4                     int
 		h1, h2, h3, h4, i1, i2, i3, i4, i5 string
+		j1, j2, j3                         string
+		itime                              int
 
-		peer T.AwgPeerOptions
+		peers    []T.AwgPeerOptions
+		peer     T.AwgPeerOptions
+		havePeer bool
 	)
+
+	// flushPeer commits the peer currently being parsed into the peers slice.
+	flushPeer := func() {
+		if havePeer {
+			peers = append(peers, peer)
+			peer = T.AwgPeerOptions{}
+			havePeer = false
+		}
+	}
 
 	section := ""
 
@@ -36,6 +50,9 @@ func AWGSingboxTxt(content string) (*T.Endpoint, error) {
 
 		// Section header
 		if strings.HasPrefix(line, "[") && strings.HasSuffix(line, "]") {
+			// A new section closes the peer currently being accumulated so each
+			// [Peer] block becomes its own entry instead of overwriting the last.
+			flushPeer()
 			section = strings.ToLower(strings.Trim(line, "[]"))
 			continue
 		}
@@ -61,6 +78,10 @@ func AWGSingboxTxt(content string) (*T.Endpoint, error) {
 						return nil, fmt.Errorf("invalid Address: %w", err)
 					}
 					addresses = append(addresses, pfx)
+				}
+			case "MTU":
+				if v, err := strconv.ParseUint(val, 10, 32); err == nil {
+					mtu = uint32(v)
 				}
 			case "Jc":
 				jc, _ = strconv.Atoi(val)
@@ -95,14 +116,38 @@ func AWGSingboxTxt(content string) (*T.Endpoint, error) {
 				i4 = val
 			case "I5":
 				i5 = val
+			// AmneziaWG 1.5 controlled-junk generators + inter-handshake timeout.
+			case "J1":
+				j1 = val
+			case "J2":
+				j2 = val
+			case "J3":
+				j3 = val
+			case "Itime", "ITime", "ITIME":
+				itime, _ = strconv.Atoi(val)
 			}
 
 		case "peer":
+			havePeer = true
 			switch key {
 			case "PublicKey":
 				peer.PublicKey = val
 			case "PresharedKey":
 				peer.PresharedKey = val
+			// Cloudflare/WARP 3-byte reserved (comma-separated). Applied in the bind
+			// at send time since WireGuard's UAPI has no reserved key.
+			case "Reserved":
+				for _, part := range strings.Split(val, ",") {
+					part = strings.TrimSpace(part)
+					if part == "" {
+						continue
+					}
+					num, err := strconv.ParseUint(part, 10, 8)
+					if err != nil {
+						return nil, fmt.Errorf("invalid Reserved: %w", err)
+					}
+					peer.Reserved = append(peer.Reserved, uint8(num))
+				}
 
 			case "AllowedIPs":
 				pfx, err := netip.ParsePrefix(val)
@@ -130,43 +175,57 @@ func AWGSingboxTxt(content string) (*T.Endpoint, error) {
 		}
 	}
 
+	// Commit the final [Peer] block that was still being accumulated.
+	flushPeer()
+
 	if privateKey == "" {
 		return nil, errors.New("missing PrivateKey")
 	}
 
-	if peer.Address == "" || peer.Port == 0 {
+	if len(peers) == 0 {
 		return nil, errors.New("missing peer Endpoint")
 	}
-	if len(peer.AllowedIPs) == 0 {
-		if len(peer.AllowedIPs) == 0 {
-			peer.AllowedIPs = badoption.Listable[netip.Prefix]([]netip.Prefix{
+	for i := range peers {
+		if peers[i].Address == "" || peers[i].Port == 0 {
+			return nil, errors.New("missing peer Endpoint")
+		}
+		if len(peers[i].AllowedIPs) == 0 {
+			peers[i].AllowedIPs = badoption.Listable[netip.Prefix]([]netip.Prefix{
 				netip.MustParsePrefix("0.0.0.0/0"), netip.MustParsePrefix("::/0"),
 			})
 		}
 	}
-	isAwg := jc+jmin+jmax+s1+s2+s3+s4 == 0 && h1+h2+h3+h4+i1+i2+i3+i4 == ""
-	noise := defaultWireguardNoiseOptions()
-	noise.FakePacket.Enabled = isAwg
-	if true || isAwg {
-		// fmt.Println(">>out", C.TypeAwg)
+
+	// isAwg is true when AmneziaWG obfs params (Jc/S/H/I/J/Itime) are present; a
+	// plain WireGuard .conf carries none of them and must be emitted as
+	// TypeWireGuard.
+	isAwg := !(jc+jmin+jmax+s1+s2+s3+s4+itime == 0 && h1+h2+h3+h4+i1+i2+i3+i4+i5+j1+j2+j3 == "")
+
+	if !isAwg {
+		wgPeers := make([]T.WireGuardPeer, 0, len(peers))
+		for _, p := range peers {
+			wgPeers = append(wgPeers, T.WireGuardPeer{
+				Address:                     p.Address,
+				Port:                        p.Port,
+				PreSharedKey:                p.PresharedKey,
+				PublicKey:                   p.PublicKey,
+				AllowedIPs:                  p.AllowedIPs,
+				PersistentKeepaliveInterval: p.PersistentKeepaliveInterval,
+				Reserved:                    p.Reserved,
+			})
+		}
+		wgopts := &T.WireGuardEndpointOptions{
+			PrivateKey: privateKey,
+			Address:    badoption.Listable[netip.Prefix](addresses),
+			Peers:      wgPeers,
+		}
+		if mtu != 0 {
+			wgopts.MTU = mtu
+		}
 		return &T.Endpoint{
-			Type: C.TypeWireGuard,
-			Tag:  "wiregaurd",
-			Options: &T.WireGuardEndpointOptions{
-				PrivateKey: privateKey,
-				Address:    badoption.Listable[netip.Prefix](addresses),
-				Peers: []T.WireGuardPeer{
-					T.WireGuardPeer{
-						Address:                     peer.Address,
-						Port:                        peer.Port,
-						PreSharedKey:                peer.PresharedKey,
-						PublicKey:                   peer.PublicKey,
-						AllowedIPs:                  peer.AllowedIPs,
-						PersistentKeepaliveInterval: peer.PersistentKeepaliveInterval,
-					},
-				},
-				Noise: noise,
-			},
+			Type:    C.TypeWireGuard,
+			Tag:     "wiregaurd",
+			Options: wgopts,
 		}, nil
 	}
 
@@ -177,6 +236,7 @@ func AWGSingboxTxt(content string) (*T.Endpoint, error) {
 
 			PrivateKey: privateKey,
 			Address:    badoption.Listable[netip.Prefix](addresses),
+			MTU:        mtu,
 
 			Jc:   jc,
 			Jmin: jmin,
@@ -197,7 +257,12 @@ func AWGSingboxTxt(content string) (*T.Endpoint, error) {
 			I4: i4,
 			I5: i5,
 
-			Peers: []T.AwgPeerOptions{peer},
+			J1:    j1,
+			J2:    j2,
+			J3:    j3,
+			Itime: itime,
+
+			Peers: peers,
 		},
 	}
 
@@ -227,10 +292,12 @@ func AWGSingbox(raw string) (*T.Endpoint, error) {
 		return 0
 	}
 
-	getUint16 := func(key string) uint16 {
-		if v, ok := u.Params[key]; ok {
-			i, _ := strconv.Atoi(v)
-			return uint16(i)
+	getUint16OfN := func(keys ...string) uint16 {
+		for _, key := range keys {
+			if v, ok := u.Params[key]; ok {
+				i, _ := strconv.Atoi(v)
+				return uint16(i)
+			}
 		}
 		return 0
 	}
@@ -274,7 +341,7 @@ func AWGSingbox(raw string) (*T.Endpoint, error) {
 		PublicKey:                   getOneOfN(u.Params, "", "peerpublickey", "publickey", "pub", "peerpub"),
 		PresharedKey:                getOneOfN(u.Params, "", "presharedkey", "psk"),
 		AllowedIPs:                  allowedIPs,
-		PersistentKeepaliveInterval: getUint16("keepalive"),
+		PersistentKeepaliveInterval: getUint16OfN("keepalive", "persistentkeepalive", "pk_keepalive"),
 	}
 	pk := getOneOfN(u.Params, "", "privatekey", "pk")
 	if pk == "" {
@@ -295,6 +362,21 @@ func AWGSingbox(raw string) (*T.Endpoint, error) {
 	// emitting a config with an empty endpoint.
 	if peer.Address == "" || peer.Port == 0 {
 		return nil, errors.New("missing peer endpoint (host:port)")
+	}
+	// Cloudflare/WARP 3-byte reserved (comma-separated). Applied in the bind at
+	// send time since WireGuard's UAPI has no reserved key.
+	if reservedStr, ok := u.Params["reserved"]; ok {
+		for _, part := range strings.Split(reservedStr, ",") {
+			part = strings.TrimSpace(part)
+			if part == "" {
+				continue
+			}
+			num, err := strconv.ParseUint(part, 10, 8)
+			if err != nil {
+				return nil, err
+			}
+			peer.Reserved = append(peer.Reserved, uint8(num))
+		}
 	}
 	opts := T.AwgEndpointOptions{
 
@@ -320,6 +402,12 @@ func AWGSingbox(raw string) (*T.Endpoint, error) {
 		I4: getOneOfN(u.Params, "", "i4"),
 		I5: getOneOfN(u.Params, "", "i5"),
 
+		// AmneziaWG 1.5 controlled-junk generators + inter-handshake timeout.
+		J1:    getOneOfN(u.Params, "", "j1"),
+		J2:    getOneOfN(u.Params, "", "j2"),
+		J3:    getOneOfN(u.Params, "", "j3"),
+		Itime: getInt("itime"),
+
 		Peers: []T.AwgPeerOptions{peer},
 	}
 	if mtuStr, ok := u.Params["mtu"]; ok {
@@ -330,7 +418,7 @@ func AWGSingbox(raw string) (*T.Endpoint, error) {
 	var out *T.Endpoint
 	// isPlainWG is true when NO AmneziaWG obfs params are present — i.e. this is a
 	// plain WireGuard endpoint and must NOT be emitted as type "awg".
-	isPlainWG := opts.Jc+opts.Jmin+opts.Jmax+opts.S1+opts.S2+opts.S3+opts.S4 == 0 && opts.H1+opts.H2+opts.H3+opts.H4+opts.I1+opts.I2+opts.I3+opts.I4 == ""
+	isPlainWG := opts.Jc+opts.Jmin+opts.Jmax+opts.S1+opts.S2+opts.S3+opts.S4+opts.Itime == 0 && opts.H1+opts.H2+opts.H3+opts.H4+opts.I1+opts.I2+opts.I3+opts.I4+opts.I5+opts.J1+opts.J2+opts.J3 == ""
 
 	if isPlainWG {
 		wgopts := T.WireGuardEndpointOptions{

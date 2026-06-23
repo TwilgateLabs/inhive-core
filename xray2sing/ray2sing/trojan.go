@@ -16,13 +16,21 @@ func TrojanSingbox(trojanURL string) (*T.Outbound, error) {
 		return nil, err
 	}
 
+	// trojan-gfw treats the entire userinfo as the password. Go's net/url
+	// splits userinfo on the first ':', so a password with an unescaped colon
+	// lands in u.Password — recombine it to avoid silent truncation.
+	password := u.Username
+	if u.Password != "" {
+		password = u.Username + ":" + u.Password
+	}
+
 	return &T.Outbound{
 		Tag:  u.Name,
 		Type: "trojan",
 		Options: &T.TrojanOutboundOptions{
 			DialerOptions:               getDialerOptions(decoded),
 			ServerOptions:               u.GetServerOption(),
-			Password:                    u.Username,
+			Password:                    password,
 			OutboundTLSOptionsContainer: getTLSOptions(decoded),
 			Transport:                   transportOptions,
 			Multiplex:                   getMuxOptions(decoded),

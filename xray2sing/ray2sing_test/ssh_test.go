@@ -21,8 +21,9 @@ func TestBase(t *testing.T) {
 			"server_port": 22,
 			"user": "user",
 			"password": "pass",
-			"private_key": "-----BEGIN OPENSSH PRIVATE KEY-----\npk\n-----END OPENSSH PRIVATE KEY-----\n",
-			"host_key": "hk"
+			"private_key": "-----BEGIN OPENSSH PRIVATE KEY-----\n\npk\n\n-----END OPENSSH PRIVATE KEY-----",
+			"host_key": "hk",
+			"udp_over_tcp": true
 		  }
 		]
 	  }

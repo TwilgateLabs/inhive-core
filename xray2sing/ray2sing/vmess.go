@@ -58,10 +58,10 @@ func VmessSingbox(vmessURL string) (*T.Outbound, error) {
 	if decoded["scy"] != "" {
 		security = decoded["scy"]
 	}
+	// Leave PacketEncoding empty (upstream/runtime default = disabled) unless the
+	// subscription carries an explicit hint. Forcing xudp on a server without XUDP
+	// support can silently mishandle UDP-associated traffic.
 	packetEncoding := decoded["packetEncoding"]
-	if packetEncoding == "" {
-		packetEncoding = "xudp"
-	}
 	// vmess base64 JSON carries no fingerprint field; default to chrome so the
 	// TLS ClientHello isn't the trivially-detectable Go-default stack (DPI).
 	if decoded["tls"] == "tls" && decoded["fp"] == "" {
@@ -76,11 +76,14 @@ func VmessSingbox(vmessURL string) (*T.Outbound, error) {
 				Server:     decoded["add"],
 				ServerPort: port,
 			},
-			UUID:                        decoded["id"],
-			Security:                    security,
-			AlterId:                     toInt(decoded["aid"]),
-			GlobalPadding:               false,
-			AuthenticatedLength:         true,
+			UUID:          decoded["id"],
+			Security:      security,
+			AlterId:       toInt(decoded["aid"]),
+			GlobalPadding: false,
+			// Default false (upstream parity); no standard vmess base64 field
+			// signals it, and runtime negotiates the bit on the wire. Only set
+			// true on an explicit hint to stay safe on legacy non-TLS AEAD nodes.
+			AuthenticatedLength:         decoded["authenticatedLength"] == "true",
 			PacketEncoding:              packetEncoding,
 			OutboundTLSOptionsContainer: getTLSOptions(decoded),
 			Transport:                   transportOptions,
