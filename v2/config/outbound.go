@@ -48,7 +48,9 @@ func patchOutboundTLSTricks(base option.Outbound, configOpt InhiveOptions) optio
 	}
 
 	if base.Type == C.TypeDirect {
-		return patchOutboundFragment(base, configOpt)
+		// Direct outbounds get no TLS-tricks; the former patchOutboundFragment
+		// (dead TLSFragment write) was removed 2026-06-23.
+		return base
 	}
 
 	if tls == nil || !tls.Enabled || transport == nil {
@@ -59,47 +61,15 @@ func patchOutboundTLSTricks(base option.Outbound, configOpt InhiveOptions) optio
 		return base
 	}
 
-	base = patchOutboundFragment(base, configOpt)
-
 	if tls.TLSTricks == nil {
 		tls.TLSTricks = &option.TLSTricksOptions{}
 	}
 	tls.TLSTricks.MixedCaseSNI = tls.TLSTricks.MixedCaseSNI || configOpt.TLSTricks.MixedSNICase
 
-	if configOpt.TLSTricks.EnablePadding {
-		tls.TLSTricks.PaddingMode = "random"
-		tls.TLSTricks.PaddingSize = configOpt.TLSTricks.PaddingSize
-		tls.UTLS = &option.OutboundUTLSOptions{
-			Enabled:     true,
-			Fingerprint: "custom",
-		}
-		// fmt.Printf("--------------------%+v----%+v", tlsTricks.PaddingSize, configOpt)
-
-	}
-
-	// if tlsTricks.MixedCaseSNI || tlsTricks.PaddingMode != "" {
-	// 	// } else {
-	// 	// 	tls["tls_tricks"] = nil
-	// }
-	// fmt.Printf("-------%+v------------- ", tlsTricks)
-
-	return base
-}
-
-func patchOutboundFragment(base option.Outbound, configOpt InhiveOptions) option.Outbound {
-	if configOpt.TLSTricks.EnableFragment {
-		if opts, ok := base.Options.(option.DialerOptionsWrapper); ok {
-			dialer := opts.TakeDialerOptions()
-			dialer.TCPFastOpen = false
-			dialer.TLSFragment = option.TLSFragmentOptions{
-				Enabled: configOpt.TLSTricks.EnableFragment,
-				Size:    configOpt.TLSTricks.FragmentSize,
-				Sleep:   configOpt.TLSTricks.FragmentSleep,
-			}
-			opts.ReplaceDialerOptions(dialer)
-		}
-
-	}
+	// EnablePadding path removed 2026-06-23: it set TLSTricks.PaddingMode/PaddingSize
+	// (dead — no runtime consumer) + a coupled uTLS "custom" fingerprint that is only
+	// meaningful with that padding spec. The whole TLS-padding feature was a no-op since
+	// the sing-box upgrade. MixedCaseSNI stays live (honored by common/tls/{std,utls}_client).
 
 	return base
 }

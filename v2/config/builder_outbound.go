@@ -219,13 +219,10 @@ func setOutbounds(options *option.Options, input *option.Options, opt *InhiveOpt
 				Type: C.TypeDirect,
 				Options: &option.DirectOutboundOptions{
 					DialerOptions: option.DialerOptions{
+						// TLSFragment removed 2026-06-23 (dead — no runtime consumer of
+						// DialerOptions.TLSFragment). This direct outbound no longer
+						// fragments; native fragmentation is the route-action path.
 						TCPFastOpen: false,
-
-						TLSFragment: option.TLSFragmentOptions{
-							Enabled: true,
-							Size:    opt.TLSTricks.FragmentSize,
-							Sleep:   opt.TLSTricks.FragmentSleep,
-						},
 					},
 				},
 			},
