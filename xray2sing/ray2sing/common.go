@@ -139,44 +139,13 @@ func getTLSOptions(decoded map[string]string) T.OutboundTLSOptionsContainer {
 }
 
 func getTricksOptions(decoded map[string]string) *option.TLSTricksOptions {
-	trick := option.TLSTricksOptions{}
-	if decoded["mc"] == "1" {
-		trick.MixedCaseSNI = true
-	}
-	trick.PaddingMode = decoded["padmode"]
-	trick.PaddingSNI = decoded["padsni"]
-	trick.PaddingSize = decoded["padsize"]
-
-	if !trick.MixedCaseSNI && trick.PaddingMode == "" && trick.PaddingSNI == "" && trick.PaddingSize == "" {
+	// PaddingMode/PaddingSNI/PaddingSize (hiddify-lineage TLS padding tricks) were
+	// dead — nothing in the runtime ever read them — so they were removed
+	// 2026-06-23. Only MixedCaseSNI is live (utls_client.go/std_client.go honor it).
+	if decoded["mc"] != "1" {
 		return nil
 	}
-	return &trick
-}
-func getFragmentOptions(decoded map[string]string) option.TLSFragmentOptions {
-	trick := option.TLSFragmentOptions{}
-	fragment := decoded["fragment"]
-	if fragment != "" {
-		splt := strings.Split(fragment, ",")
-		if len(splt) > 2 {
-			if splt[0] == "tlshello" {
-				trick.Size = splt[1]
-				trick.Sleep = splt[2]
-			} else {
-				trick.Size = splt[0]
-				trick.Sleep = splt[1]
-			}
-		}
-	} else {
-		trick.Size = decoded["fgsize"]
-		trick.Sleep = decoded["fgsleep"]
-	}
-	if trick.Size != "" {
-		trick.Enabled = true
-	} else {
-		trick.Enabled = false
-	}
-
-	return trick
+	return &option.TLSTricksOptions{MixedCaseSNI: true}
 }
 func getMuxOptions(decoded map[string]string) *option.OutboundMultiplexOptions {
 	mux := option.OutboundMultiplexOptions{}
@@ -592,11 +561,13 @@ func getALPNversion(s []string) int {
 //		}
 //	}
 func getDialerOptions(decoded map[string]string) option.DialerOptions {
-	fragment := getFragmentOptions(decoded)
-	return T.DialerOptions{
-		// TCPFastOpen: !fragment.Enabled,
-		TLSFragment: fragment,
-	}
+	// Intentionally empty. The legacy hiddify-style per-outbound tls_fragment
+	// (Size/Sleep/Method/Range) was a dead no-op — nothing in the runtime ever
+	// read DialerOptions.TLSFragment — so it was removed 2026-06-23. Native TLS
+	// fragmentation is the upstream sing-box route-action path
+	// (metadata.TLSFragment -> tf.NewConn, which is SNI-aware). If per-outbound
+	// fragment dialing is ever wanted, wire tf.NewConn into the dialer here.
+	return option.DialerOptions{}
 }
 
 func decodeBase64IfNeeded(b64string string) (string, error) {
