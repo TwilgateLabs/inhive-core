@@ -47,6 +47,14 @@ type InhiveInstance struct {
 	// service stops or restarts. Nil when no service is running.
 	modeWatcherCancel context.CancelFunc
 	modeWatcherMu     sync.Mutex
+
+	// startCancel отменяет блокирующий olcrtc-старт (primary awaitReady, до ~30с)
+	// когда юзер отменяет connect повторным тапом (Dart → Stop). Хранится ОТДЕЛЬНО
+	// от lock: StartService держит static.lock весь блокирующий старт, поэтому Stop
+	// не может взять lock, пока не прервёт старт через этот cancel. Nil когда нет
+	// активного STARTING. См. start.go (set/clear) и stop.go (abort до lock).
+	startCancel   context.CancelFunc
+	startCancelMu sync.Mutex
 }
 
 var static = &InhiveInstance{
@@ -63,4 +71,39 @@ func init() {
 	// Default mode 1 (sing-box primary). Set explicitly so it survives any
 	// later refactor that re-zeroes the static struct.
 	static.currentMode.Store(1)
+}
+
+// setStartCancel сохраняет cancel блокирующего старта. Defensive: отменяет
+// предыдущий если остался (при сериализованном через static.lock старте не
+// должно случаться).
+func (s *InhiveInstance) setStartCancel(cancel context.CancelFunc) {
+	s.startCancelMu.Lock()
+	if s.startCancel != nil {
+		s.startCancel()
+	}
+	s.startCancel = cancel
+	s.startCancelMu.Unlock()
+}
+
+// clearStartCancel забывает cancel после того как старт завершился (успехом или
+// ошибкой). НЕ отменяет: на успехе startCtx должен жить дальше под работающим
+// box (он дериватив static.BaseContext, не request-scoped).
+func (s *InhiveInstance) clearStartCancel() {
+	s.startCancelMu.Lock()
+	s.startCancel = nil
+	s.startCancelMu.Unlock()
+}
+
+// abortStart прерывает идущий блокирующий старт, если он есть. Зовётся из Stop()
+// ДО взятия static.lock. No-op когда старта нет (ref уже nil — после успеха
+// очищен через clearStartCancel). Cancel читаем под мьютексом, зовём вне —
+// context.CancelFunc идемпотентна и потокобезопасна.
+func (s *InhiveInstance) abortStart() {
+	s.startCancelMu.Lock()
+	cancel := s.startCancel
+	s.startCancelMu.Unlock()
+	if cancel != nil {
+		Log(LogLevel_INFO, LogType_CORE, "abortStart: cancelling in-flight connect")
+		cancel()
+	}
 }

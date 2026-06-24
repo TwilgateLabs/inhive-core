@@ -166,8 +166,20 @@ func StartService(ctx context.Context, in *StartRequest) (coreResponse *CoreInfo
 	libbox.SetMemoryLimit(C.IsIos || !in.DisableMemoryLimit)
 	WriteSharedLog("StartService: SetMemoryLimit done")
 
+	// Отменяемый старт: оборачиваем ctx в startCtx и сохраняем cancel ДО
+	// NewService. Блокирующий olcrtc-старт (primary awaitReady, до ~30с) идёт
+	// ВНУТРИ NewService и держит static.lock; static.StartedService (со своим
+	// cancel) присваивается только ПОСЛЕ возврата NewService — слишком поздно
+	// чтобы прервать. Stop() дёргает abortStart() ДО lock → startCtx отменяется
+	// → box ctx (дериватив) → olcrtc runCtx → awaitReady просыпается. ctx здесь =
+	// static.BaseContext (долгоживущий, не request-scoped), так что startCtx живёт
+	// под работающим box; на успехе НЕ отменяем — только забываем ref (clear).
+	startCtx, cancelStart := context.WithCancel(ctx)
+	static.setStartCancel(cancelStart)
+	defer static.clearStartCancel()
+
 	WriteSharedLog("StartService: NewService begin (sing-box engine instantiation)")
-	instance, err := NewService(ctx, *options)
+	instance, err := NewService(startCtx, *options)
 	if err != nil {
 		WriteSharedLogf("StartService: NewService FAILED: %v", err)
 		return errorWrapper(MessageType_START_SERVICE, err)

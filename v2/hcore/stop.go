@@ -22,6 +22,12 @@ func Stop() (coreResponse *CoreInfoResponse, err error) {
 		coreResponse, err = errorWrapper(MessageType_UNEXPECTED_ERROR, recovered_err)
 	})
 
+	// Кроссплатформенная отмена connect: прерываем идущий блокирующий старт
+	// (olcrtc primary awaitReady, до ~30с) ДО взятия static.lock — иначе Stop
+	// повиснет за StartService, который держит lock весь старт. No-op если старта
+	// нет (обычный disconnect). См. static.abortStart / start.go.
+	static.abortStart()
+
 	static.lock.Lock()
 	defer static.lock.Unlock()
 
