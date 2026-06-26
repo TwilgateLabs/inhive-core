@@ -23,6 +23,7 @@ import (
 	"context"
 	"time"
 
+	"github.com/sagernet/sing-box/common/urltest"
 	"github.com/sagernet/sing-box/include"
 	"github.com/sagernet/sing-box/option"
 	"github.com/twilgate/inhive-core/v2/config"
@@ -61,22 +62,46 @@ func (s *CoreService) UrlTestConfig(ctx context.Context, in *UrlTestConfigReques
 		return &UrlTestConfigResponse{Error: "parse config: " + jsonErr.Error()}, nil
 	}
 
-	// Side-instance: TUN / system-proxy / clash-api all forced off, SOCKS5 on a
-	// random localhost port (RunInstanceQuiet). The 250ms settle delay lives
-	// inside RunInstanceQuiet — BEFORE the measurement below — so DelayMs is the
-	// genuine RTT through the outbound, not inflated by instance bring-up.
+	if len(opts.Outbounds) == 0 {
+		return &UrlTestConfigResponse{Error: "no outbounds in config"}, nil
+	}
+	// Probe through the FIRST outbound (the exit), NOT the side-instance's SOCKS5
+	// default route. For chained transports (utproto = a vless with detour→utproto
+	// helper) the helper is a transport layer, not an exit — routing via the
+	// SOCKS5 default could pick the helper and the probe fails with EOF even when
+	// the server works. Dialing the main outbound drives the whole detour chain,
+	// so the verdict reflects real end-to-end health.
+	mainTag := opts.Outbounds[0].Tag
+
+	// Side-instance: TUN / system-proxy / clash-api all forced off (RunInstanceQuiet).
+	// The 250ms settle delay lives inside RunInstanceQuiet — BEFORE the probe — so
+	// the measured delay is the genuine RTT, not inflated by instance bring-up.
 	inst, instErr := RunInstanceQuiet(ctx, nil, &opts)
 	if instErr != nil {
 		return &UrlTestConfigResponse{Error: "run instance: " + instErr.Error()}, nil
 	}
 	defer inst.Close()
 
-	start := time.Now()
-	// Real HEAD probe THROUGH the side-instance outbound (SOCKS5 → outbound →
-	// url). ContentFromURL fails on non-2xx/204 or any transport error → honest
-	// "doesn't work".
-	if _, probeErr := inst.ContentFromURL("HEAD", url, timeout); probeErr != nil {
-		return &UrlTestConfigResponse{Error: probeErr.Error()}, nil
+	b := inst.Box()
+	if b == nil {
+		return &UrlTestConfigResponse{Error: "side-instance not ready"}, nil
 	}
-	return &UrlTestConfigResponse{DelayMs: int32(time.Since(start).Milliseconds())}, nil
+	detour, ok := b.Outbound().Outbound(mainTag)
+	if !ok {
+		return &UrlTestConfigResponse{Error: "main outbound not found: " + mainTag}, nil
+	}
+
+	// urltest.URLTest does a real HTTP HEAD to the probe URL THROUGH the outbound's
+	// own dialer (TCP-over-QUIC for hy2, the detour chain for utproto, etc.) and
+	// requires the response — dead/blocked → error, no false positive.
+	testCtx, cancel := context.WithTimeout(ctx, timeout)
+	defer cancel()
+	delay, terr := urltest.URLTest(testCtx, url, detour)
+	if terr != nil {
+		return &UrlTestConfigResponse{Error: terr.Error()}, nil
+	}
+	if delay == 0 {
+		return &UrlTestConfigResponse{Error: "zero delay"}, nil
+	}
+	return &UrlTestConfigResponse{DelayMs: int32(delay)}, nil
 }
