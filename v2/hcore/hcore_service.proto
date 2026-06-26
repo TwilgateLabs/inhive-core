@@ -17,6 +17,9 @@ service Core {
   rpc Parse (ParseRequest) returns (ParseResponse);
   // Wave 13D — see BootstrapFetchRequest in hcore.proto for the full contract.
   rpc BootstrapFetch (BootstrapFetchRequest) returns (BootstrapFetchResponse);
+  // Honest per-server ping via a side-instance — see UrlTestConfigRequest in
+  // hcore.proto. Works while the VPN is disconnected, no main-box dependency.
+  rpc UrlTestConfig (UrlTestConfigRequest) returns (UrlTestConfigResponse);
   rpc ChangeInhiveSettings (ChangeInhiveSettingsRequest) returns (CoreInfoResponse);
   //rpc GenerateConfig (GenerateConfigRequest) returns (GenerateConfigResponse);
   rpc StartService (StartRequest) returns (CoreInfoResponse);

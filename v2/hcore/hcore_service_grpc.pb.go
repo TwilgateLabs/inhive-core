@@ -29,6 +29,7 @@ const (
 	Core_Setup_FullMethodName                 = "/hcore.Core/Setup"
 	Core_Parse_FullMethodName                 = "/hcore.Core/Parse"
 	Core_BootstrapFetch_FullMethodName        = "/hcore.Core/BootstrapFetch"
+	Core_UrlTestConfig_FullMethodName         = "/hcore.Core/UrlTestConfig"
 	Core_ChangeInhiveSettings_FullMethodName  = "/hcore.Core/ChangeInhiveSettings"
 	Core_StartService_FullMethodName          = "/hcore.Core/StartService"
 	Core_Stop_FullMethodName                  = "/hcore.Core/Stop"
@@ -60,6 +61,9 @@ type CoreClient interface {
 	Parse(ctx context.Context, in *ParseRequest, opts ...grpc.CallOption) (*ParseResponse, error)
 	// Wave 13D — see BootstrapFetchRequest in hcore.proto for the full contract.
 	BootstrapFetch(ctx context.Context, in *BootstrapFetchRequest, opts ...grpc.CallOption) (*BootstrapFetchResponse, error)
+	// Honest per-server ping via a side-instance — see UrlTestConfigRequest in
+	// hcore.proto. Works while the VPN is disconnected, no main-box dependency.
+	UrlTestConfig(ctx context.Context, in *UrlTestConfigRequest, opts ...grpc.CallOption) (*UrlTestConfigResponse, error)
 	ChangeInhiveSettings(ctx context.Context, in *ChangeInhiveSettingsRequest, opts ...grpc.CallOption) (*CoreInfoResponse, error)
 	// rpc GenerateConfig (GenerateConfigRequest) returns (GenerateConfigResponse);
 	StartService(ctx context.Context, in *StartRequest, opts ...grpc.CallOption) (*CoreInfoResponse, error)
@@ -221,6 +225,16 @@ func (c *coreClient) BootstrapFetch(ctx context.Context, in *BootstrapFetchReque
 	cOpts := append([]grpc.CallOption{grpc.StaticMethod()}, opts...)
 	out := new(BootstrapFetchResponse)
 	err := c.cc.Invoke(ctx, Core_BootstrapFetch_FullMethodName, in, out, cOpts...)
+	if err != nil {
+		return nil, err
+	}
+	return out, nil
+}
+
+func (c *coreClient) UrlTestConfig(ctx context.Context, in *UrlTestConfigRequest, opts ...grpc.CallOption) (*UrlTestConfigResponse, error) {
+	cOpts := append([]grpc.CallOption{grpc.StaticMethod()}, opts...)
+	out := new(UrlTestConfigResponse)
+	err := c.cc.Invoke(ctx, Core_UrlTestConfig_FullMethodName, in, out, cOpts...)
 	if err != nil {
 		return nil, err
 	}
@@ -409,6 +423,9 @@ type CoreServer interface {
 	Parse(context.Context, *ParseRequest) (*ParseResponse, error)
 	// Wave 13D — see BootstrapFetchRequest in hcore.proto for the full contract.
 	BootstrapFetch(context.Context, *BootstrapFetchRequest) (*BootstrapFetchResponse, error)
+	// Honest per-server ping via a side-instance — see UrlTestConfigRequest in
+	// hcore.proto. Works while the VPN is disconnected, no main-box dependency.
+	UrlTestConfig(context.Context, *UrlTestConfigRequest) (*UrlTestConfigResponse, error)
 	ChangeInhiveSettings(context.Context, *ChangeInhiveSettingsRequest) (*CoreInfoResponse, error)
 	// rpc GenerateConfig (GenerateConfigRequest) returns (GenerateConfigResponse);
 	StartService(context.Context, *StartRequest) (*CoreInfoResponse, error)
@@ -476,6 +493,9 @@ func (UnimplementedCoreServer) Parse(context.Context, *ParseRequest) (*ParseResp
 }
 func (UnimplementedCoreServer) BootstrapFetch(context.Context, *BootstrapFetchRequest) (*BootstrapFetchResponse, error) {
 	return nil, status.Error(codes.Unimplemented, "method BootstrapFetch not implemented")
+}
+func (UnimplementedCoreServer) UrlTestConfig(context.Context, *UrlTestConfigRequest) (*UrlTestConfigResponse, error) {
+	return nil, status.Error(codes.Unimplemented, "method UrlTestConfig not implemented")
 }
 func (UnimplementedCoreServer) ChangeInhiveSettings(context.Context, *ChangeInhiveSettingsRequest) (*CoreInfoResponse, error) {
 	return nil, status.Error(codes.Unimplemented, "method ChangeInhiveSettings not implemented")
@@ -673,6 +693,24 @@ func _Core_BootstrapFetch_Handler(srv interface{}, ctx context.Context, dec func
 	}
 	handler := func(ctx context.Context, req interface{}) (interface{}, error) {
 		return srv.(CoreServer).BootstrapFetch(ctx, req.(*BootstrapFetchRequest))
+	}
+	return interceptor(ctx, in, info, handler)
+}
+
+func _Core_UrlTestConfig_Handler(srv interface{}, ctx context.Context, dec func(interface{}) error, interceptor grpc.UnaryServerInterceptor) (interface{}, error) {
+	in := new(UrlTestConfigRequest)
+	if err := dec(in); err != nil {
+		return nil, err
+	}
+	if interceptor == nil {
+		return srv.(CoreServer).UrlTestConfig(ctx, in)
+	}
+	info := &grpc.UnaryServerInfo{
+		Server:     srv,
+		FullMethod: Core_UrlTestConfig_FullMethodName,
+	}
+	handler := func(ctx context.Context, req interface{}) (interface{}, error) {
+		return srv.(CoreServer).UrlTestConfig(ctx, req.(*UrlTestConfigRequest))
 	}
 	return interceptor(ctx, in, info, handler)
 }
@@ -959,6 +997,10 @@ var Core_ServiceDesc = grpc.ServiceDesc{
 		{
 			MethodName: "BootstrapFetch",
 			Handler:    _Core_BootstrapFetch_Handler,
+		},
+		{
+			MethodName: "UrlTestConfig",
+			Handler:    _Core_UrlTestConfig_Handler,
 		},
 		{
 			MethodName: "ChangeInhiveSettings",

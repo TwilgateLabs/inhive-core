@@ -9,6 +9,10 @@ shipped standalone).
 
 ## [Unreleased]
 
+### Added (2026-06-26 — honest per-server ping)
+
+- **New `UrlTestConfig` gRPC method for honest server ping.** The app can now ask the core to ping a single server *honestly*, regardless of VPN state: the core spins a throwaway side-instance from a one-server config, runs a real HEAD probe to `generate_204` *through that server's outbound*, measures the round-trip, and tears the instance down — without touching the main VPN box (same isolated `RunInstanceQuiet` scaffolding as BootstrapFetch, and the shared `urltest` probe). A working server returns its real latency; a dead or DPI-blocked one returns an error — no false "reachable". This is what lets the app retire its TCP-connect ping, which only checked whether a TCP port was open and so lied for Reality (port open but protocol blocked → fake green) and for hysteria2/QUIC (no TCP listener on the UDP port → fake blank). Honest for hysteria2/QUIC and Reality alike. Verified with a runtime test (live outbound → real ms; unroutable outbound → error + 0 ms, no false positive).
+
 ### Added (2026-06-26 — on-device memory diagnostics)
 
 - **Memory sampler in the log.** The core now prints a compact memory line every 10 seconds — `mem: phys_footprint=… heap=… sys=… goroutines=… gc=…` — so you can watch the core's memory on the phone straight from the in-app logs (no Xcode needed). On iOS it includes `phys_footprint`, the exact metric the system uses to decide whether to kill the tunnel. Read-only; runs on every platform and stops cleanly when the VPN stops.
