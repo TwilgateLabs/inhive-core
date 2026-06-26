@@ -150,6 +150,7 @@ func urisFromContainerObject(raw json.RawMessage) []string {
 func uriFromAnyEntry(raw json.RawMessage) (string, bool) {
 	var probe struct {
 		Protocol string          `json:"protocol"`
+		Type     string          `json:"type"`
 		Method   string          `json:"method"`
 		Password json.RawMessage `json:"password"`
 		Server   string          `json:"server"`
@@ -160,11 +161,17 @@ func uriFromAnyEntry(raw json.RawMessage) (string, bool) {
 	if probe.Protocol != "" {
 		return uriFromXrayOutbound(raw, probe.Protocol)
 	}
-	// No "protocol" but looks like a SIP008 server entry.
+	// Native sing-box outbound: keyed by "type" (vs Xray's "protocol"). A sing-box
+	// shadowsocks outbound ALSO carries method+password, so this MUST precede the
+	// SIP008 check below or it would be misrouted.
+	if probe.Type != "" {
+		return uriFromSingboxOutbound(raw, probe.Type)
+	}
+	// No "protocol"/"type" but looks like a SIP008 server entry.
 	if probe.Method != "" && probe.Server != "" {
 		return uriFromSIP008(raw)
 	}
-	skip("entry", "no recognizable protocol/method key")
+	skip("entry", "no recognizable protocol/method/type key")
 	return "", false
 }
 

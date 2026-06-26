@@ -7,6 +7,7 @@ require (
 	github.com/sagernet/sing-box v1.13.0
 	github.com/sagernet/wireguard-go v0.0.2-beta.1.0.20260224074747-506b7631853c
 	github.com/spf13/cobra v1.10.2
+	gopkg.in/yaml.v3 v3.0.1
 // github.com/xtls/xray-core v0.0.0-00010101000000-000000000000
 )
 

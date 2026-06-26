@@ -9,6 +9,14 @@ shipped standalone).
 
 ## [Unreleased]
 
+### Added (2026-06-26 — universal subscription formats)
+
+Providers serve different container formats based on the client's User-Agent: a client that presents as sing-box gets a sing-box JSON config, a clash client gets Clash YAML, others get base64 share-links — and the protocol set can differ per format (e.g. some only include hysteria2 in the sing-box/Shadowrocket variants). The parser now ingests the two formats we were missing, so we can consume whatever a provider sends instead of falling back to a reduced share-link set.
+
+- **Native sing-box JSON ingest.** Outbounds keyed by `type` (vs Xray's `protocol`) with flat fields and nested `tls`/`transport` are now rebuilt into share-links and parsed through the same single per-protocol pipeline (hysteria2, vless incl. reality, vmess, trojan, shadowsocks, tuic). Group/system outbounds (`selector`/`urltest`/`direct`/`block`) are filtered, never turned into fake nodes. (`singbox_ingest.go`, dispatched from `json_ingest.go` on the `type` key before the SIP008 check.)
+- **Clash / Clash.Meta YAML ingest.** A `proxies:` list (clash field names: `port`/`cipher`/`servername`/`skip-cert-verify`/`network`+`*-opts`/`reality-opts`) is transcoded the same way; `proxy-groups`/`rules` are ignored. (`clash_ingest.go`; `yaml.v3` was already in the module graph — no new dependency.)
+- Both are guarded by round-trip tests; everything still funnels through the one URI-parser source of truth, so list, ping and connect can't disagree.
+
 ### Fixed (2026-06-26 — ping reliability)
 
 The honest per-server ping was truthful but brittle: it spun a brand-new side-instance and made a *single* cold probe, so any first-attempt hiccup — a cold DNS answer, one dropped SYN, a TLS/WebSocket handshake racing the instance's 250 ms settle — was reported as "dead". Pinging the same working server a few times could show offline, offline, offline, then online, which read as the app lying. A comparison of how other clients ping (sing-box's own warm urltest group, Clash.Meta/Mihomo) showed the difference: they keep a warm instance and/or never declare a node dead on one failed probe. We now do the cheap, equivalent thing.

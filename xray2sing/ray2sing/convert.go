@@ -160,6 +160,10 @@ func GenerateConfigLite(input string, useXrayWhenPossible bool) (*option.Options
 	// centrally for leak protection). See json_ingest.go for the rationale.
 	if uris, ok := ingestJSON(input); ok {
 		input = uris
+	} else if uris, ok := ingestClashYAML(input); ok {
+		// Clash / Clash.Meta YAML (proxies:) — the other dominant container
+		// format. Same rebuild-to-URI contract as the JSON path.
+		input = uris
 	}
 
 	configArray := expandDecodedConfig(input)
