@@ -95,6 +95,14 @@ func Hysteria2Singbox(hysteria2Url string) (*T.Outbound, error) {
 		// TurnRelay: turnRelay,
 	}
 
+	// explicit alpn= from the URI (hy2 export extension). When absent, leave ALPN nil
+	// so sing-quic injects its h3 default; when present, honor it (e.g. h3,custom).
+	// Mirrors hysteria1 (hysteria.go). The value was previously parsed-then-ignored.
+	// (Audit 2026-06-26.)
+	if alpn := getOneOfN(decoded, "", "alpn"); alpn != "" {
+		h2opts.TLS.ALPN = strings.Split(alpn, ",")
+	}
+
 	// bandwidth hints (upmbps/downmbps) — v2rayN/Happ hy2 export extension.
 	// Mirrors hysteria1; enables Brutal congestion control (SendBPS/ReceiveBPS).
 	if upMbps, e := strconv.Atoi(strings.TrimSpace(getOneOfN(decoded, "", "upmbps", "up"))); e == nil {

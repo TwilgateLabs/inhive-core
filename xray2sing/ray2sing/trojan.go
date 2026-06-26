@@ -2,6 +2,7 @@ package ray2sing
 
 import (
 	T "github.com/sagernet/sing-box/option"
+	E "github.com/sagernet/sing/common/exceptions"
 )
 
 func TrojanSingbox(trojanURL string) (*T.Outbound, error) {
@@ -10,6 +11,14 @@ func TrojanSingbox(trojanURL string) (*T.Outbound, error) {
 		return nil, err
 	}
 	decoded := u.Params
+
+	// XTLS-Vision flow has NO field in sing-box's TrojanOutboundOptions (unlike VLESS).
+	// Silently dropping it builds a plain Trojan-TLS node that dies in the handshake
+	// against a Vision server. Surface a diagnosable error instead, mirroring the VLESS
+	// encryption guard. Fires only when flow is explicitly non-empty/non-none. (Audit 2026-06-26.)
+	if flow := decoded["flow"]; flow != "" && flow != "none" {
+		return nil, E.New("Trojan flow '" + flow + "' (XTLS-Vision) not supported: sing-box TrojanOutboundOptions has no flow field")
+	}
 
 	transportOptions, err := getTransportOptions(decoded)
 	if err != nil {

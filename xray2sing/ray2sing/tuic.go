@@ -56,6 +56,17 @@ func TuicSingbox(tuicUrl string) (*T.Outbound, error) {
 		udpRelayMode = getOneOfN(decoded, "", "udp_relay_mode", "udprelaymode")
 	}
 
+	// SNI: explicit sni= wins; otherwise fall back to the connect host so a hostname
+	// endpoint still sends SNI (matches Happ) and keeps TLS cert verification. Only a
+	// bare-IP server legitimately omits SNI (isIPOnly → disable_sni), exactly like
+	// hysteria2.go. The old `DisableSNI: decoded["sni"]==""` force-disabled SNI for
+	// EVERY hostname endpoint without an explicit sni= — breaking SNI-routed fronts
+	// AND silently dropping cert verification. (Audit 2026-06-26.)
+	sni := decoded["sni"]
+	if sni == "" {
+		sni = u.Hostname
+	}
+
 	result := T.Outbound{
 		Type: "tuic",
 		Tag:  u.Name,
@@ -71,8 +82,8 @@ func TuicSingbox(tuicUrl string) (*T.Outbound, error) {
 			OutboundTLSOptionsContainer: T.OutboundTLSOptionsContainer{
 				TLS: &T.OutboundTLSOptions{
 					Enabled:    true,
-					DisableSNI: decoded["sni"] == "",
-					ServerName: decoded["sni"],
+					DisableSNI: isIPOnly(sni),
+					ServerName: sni,
 					// getOneOfN normalizes both the lookup key and the variants, so the
 					// underscore form allow_insecure (which normalizeStr turns into the
 					// key "allow insecure") is matched too — a direct map["allowinsecure"]

@@ -84,7 +84,11 @@ func getTLSOptions(decoded map[string]string) T.OutboundTLSOptionsContainer {
 		ECH:        ECHOpts,
 		TLSTricks:  getTricksOptions(decoded),
 	}
-	if fp != "" && !tlsOptions.DisableSNI {
+	// uTLS fingerprint must be honored even with disable_sni — a nosni=1 node still
+	// benefits from a real browser ClientHello (anti-DPI). sing-box supports
+	// uTLS+disable_sni; the old `&& !DisableSNI` guard silently degraded fp nodes to
+	// the std-TLS ClientHello. (Audit 2026-06-26.)
+	if fp != "" {
 		tlsOptions.UTLS = &option.OutboundUTLSOptions{
 			Enabled:     true,
 			Fingerprint: fp,
@@ -106,17 +110,33 @@ func getTLSOptions(decoded map[string]string) T.OutboundTLSOptionsContainer {
 	}
 
 	if alpn, ok := decoded["alpn"]; ok && alpn != "" {
-		net := getOneOfN(decoded, "net")
-		if net == "" {
-			net = getOneOfN(decoded, "type")
-		}
-		if net == "httpupgrade" || net == "ws" || net == "grpc" || net == "h2" {
-			tlsOptions.ALPN = []string{"h2", "http/1.1"}
-		} else {
+		// net = the transport ("ws"/"grpc"/"xhttp"/...). vmess-legacy URIs spell it
+		// "net", vless/trojan spell it "type". getOneOfN(dic, default, keys...) — the
+		// keys were MISSING here (getOneOfN(decoded, "net") => default "net", no keys),
+		// so net was ALWAYS the literal string "net" and the per-transport ALPN clamp
+		// below was DEAD CODE: every config fell through to the raw user split, letting
+		// "h2" leak onto a ws transport and EOF the upgrade. (Root cause found 2026-06-26.)
+		net := getOneOfN(decoded, "", "net", "type")
+		switch net {
+		case "httpupgrade", "ws":
+			// HTTP/1.1-based transports. The WebSocket / httpupgrade handshake is an
+			// HTTP/1.1 Upgrade — it CANNOT run over an HTTP/2 connection. If "h2" is
+			// offered in ALPN the server may pick HTTP/2 at TLS-time and the upgrade
+			// dies with EOF. Xray clamps ws/httpupgrade to http/1.1 regardless of the
+			// subscription's alpn; we must too, or every ws+TLS node is a coin-flip
+			// (works only when the server happens to fall back to http/1.1).
+			// Bug 2026-06-26: foreign sub vless+ws alpn=http/1.1,h2 → EOF until h2 dropped.
+			tlsOptions.ALPN = []string{"http/1.1"}
+		case "grpc", "h2":
+			// HTTP/2-based transports negotiate h2 exclusively.
+			tlsOptions.ALPN = []string{"h2"}
+		default:
 			tlsOptions.ALPN = strings.Split(alpn, ",")
-			isXhttp := getOneOfN(decoded, "", "type") == "xhttp" || getOneOfN(decoded, "", "net") == "xhttp"
-			if getALPNversion(tlsOptions.ALPN) == 3 && isXhttp {
-				tlsOptions.UTLS = nil //TODO utls quic has bug (h3 only)
+			// uTLS has no HTTP/3 ClientHello support in this build; leaving it enabled
+			// for an h3 ALPN silently breaks the node. The guard was wrongly scoped to
+			// xhttp only — net=quic+fp hit the exact same h3-uTLS bug. (Audit 2026-06-26.)
+			if getALPNversion(tlsOptions.ALPN) == 3 {
+				tlsOptions.UTLS = nil // utls has no h3 ClientHello (h3-only ALPN)
 			}
 		}
 
@@ -216,7 +236,17 @@ func getTransportOptions(decoded map[string]string) (*option.V2RayTransportOptio
 			transportOptions.HTTPOptions.Method = m
 		}
 		if host != "" {
-			transportOptions.HTTPOptions.Host = badoption.Listable[string]{host}
+			// Xray HTTP/2 (net=h2) supports a comma-separated Host LIST for rotation.
+			// Collapsing it into one element produces a bogus single host "a.com,b.com".
+			// Scope strictly to case "http" — ws/httpupgrade use a single Host value.
+			// (Audit 2026-06-26.) Single host → 1-elem slice, byte-identical.
+			hosts := make([]string, 0, 2)
+			for _, h := range strings.Split(host, ",") {
+				if h = strings.TrimSpace(h); h != "" {
+					hosts = append(hosts, h)
+				}
+			}
+			transportOptions.HTTPOptions.Host = badoption.Listable[string](hosts)
 		}
 		httpPath := path
 		if httpPath == "" {

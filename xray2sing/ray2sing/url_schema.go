@@ -4,6 +4,7 @@ import (
 	"net/url"
 	"regexp"
 	"strings"
+	"unicode/utf8"
 
 	T "github.com/sagernet/sing-box/option"
 )
@@ -54,8 +55,13 @@ func ParseUrl(inputURL string, defaultPort uint16) (*UrlSchema, error) {
 	if data.Scheme == "ss" && isBase64CharsOnly(data.Username) {
 		userInfo, err := decodeBase64IfNeeded(data.Username)
 
-		// fmt.Print(userInfo)
-		if err == nil && isValidChar(userInfo) {
+		// Decode-then-validate, NOT a character whitelist: SIP002 userinfo is
+		// base64("method:password"). Accept the decode iff it yields printable text
+		// containing a ':'. The old isValidChar() whitelist of "allowed" punctuation
+		// silently dropped real passwords containing '.', ',', '?', ';', brackets, etc.
+		// → method fell back to the raw base64 blob (broken node). Structurally, a
+		// whitelist can never keep up with arbitrary credential bytes. (Audit 2026-06-26.)
+		if err == nil && strings.ContainsRune(userInfo, ':') && isPrintableText(userInfo) {
 			// Split on the FIRST colon only: SS-2022 (2022-blake3-*) passwords are
 			// themselves base64 and contain ':' (method:uPSK:iPSK, or a single PSK
 			// with '/' '+' '='), so strings.Split + len==2 dropped the whole decode
@@ -136,15 +142,28 @@ func getPassword(u *url.URL) string {
 	return ""
 }
 
-var base64CharRegex = regexp.MustCompile(`^[A-Za-z0-9+/=]+$`)
+// base64CharRegex includes the URL-safe alphabet ('-','_') so SIP002 userinfo
+// encoded with base64url still reaches the decoder (decodeBase64FaultTolerant tries
+// Std then URL). The old std-only set dropped url-safe blobs before decoding. (Audit 2026-06-26.)
+var base64CharRegex = regexp.MustCompile(`^[A-Za-z0-9+/=_-]+$`)
 
 func isBase64CharsOnly(s string) bool {
 	return base64CharRegex.MatchString(s)
 }
 
-var validCharRegex = regexp.MustCompile(`^[A-Za-z0-9+/=_)(: !~@#$%^&*-]+$`)
-
-func isValidChar(s string) bool {
-
-	return validCharRegex.MatchString(s)
+// isPrintableText reports whether s is valid UTF-8 with no ASCII control bytes
+// (tab excepted) — i.e. plausible decoded credential text, not binary that a
+// non-base64 string happened to decode into. Replaces the old isValidChar()
+// punctuation whitelist: we validate the decoded RESULT instead of gating input
+// characters, so arbitrary-but-printable passwords survive. (Audit 2026-06-26.)
+func isPrintableText(s string) bool {
+	if !utf8.ValidString(s) {
+		return false
+	}
+	for _, r := range s {
+		if (r < 0x20 && r != '\t') || r == 0x7f {
+			return false
+		}
+	}
+	return true
 }

@@ -182,17 +182,31 @@ type xrayOutbound struct {
 }
 
 type xrayStream struct {
-	Network         string                 `json:"network"`
-	Security        string                 `json:"security"`
-	TLSSettings     *xrayTLSSettings       `json:"tlsSettings"`
-	RealitySettings *xrayRealitySettings   `json:"realitySettings"`
-	WSSettings      *xrayWSSettings        `json:"wsSettings"`
-	HTTPUpgrade     *xrayWSSettings        `json:"httpupgradeSettings"`
-	GRPCSettings    *xrayGRPCSettings      `json:"grpcSettings"`
-	HTTPSettings    *xrayHTTPSettings      `json:"httpSettings"`
-	XHTTPSettings   *xrayXHTTPSettings     `json:"xhttpSettings"`
-	SplitHTTP       *xrayXHTTPSettings     `json:"splithttpSettings"`
-	TCPSettings     map[string]interface{} `json:"tcpSettings"`
+	Network         string               `json:"network"`
+	Security        string               `json:"security"`
+	TLSSettings     *xrayTLSSettings     `json:"tlsSettings"`
+	RealitySettings *xrayRealitySettings `json:"realitySettings"`
+	WSSettings      *xrayWSSettings      `json:"wsSettings"`
+	HTTPUpgrade     *xrayWSSettings      `json:"httpupgradeSettings"`
+	GRPCSettings    *xrayGRPCSettings    `json:"grpcSettings"`
+	HTTPSettings    *xrayHTTPSettings    `json:"httpSettings"`
+	XHTTPSettings   *xrayXHTTPSettings   `json:"xhttpSettings"`
+	SplitHTTP       *xrayXHTTPSettings   `json:"splithttpSettings"`
+	TCPSettings     *xrayTCPSettings     `json:"tcpSettings"`
+}
+
+// xrayTCPSettings models the TCP transport's HTTP/1.1 header obfuscation
+// (tcpSettings.header.type=http). Xray stores request path and Host headers as
+// ARRAYS. The field was previously a dead map[string]interface{} (never read), so
+// the obfuscation was silently dropped on JSON ingest. (Audit 2026-06-26.)
+type xrayTCPSettings struct {
+	Header struct {
+		Type    string `json:"type"`
+		Request struct {
+			Path    []string            `json:"path"`
+			Headers map[string][]string `json:"headers"`
+		} `json:"request"`
+	} `json:"header"`
 }
 
 type xrayTLSSettings struct {
@@ -229,9 +243,10 @@ type xrayHTTPSettings struct {
 }
 
 type xrayXHTTPSettings struct {
-	Path string `json:"path"`
-	Host string `json:"host"`
-	Mode string `json:"mode"`
+	Path  string          `json:"path"`
+	Host  string          `json:"host"`
+	Mode  string          `json:"mode"`
+	Extra json.RawMessage `json:"extra"`
 }
 
 // uriFromXrayOutbound builds the matching share-link URI for the supported
@@ -501,6 +516,27 @@ func applyNetworkParamsToQuery(q url.Values, net string, st *xrayStream) {
 			if x.Mode != "" {
 				q.Set("mode", x.Mode)
 			}
+			if len(x.Extra) > 0 {
+				// Forward the xhttp `extra` blob (split-download endpoint, custom
+				// headers, noGRPCHeader). getTransportOptions unmarshals decoded["extra"]
+				// into XHTTPExtra; without this the JSON path silently dropped the whole
+				// split-download config. (Audit 2026-06-26.)
+				q.Set("extra", string(x.Extra))
+			}
+		}
+	case "tcp":
+		// TCP HTTP-header obfuscation (tcpSettings.header.type=http). Promote to the
+		// http transport via headerType=http (common.go:208), consistent with the
+		// share-link path. Xray stores request path & Host as ARRAYS — take element [0].
+		// Plain TCP (no http header) leaves the query untouched → byte-identical. (Audit 2026-06-26.)
+		if t := st.TCPSettings; t != nil && strings.EqualFold(t.Header.Type, "http") {
+			q.Set("headerType", "http")
+			if p := t.Header.Request.Path; len(p) > 0 && p[0] != "" {
+				q.Set("path", p[0])
+			}
+			if h := t.Header.Request.Headers["Host"]; len(h) > 0 && h[0] != "" {
+				q.Set("host", h[0])
+			}
 		}
 	}
 }
@@ -592,6 +628,20 @@ func applyStreamToVmessMap(m map[string]interface{}, st *xrayStream) {
 			}
 			if x.Host != "" {
 				m["host"] = x.Host
+			}
+		}
+	case "tcp":
+		// vmess+tcp HTTP-header obfs (classic v2ray): the header type lives in the
+		// vmess `type` field; common.go:208 promotes net=tcp+type=http to the http
+		// transport. Xray stores path & Host as arrays — take element [0]. Previously
+		// the dead TCPSettings map dropped this silently. (Audit 2026-06-26.)
+		if t := st.TCPSettings; t != nil && strings.EqualFold(t.Header.Type, "http") {
+			m["type"] = "http"
+			if p := t.Header.Request.Path; len(p) > 0 && p[0] != "" {
+				m["path"] = p[0]
+			}
+			if h := t.Header.Request.Headers["Host"]; len(h) > 0 && h[0] != "" {
+				m["host"] = h[0]
 			}
 		}
 	}
