@@ -35,6 +35,9 @@ func Stop() (coreResponse *CoreInfoResponse, err error) {
 	// Tear down Phase 2 watcher before the daemon — once box.Outbound() is
 	// gone, monitoring.Get(ctx) panics through the broadcaster.
 	stopModeWatcher()
+	// Гасим сэмплер памяти (mem_sampler.go) — он бьётся к box-контексту,
+	// но останавливаем явно, чтобы не полагаться на goroutine-after-shutdown.
+	stopMemSampler()
 	ss := static.StartedService
 	if ss == nil {
 		return SetCoreStatus(CoreStates_STOPPED, MessageType_ALREADY_STOPPED, ""), nil

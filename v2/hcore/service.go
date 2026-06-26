@@ -8,6 +8,7 @@ import (
 
 	"github.com/sagernet/sing-box/adapter"
 	"github.com/sagernet/sing-box/common/urltest"
+	C "github.com/sagernet/sing-box/constant"
 	"github.com/sagernet/sing-box/daemon"
 	"github.com/sagernet/sing-box/experimental/clashapi"
 	"github.com/sagernet/sing-box/experimental/clashapi/trafficontrol"
@@ -24,6 +25,11 @@ func NewService(ctx context.Context, options option.Options) (*daemon.StartedSer
 		Debug:       static.debug,
 		LogMaxLines: 100,
 		Handler:     &logInterface,
+		// Pressure-watchdog: на iOS при критическом memory-pressure сбрасывает
+		// соединения + отдаёт память ОС (shed-on-critical) ДО того как jetsam
+		// прибьёт packet-tunnel. Зеркалит command_server.go:63. Эффект только
+		// под darwin+cgo (iOS); на Windows/Android — no-op.
+		OOMKiller: C.IsIos,
 		ExtraServices: []adapter.LifecycleService{
 			&inhiveMainServiceManager{},
 		},

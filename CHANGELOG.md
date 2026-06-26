@@ -9,6 +9,24 @@ shipped standalone).
 
 ## [Unreleased]
 
+### Added (2026-06-26 — on-device memory diagnostics)
+
+- **Memory sampler in the log.** The core now prints a compact memory line every 10 seconds — `mem: phys_footprint=… heap=… sys=… goroutines=… gc=…` — so you can watch the core's memory on the phone straight from the in-app logs (no Xcode needed). On iOS it includes `phys_footprint`, the exact metric the system uses to decide whether to kill the tunnel. Read-only; runs on every platform and stops cleanly when the VPN stops.
+
+### Changed (2026-06-26 — iOS memory footprint)
+
+- **Fewer OS threads on iOS.** The core now pins itself to a single scheduler thread on iOS only. Each extra thread costs memory the tunnel can't spare under the iOS budget, and a VPN proxy is I/O-bound so the lost parallelism doesn't matter. Windows and Android are unchanged.
+- **The core log file no longer grows without bound.** `box.log` used to append forever (it had reached 59 MB). It's now capped: when it passes ~5 MB it's rotated to a single backup at startup. No new dependency was added.
+- **Less log spam on broken DNS packets.** The "process DNS packet" error used to be logged once per bad packet (thousands of times during an outage), which itself burned memory. It's now rate-limited to once a second with a "(+N suppressed)" tail.
+
+### Fixed (2026-06-26 — iOS freeze hardening)
+
+- **iOS app no longer freezes after a long server outage.** After the server was unreachable for hours, the core could lock up and stop reconnecting even once the server came back (you'd see a connected-looking screen that didn't respond). Four changes address the root causes:
+  - **Cap on DNS request flooding.** When the upstream DNS was down, the core spawned an unbounded worker per DNS packet; these piled up faster than they drained and slowly exhausted the iOS memory budget. There's now a generous concurrency cap — under a real flood, excess packets are dropped (with a once-a-second log line) instead of accumulating.
+  - **Stuck server connection now gets recycled.** A connection left in a failed state after "connection refused" used to be reused forever, so reconnect never happened. It's now invalidated after a failed attempt so the next try opens a fresh one — without disturbing the built-in reconnect/backoff for healthy connections.
+  - **Lower memory ceiling on iOS.** The previous memory target was set high enough that real usage drifted past the system's hard limit, putting the runtime into a permanent garbage-collection stall instead of a clean restart. Lowered the target and relaxed the collector to leave proper headroom.
+  - **Memory-pressure safety net enabled.** On iOS, the core now reacts to system memory-pressure warnings by shedding connections and releasing memory before the OS would kill the tunnel.
+
 ### Added (2026-06-24 — parser consolidation)
 
 - **`parse` desktop C-export** (`platform/desktop/custom.go`): the FFI sibling of `MobileParse` — pure `Ray2Singbox` over `libbox.BaseContext`, no `setup()`/running engine. Lets the Windows/macOS/Linux Flutter app parse subscriptions through the canonical Go parser via the loaded DLL/dylib (no gRPC, no disk side-effects), bringing the desktop on par with iOS/Android. On error returns `{"__parse_error__":"…"}` (C ABI has no exceptions). Result must be freed via `freeString`.

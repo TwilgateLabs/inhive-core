@@ -48,6 +48,11 @@ type InhiveInstance struct {
 	modeWatcherCancel context.CancelFunc
 	modeWatcherMu     sync.Mutex
 
+	// memSamplerCancel гасит read-only сэмплер памяти (mem_sampler.go) при
+	// остановке/рестарте ядра. Nil когда сэмплер не запущен.
+	memSamplerCancel context.CancelFunc
+	memSamplerMu     sync.Mutex
+
 	// startCancel отменяет блокирующий olcrtc-старт (primary awaitReady, до ~30с)
 	// когда юзер отменяет connect повторным тапом (Dart → Stop). Хранится ОТДЕЛЬНО
 	// от lock: StartService держит static.lock весь блокирующий старт, поэтому Stop

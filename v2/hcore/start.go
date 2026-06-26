@@ -201,6 +201,10 @@ func StartService(ctx context.Context, in *StartRequest) (coreResponse *CoreInfo
 	// explicitly so we don't rely on goroutine-after-shutdown semantics.
 	if boxCtx := static.Context(); boxCtx != nil {
 		startModeWatcher(boxCtx, static)
+		// Read-only сэмплер памяти в лог (mem_sampler.go) — бьётся к тому же
+		// box-контексту, гаснет в Stop(). Помогает видеть память ядра на
+		// устройстве без Xcode (инцидент 2026-06-25).
+		startMemSampler(boxCtx)
 	}
 
 	WriteSharedLog("StartService: returning STARTED")
