@@ -65,13 +65,27 @@ func (s *CoreService) UrlTestConfig(ctx context.Context, in *UrlTestConfigReques
 	if len(opts.Outbounds) == 0 {
 		return &UrlTestConfigResponse{Error: "no outbounds in config"}, nil
 	}
-	// Probe through the FIRST outbound (the exit), NOT the side-instance's SOCKS5
-	// default route. For chained transports (utproto = a vless with detour→utproto
-	// helper) the helper is a transport layer, not an exit — routing via the
-	// SOCKS5 default could pick the helper and the probe fails with EOF even when
-	// the server works. Dialing the main outbound drives the whole detour chain,
-	// so the verdict reflects real end-to-end health.
-	mainTag := opts.Outbounds[0].Tag
+	// Probe through the real EXIT outbound — NOT a group, a special outbound, or
+	// the side-instance's SOCKS5 default route. The app's buildSingboxConfig puts
+	// a "select" selector at outbounds[0] (members [exit, direct]), then the exit
+	// outbound, then any transport detours (utproto/shadowtls). Probing the
+	// selector or routing via the SOCKS5 default fails with EOF for chained
+	// transports (e.g. utproto = a VLESS whose detour is a FakeTLS helper).
+	// Dialing the first real proxy outbound (the exit) drives the whole detour
+	// chain, so the verdict reflects real end-to-end health. Skip only GROUP
+	// outbounds (selector/urltest/loadbalance) — in a ping config the exit always
+	// precedes the trailing direct/block, so the first non-group is the exit.
+	skipTypes := map[string]bool{"selector": true, "urltest": true, "loadbalance": true}
+	var mainTag string
+	for _, ob := range opts.Outbounds {
+		if !skipTypes[ob.Type] {
+			mainTag = ob.Tag
+			break
+		}
+	}
+	if mainTag == "" {
+		return &UrlTestConfigResponse{Error: "no exit outbound in config"}, nil
+	}
 
 	// Side-instance: TUN / system-proxy / clash-api all forced off (RunInstanceQuiet).
 	// The 250ms settle delay lives inside RunInstanceQuiet — BEFORE the probe — so
