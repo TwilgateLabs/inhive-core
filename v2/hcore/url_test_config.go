@@ -21,6 +21,7 @@ package hcore
 
 import (
 	"context"
+	"errors"
 	"time"
 
 	"github.com/sagernet/sing-box/common/urltest"
@@ -108,14 +109,54 @@ func (s *CoreService) UrlTestConfig(ctx context.Context, in *UrlTestConfigReques
 	// urltest.URLTest does a real HTTP HEAD to the probe URL THROUGH the outbound's
 	// own dialer (TCP-over-QUIC for hy2, the detour chain for utproto, etc.) and
 	// requires the response — dead/blocked → error, no false positive.
+	//
+	// Best-of-N on the SAME warm side-instance (2026-06-26 ping-flake fix). The old
+	// single shot declared a server dead on ANY first-attempt blip — a cold DNS
+	// answer, one dropped SYN, a Reality/uTLS/WS handshake that raced the 250ms
+	// settle. That is why the same config pinged 3× showed "dead" then alive on the
+	// 4th: each tap measured a fresh cold path. Now we retry on the already-running
+	// instance — attempt 1 gets the big slice for the cold handshake, attempts 2-3
+	// ride warm OS DNS/route state and resolve fast. First success wins; only if ALL
+	// attempts fail do we report a real tested-dead verdict. Total stays within the
+	// caller's `timeout` budget (default 5s, under the app's 7s gRPC guard).
 	testCtx, cancel := context.WithTimeout(ctx, timeout)
 	defer cancel()
-	delay, terr := urltest.URLTest(testCtx, url, detour)
-	if terr != nil {
-		return &UrlTestConfigResponse{Error: terr.Error()}, nil
+
+	var lastErr error
+	for _, attemptTimeout := range splitProbeBudget(timeout) {
+		if testCtx.Err() != nil {
+			break // overall budget exhausted
+		}
+		attemptCtx, attemptCancel := context.WithTimeout(testCtx, attemptTimeout)
+		delay, terr := urltest.URLTest(attemptCtx, url, detour)
+		attemptCancel()
+		if terr == nil && delay > 0 {
+			return &UrlTestConfigResponse{DelayMs: int32(delay)}, nil
+		}
+		if terr != nil {
+			lastErr = terr
+			continue
+		}
+		lastErr = errors.New("zero delay") // terr==nil but delay==0 — soft fail, keep trying
 	}
-	if delay == 0 {
-		return &UrlTestConfigResponse{Error: "zero delay"}, nil
+	if lastErr != nil {
+		return &UrlTestConfigResponse{Error: lastErr.Error()}, nil
 	}
-	return &UrlTestConfigResponse{DelayMs: int32(delay)}, nil
+	return &UrlTestConfigResponse{Error: "zero delay"}, nil
+}
+
+// splitProbeBudget divides the probe budget across best-of-N attempts. The first
+// attempt gets the largest slice (it pays the cold DNS+TCP+TLS+WS handshake); the
+// rest are smaller because they ride warm OS state and should resolve quickly.
+// 60% / 20% / 20% — three shots inside one budget (5s → 3s, 1s, 1s).
+func splitProbeBudget(total time.Duration) []time.Duration {
+	if total <= 0 {
+		total = urlTestConfigDefaultTimeout
+	}
+	first := total * 3 / 5
+	rest := (total - first) / 2
+	if rest <= 0 {
+		return []time.Duration{total}
+	}
+	return []time.Duration{first, rest, rest}
 }

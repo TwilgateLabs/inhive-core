@@ -3,6 +3,7 @@ package hcore
 import (
 	"context"
 	"testing"
+	"time"
 )
 
 // TestUrlTestConfig_Direct validates the full honest-ping plumbing end-to-end:
@@ -53,6 +54,52 @@ func TestUrlTestConfig_Dead(t *testing.T) {
 		t.Fatalf("dead server should report 0 delay, got %d", resp.DelayMs)
 	}
 	t.Logf("dead outbound correctly errored: %s", resp.Error)
+}
+
+// TestSplitProbeBudget guards the best-of-N budget split (2026-06-26 ping-flake
+// fix): the first attempt must get the largest slice (it pays the cold
+// DNS+TCP+TLS+WS handshake), every slice must be positive, and the attempts must
+// never sum past the caller's budget (else they'd blow the app's 7s gRPC guard).
+func TestSplitProbeBudget(t *testing.T) {
+	for _, total := range []time.Duration{
+		urlTestConfigDefaultTimeout, // 5s — the real default
+		8 * time.Second,
+		2 * time.Second,
+		1 * time.Second,
+	} {
+		got := splitProbeBudget(total)
+		if len(got) == 0 {
+			t.Fatalf("splitProbeBudget(%v): no attempts", total)
+		}
+		var sum time.Duration
+		for _, d := range got {
+			if d <= 0 {
+				t.Fatalf("splitProbeBudget(%v)=%v: non-positive slice %v", total, got, d)
+			}
+			sum += d
+		}
+		if sum > total {
+			t.Fatalf("splitProbeBudget(%v)=%v sums to %v > budget", total, got, sum)
+		}
+		for _, d := range got[1:] {
+			if d > got[0] {
+				t.Fatalf("splitProbeBudget(%v)=%v: first slice must be the largest", total, got)
+			}
+		}
+	}
+	// Zero / negative budget must fall back to the default budget (never empty,
+	// never panic, never exceed the default).
+	got := splitProbeBudget(0)
+	if len(got) == 0 || got[0] <= 0 {
+		t.Fatalf("splitProbeBudget(0) must fall back to positive slices, got %v", got)
+	}
+	var sum time.Duration
+	for _, d := range got {
+		sum += d
+	}
+	if sum > urlTestConfigDefaultTimeout {
+		t.Fatalf("splitProbeBudget(0)=%v exceeds default budget %v", got, urlTestConfigDefaultTimeout)
+	}
 }
 
 // TestUrlTestConfig_EmptyConfig validates input guarding.

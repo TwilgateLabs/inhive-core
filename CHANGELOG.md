@@ -9,6 +9,13 @@ shipped standalone).
 
 ## [Unreleased]
 
+### Fixed (2026-06-26 — ping reliability)
+
+The honest per-server ping was truthful but brittle: it spun a brand-new side-instance and made a *single* cold probe, so any first-attempt hiccup — a cold DNS answer, one dropped SYN, a TLS/WebSocket handshake racing the instance's 250 ms settle — was reported as "dead". Pinging the same working server a few times could show offline, offline, offline, then online, which read as the app lying. A comparison of how other clients ping (sing-box's own warm urltest group, Clash.Meta/Mihomo) showed the difference: they keep a warm instance and/or never declare a node dead on one failed probe. We now do the cheap, equivalent thing.
+
+- **Best-of-N probe on the same warm side-instance.** `UrlTestConfig` now probes up to three times within the same time budget instead of once, reusing the already-running instance so attempts 2–3 ride warm OS DNS/route state; the first attempt gets the largest slice for the cold handshake. The first success wins and only if all attempts fail is the server reported dead. This is what removes the "3× offline then online" flicker — a working server answers on the first tap. (`url_test_config.go`, `splitProbeBudget`, with a unit-test guard.)
+- **Side-instances no longer clobber the process-global logger.** Each box bring-up unconditionally reset the global std logger; under a parallel ping-all that is a write/write data race on an unsynchronised package global. Only the main box owns it now, so concurrent ping probes never touch it (`daemon/instance.go`).
+
 ### Fixed (2026-06-26 — foreign-subscription compatibility audit)
 
 A differential audit of our config parser against Xray/Happ found a class of configs that imported as a valid node but silently didn't work — or worked insecurely. This was the third "our universal client doesn't support X" regression, so the fixes all land in the single Go parser (`ray2sing`) — both the ping and the live connection get them at once — and a new canonical corpus test plus a cross-path equivalence test (`ray2sing_test/compat_corpus_test.go`) now guard every case so the class can't silently come back.
