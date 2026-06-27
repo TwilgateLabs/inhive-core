@@ -349,3 +349,23 @@ func TestCorpus_JSON_TCPHeaderObfs(t *testing.T) {
 		t.Errorf("plain TCP should have no transport, got %v", tr)
 	}
 }
+
+// #1 (JSON path) — the per-transport ALPN clamp must fire on the JSON-ingest path
+// too, not just on share-links. alpn_transport_test.go locks the share-link path;
+// this locks JSON. The clamp lives in the per-protocol parser (common.go), but it
+// only fires if the JSON→URI transcoder preserves BOTH the network AND the alpn:
+// drop either and a ws+tls node silently re-offers h2 → EOF (the original 2026-06-26
+// bug). This test catches that transcoder drop, which the share-link test cannot.
+func TestCorpus_JSON_WS_ALPN_Clamp(t *testing.T) {
+	u := corpusUUID
+	// ws + TLS + alpn=["http/1.1","h2"] → h2 dropped, clamped to http/1.1.
+	ws := `{"protocol":"vless","settings":{"vnext":[{"address":"cdn.example.com","port":443,"users":[{"id":"` + u + `","encryption":"none"}]}]},"streamSettings":{"network":"ws","security":"tls","tlsSettings":{"serverName":"cdn.example.com","alpn":["http/1.1","h2"]},"wsSettings":{"path":"/p","headers":{"Host":"cdn.example.com"}}}}`
+	if alpn := asStrings(sub(mustOutbound(t, ws), "tls")["alpn"]); !eqStrings(alpn, []string{"http/1.1"}) {
+		t.Errorf("ws+tls JSON alpn = %v, want [http/1.1] (h2 must be clamped on the JSON path too)", alpn)
+	}
+	// sibling: gRPC over the same alpn → clamped to h2 (HTTP/2 transport).
+	grpc := `{"protocol":"vless","settings":{"vnext":[{"address":"cdn.example.com","port":443,"users":[{"id":"` + u + `","encryption":"none"}]}]},"streamSettings":{"network":"grpc","security":"tls","tlsSettings":{"serverName":"cdn.example.com","alpn":["http/1.1","h2"]},"grpcSettings":{"serviceName":"gsvc"}}}`
+	if alpn := asStrings(sub(mustOutbound(t, grpc), "tls")["alpn"]); !eqStrings(alpn, []string{"h2"}) {
+		t.Errorf("grpc+tls JSON alpn = %v, want [h2]", alpn)
+	}
+}
