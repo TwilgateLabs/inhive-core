@@ -1,6 +1,6 @@
 module github.com/twilgate/inhive-core
 
-go 1.26.3
+go 1.26.4
 
 require (
 	github.com/bepass-org/warp-plus v1.2.4

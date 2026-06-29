@@ -1,6 +1,6 @@
 module github.com/twilgate/xray2sing
 
-go 1.26.3
+go 1.26.4
 
 require (
 	github.com/sagernet/sing v0.8.4
