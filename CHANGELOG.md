@@ -9,6 +9,13 @@ shipped standalone).
 
 ## [Unreleased]
 
+### Fixed (2026-07-02 — iOS crash/abort hardening under sustained upstream loss)
+
+When an upstream exit node went fully unreachable (a null-routed server produced a storm of failing dials + DNS lookups), the iOS core could hit an unrecoverable Go runtime fatal (`SIGABRT`, re-raised — not a catchable panic) instead of degrading gracefully. This closes the two off-heap / thread fatal surfaces that the 4.6.1 memory hardening didn't cover:
+
+- **Concurrent outbound-dial cap.** Every app socket becomes a TUN flow that blocks in the dialer for the full TCP-connect timeout when the upstream is down; under a retry storm these pile up, each holding a goroutine stack + cached buffer + gVisor endpoint — off-heap `phys_footprint` that the Go memory limit does not bound and that iOS jetsam kills the extension for. A counting semaphore (`maxConcurrentDials = 256`, mirroring the existing DNS-exchange cap) now bounds in-flight blocking dials; on saturation the flow is dropped with a rate-limited log and a `dialsDropped` counter, exactly like the DNS path. (`route/conn.go`.)
+- **iOS OS-thread cap.** The Go runtime's default 10000-thread ceiling was never lowered; each cgo-blocking dial can hold a thread, so a dial storm could reach `fatal error: thread exhaustion` — an unrecoverable `SIGABRT` with no goroutine-panic frame. `runtimeDebug.SetMaxThreads(512)` on the iOS extension converts that into an early, deterministic, loggable failure — and combined with the dial cap it should never be reached. (`experimental/libbox/memory.go`.)
+
 ### Added (2026-06-26 — universal subscription formats)
 
 Providers serve different container formats based on the client's User-Agent: a client that presents as sing-box gets a sing-box JSON config, a clash client gets Clash YAML, others get base64 share-links — and the protocol set can differ per format (e.g. some only include hysteria2 in the sing-box/Shadowrocket variants). The parser now ingests the two formats we were missing, so we can consume whatever a provider sends instead of falling back to a reduced share-link set.
