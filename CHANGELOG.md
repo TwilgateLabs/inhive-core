@@ -9,6 +9,16 @@ shipped standalone).
 
 ## [Unreleased]
 
+### Changed (2026-07-03 — iOS NE memory & build diet, code-review follow-ups)
+
+Follow-ups from the full-app code review, all aimed at the iOS Network Extension's ~50MB jetsam budget:
+
+- **NaiveProxy (Cronet) excluded from the iOS build.** `with_naive_outbound` statically links the Chromium network stack (~30-45MB per slice, its own thread pool and allocator) into *both* the app and the extension; inside the NE budget a naive outbound would be an instant jetsam. iOS now builds with its own `IOS_TAGS` (no naive); a naive node in a config yields the stub's clear "rebuild with -tags" error instead of an OOM death. `with_dhcp` dropped from iOS tags too — DHCP DNS discovery can't work inside an NE. (`Makefile`.)
+- **`make ios IOS_TARGET=ios`** — device-only xcframework builds; the simulator slice (241MB of 362MB, 2× build time) is now opt-out for release runs. Default behaviour unchanged.
+- **`debug.FreeOSMemory()` after mobile start-up.** Config parsing + rule-set compilation leave 3-8MB of garbage that the Go scavenger returns lazily, while jetsam judges `phys_footprint` immediately; the pages are now returned right after the core reports STARTED (iOS/Android). Upstream's `cmd_run.go` does the same.
+- **`readStatus` no longer opens goleveldb every second.** The 1/sec system-info stream re-read `lastStartRequestName` via a full DB open/close on every tick until traffic passed 1MB — constant allocation churn under the 32MB memory limit. The name is now cached at `StartService` (one cold-start DB read at most, negative result cached too). (`v2/hcore/start.go`, `commands.go`.)
+- **`heartbeat.log` size-cap rotation.** The App Group diagnostic log grew unbounded across sessions; it now rotates once at start past 1MB, keeping a single `.1` backup — same non-fatal pattern as the box.log cap. (`v2/hcore/grpc_server.go`.)
+
 ### Fixed (2026-07-02 — iOS crash/abort hardening under sustained upstream loss)
 
 When an upstream exit node went fully unreachable (a null-routed server produced a storm of failing dials + DNS lookups), the iOS core could hit an unrecoverable Go runtime fatal (`SIGABRT`, re-raised — not a catchable panic) instead of degrading gracefully. This closes the two off-heap / thread fatal surfaces that the 4.6.1 memory hardening didn't cover:

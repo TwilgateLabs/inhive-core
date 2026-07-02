@@ -5,6 +5,9 @@ import (
 	"context"
 	"fmt"
 	"path/filepath"
+	"runtime"
+	runtimeDebug "runtime/debug"
+	"sync"
 	"time"
 
 	"github.com/twilgate/inhive-core/v2/config"
@@ -36,6 +39,45 @@ func (s *CoreService) StartService(ctx context.Context, in *StartRequest) (resp 
 		resp, err = errorWrapper(MessageType_UNEXPECTED_ERROR, e)
 	})
 	return StartService(ctx, in)
+}
+
+// Кеш lastStartRequestName. GetSystemInfoStream тикает 1/сек, и пока
+// UplinkTotal < 1MB (или профиль пуст) readStatus раньше КАЖДЫЙ тик ходил в
+// goleveldb (db.GetTable().Get = полный open/close: аллокации, manifest, fd) —
+// секундный alloc-churn под 32MB memory-limit iOS NE. Имя меняется только в
+// StartService, так что кешируем при записи; DB трогаем максимум один раз
+// (холодный процесс, StartService ещё не звался), результат — включая
+// негативный — запоминаем.
+var (
+	lastStartNameMu     sync.Mutex
+	lastStartNameValue  string
+	lastStartNameLoaded bool
+)
+
+func setCachedLastStartRequestName(name string) {
+	lastStartNameMu.Lock()
+	defer lastStartNameMu.Unlock()
+	lastStartNameValue = name
+	lastStartNameLoaded = true
+}
+
+// cachedLastStartRequestName возвращает имя профиля без похода в DB на каждом
+// тике. Если кеш холодный (процесс рестартовал, StartService ещё не звался) —
+// однократное чтение из DB; неудача тоже кешируется (negative cache), иначе
+// пустая DB возвращала бы нас к churn-у каждый тик.
+func cachedLastStartRequestName() string {
+	lastStartNameMu.Lock()
+	defer lastStartNameMu.Unlock()
+	if !lastStartNameLoaded {
+		lastStartNameLoaded = true
+		settings := db.GetTable[hcommon.AppSettings]()
+		if lastName, err := settings.Get("lastStartRequestName"); err == nil && lastName != nil {
+			if v, ok := lastName.Value.(string); ok {
+				lastStartNameValue = v
+			}
+		}
+	}
+	return lastStartNameValue
 }
 
 func saveLastStartRequest(in *StartRequest) error {
@@ -117,6 +159,10 @@ func StartService(ctx context.Context, in *StartRequest) (coreResponse *CoreInfo
 	}
 
 	static.previousStartRequest = in
+	// Кешируем имя профиля для readStatus (см. cachedLastStartRequestName):
+	// после loadLastStartRequestIfNeeded оно заполнено и из явного запроса,
+	// и из DB-восстановления.
+	setCachedLastStartRequestName(in.ConfigName)
 	WriteSharedLog("StartService: BuildConfig begin")
 	options, err := BuildConfig(ctx, in)
 	if err != nil {
@@ -208,5 +254,16 @@ func StartService(ctx context.Context, in *StartRequest) (coreResponse *CoreInfo
 	}
 
 	WriteSharedLog("StartService: returning STARTED")
-	return SetCoreStatus(CoreStates_STARTED, MessageType_EMPTY, ""), nil
+	resp := SetCoreStatus(CoreStates_STARTED, MessageType_EMPTY, "")
+
+	// Мобильные платформы: сразу вернуть ОС startup-мусор (парсинг конфига,
+	// компиляция rule-sets оставляют 3-8MB, которые scavenger отдаёт лениво).
+	// Upstream cmd_run.go делает то же после старта; наш hcore-путь — нет.
+	// Критично для iOS: jetsam смотрит на phys_footprint, а не на живой heap.
+	// Гейт по runtime.GOOS — консистентно с log_shared.go / grpc_server.go.
+	if runtime.GOOS == "ios" || runtime.GOOS == "android" {
+		runtimeDebug.FreeOSMemory()
+		WriteSharedLog("StartService: FreeOSMemory done")
+	}
+	return resp, nil
 }

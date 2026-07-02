@@ -11,9 +11,23 @@ ifeq ($(OS),Windows_NT)
 Not available for Windows! use bash in WSL
 endif
 CRONET_GO_VERSION := $(shell cat sing-box/.github/CRONET_GO_VERSION)
-TAGS=with_gvisor,with_quic,with_wireguard,with_utls,with_clash_api,with_grpc,with_awg,tfogo_checklinkname0,with_naive_outbound,with_olcrtc
-IOS_ADD_TAGS=with_dhcp,with_low_memory
+# BASE_TAGS — общие для всех платформ. with_naive_outbound добавляется только
+# в TAGS (desktop/android): naive статически влинковывает Chromium/Cronet
+# (~30-45MB на слайс), что для iOS NE-процесса (jetsam-бюджет ~50MB) смертельно.
+# iOS собирается с IOS_TAGS (без naive) — если naive-нода попадёт в конфиг,
+# стаб include/naive_outbound_stub.go отдаст внятную ошибку вместо крэша.
+BASE_TAGS=with_gvisor,with_quic,with_wireguard,with_utls,with_clash_api,with_grpc,with_awg,tfogo_checklinkname0,with_olcrtc
+TAGS=$(BASE_TAGS),with_naive_outbound
+IOS_TAGS=$(BASE_TAGS)
+# with_dhcp убран из iOS-тагов (2026-07-02): DHCP-DNS discovery в iOS NE не
+# работает (нет доступа к DHCP-опциям интерфейса), наш конфиг-билдер dhcp://
+# сам не эмитит, а dhcp://-сервер из чужого конфига получит понятную ошибку
+# стаба вместо тихо неработающего резолвера.
+IOS_ADD_TAGS=with_low_memory
 MACOS_ADD_TAGS=with_dhcp
+# make ios IOS_TARGET=ios — device-only сборка (без симуляторного слайса:
+# он ~241MB из 362MB xcframework и удваивает время сборки).
+IOS_TARGET ?= ios,iossimulator
 WINDOWS_ADD_TAGS=with_purego
 LDFLAGS=-w -s -checklinkname=0 -buildid= $${CODE_VERSION}
 GOBUILDLIB=CGO_ENABLED=1 go build -trimpath -ldflags="$(LDFLAGS)" -buildmode=c-shared
@@ -92,9 +106,9 @@ android-deploy:
 
 ios: lib_install
 	gomobile bind -v \
-		-target ios,iossimulator \
+		-target $(IOS_TARGET) \
 		-libname=inhive-core \
-		-tags=$(TAGS),$(IOS_ADD_TAGS) \
+		-tags=$(IOS_TAGS),$(IOS_ADD_TAGS) \
 		-trimpath \
 		-ldflags="$(LDFLAGS)" \
 		-o $(BINDIR)/InhiveCore.xcframework \

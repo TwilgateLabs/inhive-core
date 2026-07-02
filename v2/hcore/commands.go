@@ -8,7 +8,6 @@ import (
 	"time"
 
 	"github.com/twilgate/inhive-core/v2/config"
-	"github.com/twilgate/inhive-core/v2/db"
 	hcommon "github.com/twilgate/inhive-core/v2/hcommon"
 	"github.com/sagernet/sing-box/adapter"
 	"github.com/sagernet/sing-box/protocol/group"
@@ -53,11 +52,11 @@ func (h *InhiveInstance) readStatus(prev *SystemInfo) *SystemInfo {
 		}
 
 		if prev == nil || prev.CurrentProfile == "" || message.UplinkTotal < 1000000 {
-			settings := db.GetTable[hcommon.AppSettings]()
-			lastName, err := settings.Get("lastStartRequestName")
-			if err == nil {
-				message.CurrentProfile = lastName.Value.(string)
-			}
+			// Кеш вместо db.Get: этот метод тикает 1/сек из
+			// GetSystemInfoStream, а goleveldb open/close на каждый тик —
+			// alloc-churn под 32MB memory-limit iOS NE (см. start.go,
+			// cachedLastStartRequestName).
+			message.CurrentProfile = cachedLastStartRequestName()
 		} else {
 			message.CurrentProfile = prev.CurrentProfile
 		}

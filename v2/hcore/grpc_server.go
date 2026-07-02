@@ -312,14 +312,26 @@ func CloseGrpcServer(mode SetupMode) {
 
 var startHeartbeatOnce sync.Once
 
+// heartbeatLogMaxBytes — порог ротации heartbeat.log. Файл живёт в App Group
+// через все сессии NE-процесса и без cap рос бесконечно (1 строка/мин).
+// Паттерн тот же, что у box.log (sing-box/log/observable.go, logRotateMaxBytes):
+// ротация один раз при старте, rename в <path>.1 (одна бэкап-копия,
+// атомарно перетирая старую), все ошибки не фатальны. heartbeat'у хватит 1MB.
+const heartbeatLogMaxBytes = 1 * 1024 * 1024
+
 // heartbeatLoop writes runtime stats once per minute. File handle is held
-// until process exit (matches stderr redirect lifecycle); rotation is out
-// of scope. All errors are silent — diagnostic must never crash the host.
+// until process exit (matches stderr redirect lifecycle); size-cap rotation
+// happens once at start. All errors are silent — diagnostic must never crash
+// the host.
 func heartbeatLoop(workingDir string) {
 	defer config.DeferPanicToError("heartbeat", func(err error) {
 		Log(LogLevel_ERROR, LogType_CORE, err.Error())
 	})
-	f, err := os.OpenFile(workingDir+"/data/heartbeat.log", os.O_WRONLY|os.O_CREATE|os.O_APPEND, 0644)
+	path := workingDir + "/data/heartbeat.log"
+	if info, statErr := os.Stat(path); statErr == nil && info.Size() > heartbeatLogMaxBytes {
+		_ = os.Rename(path, path+".1")
+	}
+	f, err := os.OpenFile(path, os.O_WRONLY|os.O_CREATE|os.O_APPEND, 0644)
 	if err != nil {
 		return
 	}
