@@ -11,13 +11,15 @@ ifeq ($(OS),Windows_NT)
 Not available for Windows! use bash in WSL
 endif
 CRONET_GO_VERSION := $(shell cat sing-box/.github/CRONET_GO_VERSION)
-# BASE_TAGS — общие для всех платформ. with_naive_outbound добавляется только
-# в TAGS (desktop/android): naive статически влинковывает Chromium/Cronet
-# (~30-45MB на слайс), что для iOS NE-процесса (jetsam-бюджет ~50MB) смертельно.
-# iOS собирается с IOS_TAGS (без naive) — если naive-нода попадёт в конфиг,
-# стаб include/naive_outbound_stub.go отдаст внятную ошибку вместо крэша.
-BASE_TAGS=with_gvisor,with_quic,with_wireguard,with_utls,with_clash_api,with_grpc,with_awg,tfogo_checklinkname0,with_olcrtc
-TAGS=$(BASE_TAGS),with_naive_outbound
+# BASE_TAGS — общие для всех платформ, включая iOS. with_naive_outbound на ВСЕХ:
+# naive (Cloudflare-mimicking HTTPS через статический libcronet.a) — наш
+# сильнейший анти-DPI fallback в РФ; работает на iOS с build 44 (CGO static
+# link, feedback_build_ios_cronet_purego). Cronet mmap'ится on-demand, 50MB
+# NE-бюджет держится (эмпирически build 44→72). Кратковременный выпил из iOS
+# (2026-07-02 аудит) был ошибкой: риск jetsam теоретический, а сам jetsam уже
+# закрыт dial-cap 256 + thread-cap 512 + mem-ceiling 32MB. Возврат 2026-07-04.
+BASE_TAGS=with_gvisor,with_quic,with_wireguard,with_utls,with_clash_api,with_grpc,with_awg,tfogo_checklinkname0,with_olcrtc,with_naive_outbound
+TAGS=$(BASE_TAGS)
 IOS_TAGS=$(BASE_TAGS)
 # with_dhcp убран из iOS-тагов (2026-07-02): DHCP-DNS discovery в iOS NE не
 # работает (нет доступа к DHCP-опциям интерфейса), наш конфиг-билдер dhcp://
