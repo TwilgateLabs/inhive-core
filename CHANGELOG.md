@@ -9,6 +9,15 @@ shipped standalone).
 
 ## [Unreleased]
 
+### Changed (2026-07-05 — cronet-go → Chromium 148, sing 0.8.9)
+
+Coordinated dependency bump of the NaiveProxy engine (the previous attempt failed because it pulled cronet-go `@main` — the *source* branch, which has no generated headers or prebuilt libs; the consumable snapshots live on the `go` publish branch):
+
+- **cronet-go April `e4926ba` (Chromium 147.0.7727.49) → `go`-branch tip `b3eec813` (Chromium 148.0.7778.96, built from `ec86c149`).** Main module, `all`, and all 29 prebuilt `lib/*` slices (ios/android/darwin/windows/linux) bumped to the same publish point — Go code and static `libcronet.a` are one Chromium version again. Brings the Apr-15 "Reduce netErrorInfo memory usage" fix (relevant to the iOS NE jetsam budget) and Chromium 148's QUIC receive-window fixes. The Jul-2 "Fix quic not disabled" one-liner is main-only with no published `go`-branch build yet — picked up on the next upstream publish.
+- **sing 0.8.4 → 0.8.9** (dragged in by cronet-go). Diff is 7 bugfix commits — UoT read/write race fixes, interface-finder fix, freelru lifetime fixes, additive `Registry.Clone`/`ExtendContext` — zero API breaks: the whole fork + core compile unchanged. purego 0.9.1 → 0.10.0 alongside (Windows/Linux dynamic loader path).
+- `sing-box/.github/CRONET_GO_VERSION` → `b3eec813...` (Windows `extract-lib` path; note the new extract-lib resolves the lib module via `git ls-remote` of the `go` branch tip, which currently equals our pin).
+- Verified: full-tags build clean, `go vet ./v2/hcore/...` clean, `make ios` EXIT 0 — device slice 121MB with 1045 `Cronet_` symbols and the `148.0.7778.96` version string embedded. Android AAR / Windows DLL rebuild still pending on the Win server (cross-typecheck for `GOOS=windows` + `with_purego` passes).
+
 ### Changed (2026-07-05 — honest per-config ping: endpoints + error classification)
 
 `UrlTestConfig` (the honest per-server side-instance probe) now measures "does the internet actually work through this config" for every protocol, and stops reporting our-side failures as a dead server:
