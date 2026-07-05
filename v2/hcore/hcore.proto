@@ -210,6 +210,65 @@ message UrlTestConfigResponse {
   bool bring_up_failed = 3;
 }
 
+// UrlTestConfigWarm — ping v2. Same honesty + disconnected moat as UrlTestConfig,
+// but WARM: a single long-lived side-instance holds ALL servers' outbounds and is
+// reused across probe cycles (like sing-box's urltest-group reusing detour dialers)
+// instead of spinning a fresh cold instance per server per tap. The first probe of a
+// cycle pays the instance bring-up; every later probe (this cycle AND the next
+// pingAll a few seconds later) rides the already-warm outbounds — killing the
+// per-server 8s cold bring-up налог that made us the slowest of the top clients and
+// was the root of the ping flake.
+//
+// Lifecycle: keyed by instance_key (the app passes a stable hash of the current
+// server list / subscription). A new key → the config changed → the old warm
+// instance is torn down and a fresh one built. An idle instance is reaped after a
+// TTL (default ~5 min) so we do not hold a side-instance forever. The app should
+// pass the SAME key for repeated pingAll of the same server set to get the reuse.
+//
+// The probe itself also checks the response status code (expectedStatus 204/200) —
+// a hijacked test endpoint returning a bogus 200 body no longer reads as success.
+message UrlTestConfigWarmRequest {
+  // Full multi-server sing-box options JSON (the app's buildMultiServerConfig
+  // output — selector + all server outbounds + direct/block, or endpoints[] for
+  // wireguard/awg). Only used when the warm instance for instance_key is absent
+  // or stale; on a cache hit the running instance is reused and this is ignored.
+  string config_json = 1;
+  // Outbound/endpoint tags to probe THIS call (a subset of the config's exits).
+  // Empty => probe every non-group exit the config exposes.
+  repeated string tags = 2;
+  string url = 3;            // probe URL; "" => https://www.gstatic.com/generate_204
+  int32 timeout_ms = 4;      // per-tag probe budget; 0 => default 5000
+  // Stable identity of the server set. Same key => reuse the warm instance.
+  // Changing it (subscription / server-list change) rebuilds the instance.
+  string instance_key = 5;
+  // 0 => expect 204 or 200 (generate_204 friendly). Set explicitly to require an
+  // exact status. A mismatched status is an honest probe failure (hijack guard).
+  int32 expected_status = 6;
+}
+
+message UrlTestWarmResult {
+  string tag = 1;
+  int32 delay_ms = 2;        // real RTT in ms; 0 on failure
+  string error = 3;          // empty on success
+}
+
+message UrlTestConfigWarmResponse {
+  // Per-tag verdicts (honest, keyed by outbound tag). Missing tags = not probed.
+  repeated UrlTestWarmResult results = 1;
+  // true = the WARM INSTANCE could not be brought up (config parse / bind /
+  // not-ready / panic) → NONE of the probes ran. The app shows blank for every
+  // requested tag ("couldn't test"), NOT a red × ("dead"). A per-tag failure with
+  // this false is an honest tested-dead verdict for that one server.
+  bool bring_up_failed = 2;
+  string error = 3;          // instance-level error text when bring_up_failed
+}
+
+// ReleaseWarmProbe tears down a warm probe instance early (e.g. the server-list
+// screen closed). No-op if the key is unknown. instance_key "" => release ALL.
+message ReleaseWarmProbeRequest {
+  string instance_key = 1;
+}
+
 message ChangeInhiveSettingsRequest {
   string inhive_settings_json = 1;
 }

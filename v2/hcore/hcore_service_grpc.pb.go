@@ -30,6 +30,8 @@ const (
 	Core_Parse_FullMethodName                 = "/hcore.Core/Parse"
 	Core_BootstrapFetch_FullMethodName        = "/hcore.Core/BootstrapFetch"
 	Core_UrlTestConfig_FullMethodName         = "/hcore.Core/UrlTestConfig"
+	Core_UrlTestConfigWarm_FullMethodName     = "/hcore.Core/UrlTestConfigWarm"
+	Core_ReleaseWarmProbe_FullMethodName      = "/hcore.Core/ReleaseWarmProbe"
 	Core_ChangeInhiveSettings_FullMethodName  = "/hcore.Core/ChangeInhiveSettings"
 	Core_StartService_FullMethodName          = "/hcore.Core/StartService"
 	Core_Stop_FullMethodName                  = "/hcore.Core/Stop"
@@ -64,6 +66,12 @@ type CoreClient interface {
 	// Honest per-server ping via a side-instance — see UrlTestConfigRequest in
 	// hcore.proto. Works while the VPN is disconnected, no main-box dependency.
 	UrlTestConfig(ctx context.Context, in *UrlTestConfigRequest, opts ...grpc.CallOption) (*UrlTestConfigResponse, error)
+	// Ping v2 — warm persistent probe-instance. One long-lived side-instance holds
+	// all servers' outbounds and is reused across probe cycles. See
+	// UrlTestConfigWarmRequest in hcore.proto. Same disconnected moat as UrlTestConfig.
+	UrlTestConfigWarm(ctx context.Context, in *UrlTestConfigWarmRequest, opts ...grpc.CallOption) (*UrlTestConfigWarmResponse, error)
+	// Tear down a warm probe instance early (server-list screen closed).
+	ReleaseWarmProbe(ctx context.Context, in *ReleaseWarmProbeRequest, opts ...grpc.CallOption) (*hcommon.Response, error)
 	ChangeInhiveSettings(ctx context.Context, in *ChangeInhiveSettingsRequest, opts ...grpc.CallOption) (*CoreInfoResponse, error)
 	// rpc GenerateConfig (GenerateConfigRequest) returns (GenerateConfigResponse);
 	StartService(ctx context.Context, in *StartRequest, opts ...grpc.CallOption) (*CoreInfoResponse, error)
@@ -235,6 +243,26 @@ func (c *coreClient) UrlTestConfig(ctx context.Context, in *UrlTestConfigRequest
 	cOpts := append([]grpc.CallOption{grpc.StaticMethod()}, opts...)
 	out := new(UrlTestConfigResponse)
 	err := c.cc.Invoke(ctx, Core_UrlTestConfig_FullMethodName, in, out, cOpts...)
+	if err != nil {
+		return nil, err
+	}
+	return out, nil
+}
+
+func (c *coreClient) UrlTestConfigWarm(ctx context.Context, in *UrlTestConfigWarmRequest, opts ...grpc.CallOption) (*UrlTestConfigWarmResponse, error) {
+	cOpts := append([]grpc.CallOption{grpc.StaticMethod()}, opts...)
+	out := new(UrlTestConfigWarmResponse)
+	err := c.cc.Invoke(ctx, Core_UrlTestConfigWarm_FullMethodName, in, out, cOpts...)
+	if err != nil {
+		return nil, err
+	}
+	return out, nil
+}
+
+func (c *coreClient) ReleaseWarmProbe(ctx context.Context, in *ReleaseWarmProbeRequest, opts ...grpc.CallOption) (*hcommon.Response, error) {
+	cOpts := append([]grpc.CallOption{grpc.StaticMethod()}, opts...)
+	out := new(hcommon.Response)
+	err := c.cc.Invoke(ctx, Core_ReleaseWarmProbe_FullMethodName, in, out, cOpts...)
 	if err != nil {
 		return nil, err
 	}
@@ -426,6 +454,12 @@ type CoreServer interface {
 	// Honest per-server ping via a side-instance — see UrlTestConfigRequest in
 	// hcore.proto. Works while the VPN is disconnected, no main-box dependency.
 	UrlTestConfig(context.Context, *UrlTestConfigRequest) (*UrlTestConfigResponse, error)
+	// Ping v2 — warm persistent probe-instance. One long-lived side-instance holds
+	// all servers' outbounds and is reused across probe cycles. See
+	// UrlTestConfigWarmRequest in hcore.proto. Same disconnected moat as UrlTestConfig.
+	UrlTestConfigWarm(context.Context, *UrlTestConfigWarmRequest) (*UrlTestConfigWarmResponse, error)
+	// Tear down a warm probe instance early (server-list screen closed).
+	ReleaseWarmProbe(context.Context, *ReleaseWarmProbeRequest) (*hcommon.Response, error)
 	ChangeInhiveSettings(context.Context, *ChangeInhiveSettingsRequest) (*CoreInfoResponse, error)
 	// rpc GenerateConfig (GenerateConfigRequest) returns (GenerateConfigResponse);
 	StartService(context.Context, *StartRequest) (*CoreInfoResponse, error)
@@ -496,6 +530,12 @@ func (UnimplementedCoreServer) BootstrapFetch(context.Context, *BootstrapFetchRe
 }
 func (UnimplementedCoreServer) UrlTestConfig(context.Context, *UrlTestConfigRequest) (*UrlTestConfigResponse, error) {
 	return nil, status.Error(codes.Unimplemented, "method UrlTestConfig not implemented")
+}
+func (UnimplementedCoreServer) UrlTestConfigWarm(context.Context, *UrlTestConfigWarmRequest) (*UrlTestConfigWarmResponse, error) {
+	return nil, status.Error(codes.Unimplemented, "method UrlTestConfigWarm not implemented")
+}
+func (UnimplementedCoreServer) ReleaseWarmProbe(context.Context, *ReleaseWarmProbeRequest) (*hcommon.Response, error) {
+	return nil, status.Error(codes.Unimplemented, "method ReleaseWarmProbe not implemented")
 }
 func (UnimplementedCoreServer) ChangeInhiveSettings(context.Context, *ChangeInhiveSettingsRequest) (*CoreInfoResponse, error) {
 	return nil, status.Error(codes.Unimplemented, "method ChangeInhiveSettings not implemented")
@@ -711,6 +751,42 @@ func _Core_UrlTestConfig_Handler(srv interface{}, ctx context.Context, dec func(
 	}
 	handler := func(ctx context.Context, req interface{}) (interface{}, error) {
 		return srv.(CoreServer).UrlTestConfig(ctx, req.(*UrlTestConfigRequest))
+	}
+	return interceptor(ctx, in, info, handler)
+}
+
+func _Core_UrlTestConfigWarm_Handler(srv interface{}, ctx context.Context, dec func(interface{}) error, interceptor grpc.UnaryServerInterceptor) (interface{}, error) {
+	in := new(UrlTestConfigWarmRequest)
+	if err := dec(in); err != nil {
+		return nil, err
+	}
+	if interceptor == nil {
+		return srv.(CoreServer).UrlTestConfigWarm(ctx, in)
+	}
+	info := &grpc.UnaryServerInfo{
+		Server:     srv,
+		FullMethod: Core_UrlTestConfigWarm_FullMethodName,
+	}
+	handler := func(ctx context.Context, req interface{}) (interface{}, error) {
+		return srv.(CoreServer).UrlTestConfigWarm(ctx, req.(*UrlTestConfigWarmRequest))
+	}
+	return interceptor(ctx, in, info, handler)
+}
+
+func _Core_ReleaseWarmProbe_Handler(srv interface{}, ctx context.Context, dec func(interface{}) error, interceptor grpc.UnaryServerInterceptor) (interface{}, error) {
+	in := new(ReleaseWarmProbeRequest)
+	if err := dec(in); err != nil {
+		return nil, err
+	}
+	if interceptor == nil {
+		return srv.(CoreServer).ReleaseWarmProbe(ctx, in)
+	}
+	info := &grpc.UnaryServerInfo{
+		Server:     srv,
+		FullMethod: Core_ReleaseWarmProbe_FullMethodName,
+	}
+	handler := func(ctx context.Context, req interface{}) (interface{}, error) {
+		return srv.(CoreServer).ReleaseWarmProbe(ctx, req.(*ReleaseWarmProbeRequest))
 	}
 	return interceptor(ctx, in, info, handler)
 }
@@ -1001,6 +1077,14 @@ var Core_ServiceDesc = grpc.ServiceDesc{
 		{
 			MethodName: "UrlTestConfig",
 			Handler:    _Core_UrlTestConfig_Handler,
+		},
+		{
+			MethodName: "UrlTestConfigWarm",
+			Handler:    _Core_UrlTestConfigWarm_Handler,
+		},
+		{
+			MethodName: "ReleaseWarmProbe",
+			Handler:    _Core_ReleaseWarmProbe_Handler,
 		},
 		{
 			MethodName: "ChangeInhiveSettings",
