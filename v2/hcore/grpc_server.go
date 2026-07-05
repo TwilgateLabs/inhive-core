@@ -41,9 +41,19 @@ func Setup(params *SetupRequest, platformInterface libbox.PlatformInterface) err
 	})
 	mu.Lock()
 	defer mu.Unlock()
+	// Idempotent re-setup: a fast reconnect (Android VPNService.onStartCommand →
+	// Mobile.setup) can call Setup() while a server for this Mode is still alive.
+	// The old code did a silent `return nil` — so the NEW server was never built,
+	// and a deferred Mobile.close(4) → CloseGrpcServer then stopped the ONE server
+	// that existed. Result: the service looked "up" but had NO gRPC server, and
+	// Dart hammered a dead channel forever. Instead, tear the stale server down
+	// (graceful stop frees the port + clears the map slot) and fall through to
+	// build a fresh one — so Setup ALWAYS leaves a live server on this Mode, with
+	// no zombie. Safe on first launch (map empty → no-op close) and identical on
+	// every OS / Mode (Win DLL, Android AAR, iOS NE all reach here).
 	if grpcServer[params.Mode] != nil {
-		Log(LogLevel_WARNING, LogType_CORE, "grpcServer already started")
-		return nil
+		Log(LogLevel_WARNING, LogType_CORE, "grpcServer already started for this mode — tearing down stale server and re-initializing")
+		closeGrpcServerLocked(params.Mode)
 	}
 	static.BaseContext = libbox.BaseContext(platformInterface)
 	static.debug = params.Debug
@@ -304,6 +314,16 @@ func AddGrpcClientPublicKey(clientPublicKey []byte) error {
 func CloseGrpcServer(mode SetupMode) {
 	mu.Lock()
 	defer mu.Unlock()
+	closeGrpcServerLocked(mode)
+}
+
+// closeGrpcServerLocked graceful-stops and removes the gRPC server for `mode`.
+// Caller MUST already hold `mu` (mu is non-reentrant — calling CloseGrpcServer
+// from a code path that already holds mu, e.g. Setup, would self-deadlock).
+// server.Stop() blocks until the listener is closed and all in-flight RPCs
+// drain, so on return the port is free and the map slot is clear — a fresh
+// StartGrpcServerByMode(mode) is guaranteed to bind, not hit "already started".
+func closeGrpcServerLocked(mode SetupMode) {
 	if server, ok := grpcServer[mode]; ok && server != nil {
 		server.Stop()
 		delete(grpcServer, mode)

@@ -45,6 +45,19 @@ func RunInstanceString(ctx context.Context, inhiveSettings *config.InhiveOptions
 	return RunInstance(ctx, inhiveSettings, singconfigs)
 }
 
+// bringUpBudget caps how long a side-instance is allowed to spend coming up
+// (config build + service start + outbound/DNS init + settle) before we give up
+// and tear it down. The service's own Start() path binds ports and initialises
+// outbounds WITHOUT honouring context cancellation, so a wedged bring-up (a port
+// bind deadlock, a DNS settle that never returns) would otherwise hang forever,
+// pile up side-instances and hold resources. 8s is a generous ceiling: a healthy
+// cold-phone bring-up finishes in well under 2s, so this only ever fires on a
+// genuine hang — and it is deliberately INDEPENDENT of the caller's probe budget
+// (the probe timeout measures the server; this measures OUR ability to run the
+// test). A timeout here surfaces as bring_up_failed on the ping path → the app
+// shows blank, never a red ×.
+const bringUpBudget = 8 * time.Second
+
 func RunInstance(ctx context.Context, inhiveSettings *config.InhiveOptions, singconfig *option.Options) (instance *InhiveInstance, err error) {
 	defer config.RecoverPanicToError("RunInstance", func(panicErr error) { err = panicErr })
 	hservice, err := runInstanceCore(ctx, inhiveSettings, singconfig)
@@ -69,7 +82,65 @@ func RunInstanceQuiet(ctx context.Context, inhiveSettings *config.InhiveOptions,
 	return runInstanceCore(ctx, inhiveSettings, singconfig)
 }
 
+// runInstanceCore brings a side-instance up under a hard deadline. The actual
+// bring-up (runInstanceCoreBlocking) runs in a goroutine because the underlying
+// service Start() is not context-cancellable; we race it against bringUpBudget.
+// On timeout we return a bring_up-classified error immediately, and the goroutine
+// closes whatever instance it eventually produces so nothing leaks (leak-safe:
+// exactly one of the two owners closes the instance).
 func runInstanceCore(ctx context.Context, inhiveSettings *config.InhiveOptions, singconfig *option.Options) (*InhiveInstance, error) {
+	type result struct {
+		inst *InhiveInstance
+		err  error
+	}
+	// Unbuffered: the worker's send only completes if the caller is still waiting
+	// to receive. If the caller has already timed out (returned), the send never
+	// succeeds and the worker falls to its cleanup branch — this is how we avoid
+	// leaking an instance that finished starting AFTER the deadline. (A buffered
+	// channel would silently accept the send and skip cleanup.)
+	done := make(chan result)
+	// Derive a cancellable child so BuildConfig / the settle select observe the
+	// deadline too (they DO honour ctx); Start() itself is un-cancellable, which
+	// is exactly why we also need the goroutine race below.
+	bringUpCtx, cancel := context.WithTimeout(ctx, bringUpBudget)
+	defer cancel()
+
+	go func() {
+		var inst *InhiveInstance
+		var err error
+		// The worker is detached — once the caller times out it runs alone, so a
+		// panic here (bad config, nil deref) must be recovered locally or it would
+		// crash the whole host process, not just fail the probe.
+		func() {
+			defer config.RecoverPanicToError("runInstanceCore.worker", func(panicErr error) { err = panicErr })
+			inst, err = runInstanceCoreBlocking(ctx, bringUpCtx, inhiveSettings, singconfig)
+		}()
+		select {
+		case done <- result{inst, err}:
+			// Delivered to the still-waiting caller — caller owns inst.Close().
+		case <-bringUpCtx.Done():
+			// Caller already gave up (timeout / parent cancel). We own cleanup:
+			// close any instance that finished starting after the deadline.
+			if inst != nil {
+				_ = inst.Close()
+			}
+		}
+	}()
+
+	select {
+	case r := <-done:
+		return r.inst, r.err
+	case <-bringUpCtx.Done():
+		return nil, fmt.Errorf("side-instance bring-up exceeded %s: %w", bringUpBudget, bringUpCtx.Err())
+	}
+}
+
+// runInstanceCoreBlocking does the synchronous bring-up. `serviceCtx` is the
+// LONG-LIVED context handed to the started service (it must outlive bring-up —
+// binding it to the bring-up deadline would kill a healthy instance the moment
+// runInstanceCore returns). `bringUpCtx` carries the bring-up deadline and is
+// used only for the deadline-aware steps (config build, settle) that honour ctx.
+func runInstanceCoreBlocking(serviceCtx, bringUpCtx context.Context, inhiveSettings *config.InhiveOptions, singconfig *option.Options) (*InhiveInstance, error) {
 	if inhiveSettings == nil {
 		inhiveSettings = config.DefaultInhiveOptions()
 	}
@@ -93,7 +164,7 @@ func runInstanceCore(ctx context.Context, inhiveSettings *config.InhiveOptions, 
 		inhiveSettings.BalancerStrategy = "round-robin"
 	}
 
-	finalConfigs, err := config.BuildConfig(ctx, inhiveSettings, &config.ReadOptions{Options: singconfig})
+	finalConfigs, err := config.BuildConfig(bringUpCtx, inhiveSettings, &config.ReadOptions{Options: singconfig})
 	if err != nil {
 		return nil, err
 	}
@@ -105,7 +176,7 @@ func runInstanceCore(ctx context.Context, inhiveSettings *config.InhiveOptions, 
 		return nil, err
 	}
 	svc := daemon.NewStartedService(daemon.ServiceOptions{
-		Context:             ctx,
+		Context:             serviceCtx,
 		Debug:               static.debug,
 		LogMaxLines:         0,
 		Handler:             &noopPlatformHandler{},
@@ -116,12 +187,15 @@ func runInstanceCore(ctx context.Context, inhiveSettings *config.InhiveOptions, 
 	}
 	instance := svc
 
-	// Settle delay — даём time для async init outbounds. Honour ctx cancellation
-	// (раньше hardcoded 250ms блокировал даже когда caller отменил context).
+	// Settle delay — даём time для async init outbounds. Honour bring-up deadline
+	// (раньше hardcoded 250ms блокировал даже когда caller отменил context). If the
+	// deadline fires here the service is already started, so we MUST close it before
+	// bailing — otherwise a wedged bring-up would leak a running side-instance.
 	select {
 	case <-time.After(250 * time.Millisecond):
-	case <-ctx.Done():
-		return nil, ctx.Err()
+	case <-bringUpCtx.Done():
+		_ = instance.CloseService()
+		return nil, bringUpCtx.Err()
 	}
 	return &InhiveInstance{
 		StartedService: instance,
