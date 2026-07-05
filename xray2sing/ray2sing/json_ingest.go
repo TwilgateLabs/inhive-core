@@ -115,9 +115,20 @@ func ingestJSON(body string) (string, bool) {
 // "outbounds" (Xray/sing-box) and "servers" (SIP008). "dns" / "routing" /
 // "rules" are deliberately NOT fields here — see the file header: they are
 // dropped on purpose.
+//
+// "remarks"/"remark" is the Happ marker: Happ exports a JSON ARRAY where each
+// element is a FULL Xray config object carrying the human node name in a
+// top-level "remarks" field (the inner outbound is always the generic tag
+// "proxy"). Its presence flips this object into "Happ per-node" mode (see
+// urisFromContainerObject): emit exactly ONE server named by remarks, instead
+// of expanding every outbound — otherwise Happ "Авто" bundles (which pack the
+// whole node list as outbounds for client-side smart routing) would explode
+// into dozens of duplicate "proxy" entries. (Happ ingest fix 2026-07-06.)
 type containerObject struct {
 	Outbounds []json.RawMessage `json:"outbounds"`
 	Servers   []json.RawMessage `json:"servers"`
+	Remarks   string            `json:"remarks"`
+	Remark    string            `json:"remark"`
 }
 
 // urisFromContainerObject pulls the proxy entries out of a wrapper object and
@@ -128,6 +139,24 @@ func urisFromContainerObject(raw json.RawMessage) []string {
 	if err := json.Unmarshal(raw, &c); err != nil {
 		return nil
 	}
+
+	// Happ per-node mode: a wrapper carrying "remarks" is one node whose real
+	// name lives in remarks and whose inner outbounds are always tagged generic
+	// "proxy"/"proxy-N". Emit exactly ONE server — the FIRST real proxy outbound
+	// — renamed to remarks. This (a) restores the country name instead of
+	// "proxy", and (b) collapses "Авто" bundles (which carry the whole server
+	// list) to a single node, matching what the Happ client itself shows.
+	if name := orDefault(c.Remarks, c.Remark); name != "" && len(c.Outbounds) > 0 {
+		for _, ob := range c.Outbounds {
+			if u, ok := uriFromAnyEntry(ob); ok {
+				return []string{renameURIFragment(u, name)}
+			}
+			// non-proxy locals (freedom/blackhole/dns/…) are skipped by
+			// uriFromAnyEntry → keep scanning for the first real proxy.
+		}
+		return nil
+	}
+
 	var uris []string
 	// Xray/sing-box full config: ingest outbounds, drop dns/routing (by design).
 	for _, ob := range c.Outbounds {
@@ -142,6 +171,20 @@ func urisFromContainerObject(raw json.RawMessage) []string {
 		}
 	}
 	return uris
+}
+
+// renameURIFragment overwrites the #fragment (display name) of an already-built
+// share-link URI. Used by the Happ per-node path to stamp the top-level
+// "remarks" name over the generic inner outbound tag ("proxy"). If the URI
+// cannot be parsed it is returned unchanged (defensive; should not happen for
+// URIs we just built).
+func renameURIFragment(uri, name string) string {
+	u, err := url.Parse(uri)
+	if err != nil {
+		return uri
+	}
+	u.Fragment = name
+	return u.String()
 }
 
 // uriFromAnyEntry decides whether a JSON object is an Xray-style outbound (has
@@ -200,6 +243,15 @@ type xrayStream struct {
 	XHTTPSettings   *xrayXHTTPSettings   `json:"xhttpSettings"`
 	SplitHTTP       *xrayXHTTPSettings   `json:"splithttpSettings"`
 	TCPSettings     *xrayTCPSettings     `json:"tcpSettings"`
+	Hysteria        *xrayHysteriaStream  `json:"hysteriaSettings"`
+}
+
+// xrayHysteriaStream is the Happ/v2rayN hysteria2 transport block. The auth
+// string (== hy2 password) lives here, NOT in settings.
+type xrayHysteriaStream struct {
+	Version int    `json:"version"`
+	Auth    string `json:"auth"`
+	Obfs    string `json:"obfs"`
 }
 
 // xrayTCPSettings models the TCP transport's HTTP/1.1 header obfuscation
@@ -273,6 +325,12 @@ func uriFromXrayOutbound(raw json.RawMessage, protocol string) (string, bool) {
 		return xrayTrojan(&ob)
 	case "shadowsocks":
 		return xrayShadowsocks(&ob)
+	case "hysteria2", "hysteria":
+		// Happ exports hysteria2 under protocol "hysteria" with
+		// streamSettings.hysteriaSettings.version==2 (v2rayN/Happ dialect).
+		// settings.version==2 is the alternate marker. hysteria v1 is not a
+		// share-link protocol here → rebuilt only when it is really v2.
+		return xrayHysteria2(&ob)
 	default:
 		// freedom/blackhole/dns/socks/http/wireguard/etc. are either local
 		// helpers (not a remote node) or protocols we cannot faithfully
@@ -377,6 +435,83 @@ func xrayShadowsocks(ob *xrayOutbound) (string, bool) {
 	}
 	srv := s.Servers[0]
 	return buildSSURI(srv.Method, srv.Password, srv.Address, srv.Port, ob.Tag, ""), true
+}
+
+// xrayHysteria2 rebuilds a hysteria2:// URI from the Happ/v2rayN "hysteria"
+// outbound. Shape (observed on live xpnet Happ export):
+//
+//	{"protocol":"hysteria",
+//	 "settings":{"address":"h.example","port":8449,"version":2},
+//	 "streamSettings":{"network":"hysteria",
+//	   "hysteriaSettings":{"version":2,"auth":"<password>"},
+//	   "security":"tls",
+//	   "tlsSettings":{"serverName":"h.example","alpn":["h3"],"allowInsecure":false}}}
+//
+// The auth string is the hy2 password; sni/alpn/insecure come from tlsSettings.
+// hysteria v1 is not rebuilt here (no share-link round-trip in this file) — we
+// only accept it when version==2 markers are present.
+func xrayHysteria2(ob *xrayOutbound) (string, bool) {
+	var s struct {
+		Address  string      `json:"address"`
+		Port     int         `json:"port"`
+		Version  json.Number `json:"version"`
+		Auth     string      `json:"auth"`
+		Password string      `json:"password"`
+	}
+	if err := json.Unmarshal(ob.Settings, &s); err != nil || s.Address == "" {
+		skip("hysteria2", "missing settings.address")
+		return "", false
+	}
+
+	// Confirm this is hysteria2, not hysteria1. Version markers can live in
+	// settings.version or streamSettings.hysteriaSettings.version.
+	v2 := s.Version.String() == "2"
+	var hs *xrayHysteriaStream
+	if ob.Stream != nil {
+		hs = ob.Stream.Hysteria
+	}
+	if hs != nil && hs.Version == 2 {
+		v2 = true
+	}
+	if !v2 {
+		skip("hysteria", "not hysteria2 (v1 not rebuilt to a share-link)")
+		return "", false
+	}
+
+	// password/auth precedence: streamSettings.hysteriaSettings.auth, then
+	// settings.auth/password.
+	password := ""
+	if hs != nil {
+		password = hs.Auth
+	}
+	password = orDefault(password, orDefault(s.Auth, s.Password))
+
+	q := url.Values{}
+	if ob.Stream != nil && ob.Stream.TLSSettings != nil {
+		t := ob.Stream.TLSSettings
+		if sni := orDefault(t.SNI, t.ServerName); sni != "" {
+			q.Set("sni", sni)
+		}
+		if len(t.ALPN) > 0 {
+			q.Set("alpn", strings.Join(t.ALPN, ","))
+		}
+		if t.AllowInsecure {
+			q.Set("insecure", "1")
+		}
+	}
+	if hs != nil && hs.Obfs != "" {
+		q.Set("obfs", "salamander")
+		q.Set("obfs-password", hs.Obfs)
+	}
+
+	u := url.URL{
+		Scheme:   "hysteria2",
+		User:     url.User(password),
+		Host:     hostPort(s.Address, s.Port),
+		RawQuery: q.Encode(),
+		Fragment: ob.Tag,
+	}
+	return u.String(), true
 }
 
 // xrayVMess rebuilds a vmess://base64(JSON) link (v2rayN field names) so the

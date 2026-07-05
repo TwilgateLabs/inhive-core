@@ -9,6 +9,16 @@ shipped standalone).
 
 ## [Unreleased]
 
+### Fixed (2026-07-06 — Happ subscription format: real names, hysteria2, no Авто dupes)
+
+Happ exports a subscription as a JSON array of FULL Xray configs (each element carries the node name in a top-level `remarks`, the inner outbound is always tagged generic `proxy`). The importer had three bugs — a live capture (66 configs) produced 105 junk `proxy` entries. All three fixed in `xray2sing/ray2sing/json_ingest.go`:
+
+- **Node names restored — `remarks` is now honored instead of the generic `proxy` tag.** A wrapper object carrying `remarks`/`remark` is treated as one Happ node: its top-level name is stamped over the inner outbound tag, so the list shows `🇳🇱 Netherlands | TCP` etc. instead of `proxy`, `proxy-2`, `proxy-3`.
+- **Hysteria2 nodes survive.** Happ exports hy2 as `protocol:"hysteria"` with `streamSettings.hysteriaSettings.version==2` + `auth`; these previously hit the default branch and were skipped. They now rebuild to `hysteria2://auth@host:port?sni=…&alpn=…` (sni/alpn/insecure from `tlsSettings`, salamander obfs when present) and round-trip through the existing hy2 parser. 11 hy2 nodes now import.
+- **"Авто" bundles collapse to one node.** Happ's `Wi-Fi | Авто` / `LTE/4G | Авто` configs pack the whole server list as outbounds for client-side smart routing; we used to expand each → dozens of duplicate `proxy` entries. A Happ per-node wrapper now emits exactly the FIRST real proxy outbound (skipping freedom/blackhole/dns locals), matching what the Happ client itself shows.
+
+Array order is preserved (grouped by country). Native sing-box JSON, bare outbound arrays, single-config and Clash/SIP008 ingest are untouched (they carry no `remarks`). New `happ_ingest_test.go` covers names≠proxy, hy2 present, no Авто dupes, order — inline sample + golden replay of the real 66-config capture (`testdata/happ_xpnet.json` → 66 nodes, 11 hy2). `go vet` clean, full ray2sing corpus green.
+
 ### Fixed (2026-07-06 — 4.7.1 hotfix: reconnect / ping hang / reality-xhttp)
 
 Three verified root-cause fixes for "ping hangs + reconnect wedges after a disconnect (all OS)" and "reality-xhttp configs never connect":
