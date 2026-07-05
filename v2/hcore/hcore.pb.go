@@ -1665,7 +1665,9 @@ func (x *BootstrapFetchResponse) GetDurationMs() int32 {
 // self-contained single-outbound config, runs a real probe THROUGH that outbound,
 // measures the RTT, tears down. Does NOT touch the main VPN box (works while the
 // VPN is disconnected). Honest for hysteria2/QUIC + reality: a dead/blocked
-// outbound fails the probe → Error set, DelayMs 0.
+// outbound fails the probe → Error set, DelayMs 0. Endpoint-based exits
+// (wireguard/awg in endpoints[], sing-box 1.13+) are probed the same way — the
+// endpoint's own dialer drives the probe.
 type UrlTestConfigRequest struct {
 	state         protoimpl.MessageState `protogen:"open.v1"`
 	ConfigJson    string                 `protobuf:"bytes,1,opt,name=config_json,json=configJson,proto3" json:"config_json,omitempty"` // self-contained sing-box options JSON for ONE server
@@ -1727,9 +1729,15 @@ func (x *UrlTestConfigRequest) GetTimeoutMs() int32 {
 }
 
 type UrlTestConfigResponse struct {
-	state         protoimpl.MessageState `protogen:"open.v1"`
-	DelayMs       int32                  `protobuf:"varint,1,opt,name=delay_ms,json=delayMs,proto3" json:"delay_ms,omitempty"` // real RTT through the outbound in ms; 0 on failure
-	Error         string                 `protobuf:"bytes,2,opt,name=error,proto3" json:"error,omitempty"`                     // empty on success; transport always OK = soft error
+	state   protoimpl.MessageState `protogen:"open.v1"`
+	DelayMs int32                  `protobuf:"varint,1,opt,name=delay_ms,json=delayMs,proto3" json:"delay_ms,omitempty"` // real RTT through the outbound in ms; 0 on failure
+	Error   string                 `protobuf:"bytes,2,opt,name=error,proto3" json:"error,omitempty"`                     // empty on success; transport always OK = soft error
+	// true = failure happened on OUR side BEFORE the probe ever ran through the
+	// outbound (config parse / side-instance bring-up / tag lookup / panic).
+	// The app maps this to "couldn't test" (blank), NOT "server dead" (red x).
+	// false with error set = the side-instance came up and the probe itself
+	// failed through the outbound → honest tested-dead verdict.
+	BringUpFailed bool `protobuf:"varint,3,opt,name=bring_up_failed,json=bringUpFailed,proto3" json:"bring_up_failed,omitempty"`
 	unknownFields protoimpl.UnknownFields
 	sizeCache     protoimpl.SizeCache
 }
@@ -1776,6 +1784,13 @@ func (x *UrlTestConfigResponse) GetError() string {
 		return x.Error
 	}
 	return ""
+}
+
+func (x *UrlTestConfigResponse) GetBringUpFailed() bool {
+	if x != nil {
+		return x.BringUpFailed
+	}
+	return false
 }
 
 type ChangeInhiveSettingsRequest struct {
@@ -2704,10 +2719,11 @@ const file_v2_hcore_hcore_proto_rawDesc = "" +
 	"configJson\x12\x10\n" +
 	"\x03url\x18\x02 \x01(\tR\x03url\x12\x1d\n" +
 	"\n" +
-	"timeout_ms\x18\x03 \x01(\x05R\ttimeoutMs\"H\n" +
+	"timeout_ms\x18\x03 \x01(\x05R\ttimeoutMs\"p\n" +
 	"\x15UrlTestConfigResponse\x12\x19\n" +
 	"\bdelay_ms\x18\x01 \x01(\x05R\adelayMs\x12\x14\n" +
-	"\x05error\x18\x02 \x01(\tR\x05error\"O\n" +
+	"\x05error\x18\x02 \x01(\tR\x05error\x12&\n" +
+	"\x0fbring_up_failed\x18\x03 \x01(\bR\rbringUpFailed\"O\n" +
 	"\x1bChangeInhiveSettingsRequest\x120\n" +
 	"\x14inhive_settings_json\x18\x01 \x01(\tR\x12inhiveSettingsJson\"^\n" +
 	"\x15GenerateConfigRequest\x12\x12\n" +

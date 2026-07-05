@@ -4,6 +4,8 @@ import (
 	"context"
 	"testing"
 	"time"
+
+	"github.com/sagernet/sing-box/option"
 )
 
 // TestUrlTestConfig_Direct validates the full honest-ping plumbing end-to-end:
@@ -52,6 +54,11 @@ func TestUrlTestConfig_Dead(t *testing.T) {
 	}
 	if resp.DelayMs != 0 {
 		t.Fatalf("dead server should report 0 delay, got %d", resp.DelayMs)
+	}
+	// The instance came up and the probe itself failed → this is a tested-dead
+	// verdict, NOT a bring-up failure. Must stay a red ×, never blank.
+	if resp.BringUpFailed {
+		t.Fatalf("probe failure must not be classified as bring-up failure: %s", resp.Error)
 	}
 	t.Logf("dead outbound correctly errored: %s", resp.Error)
 }
@@ -110,5 +117,97 @@ func TestUrlTestConfig_EmptyConfig(t *testing.T) {
 	}
 	if resp.Error == "" {
 		t.Fatalf("empty config should report an error")
+	}
+	if !resp.BringUpFailed {
+		t.Fatalf("empty config is OUR failure — must be classified bring-up, got probe-failed")
+	}
+}
+
+// TestUrlTestConfig_BringUpClassification: every failure BEFORE the probe runs
+// (unparseable JSON, config without any exit) must carry BringUpFailed=true so
+// the app shows blank ("couldn't test") instead of a false red × ("server
+// dead"). No network needed — these all fail before instance bring-up.
+func TestUrlTestConfig_BringUpClassification(t *testing.T) {
+	for name, cfg := range map[string]string{
+		"garbage json": `{not json`,
+		"no exits":     `{"outbounds":[]}`,
+		"groups only":  `{"outbounds":[{"type":"selector","tag":"select","outbounds":[]}]}`,
+	} {
+		resp, err := (&CoreService{}).UrlTestConfig(context.Background(), &UrlTestConfigRequest{ConfigJson: cfg})
+		if err != nil {
+			t.Fatalf("%s: unexpected hard error: %v", name, err)
+		}
+		if resp.Error == "" {
+			t.Fatalf("%s: expected an error", name)
+		}
+		if !resp.BringUpFailed {
+			t.Fatalf("%s: pre-probe failure must be bring-up class, got probe-failed (%s)", name, resp.Error)
+		}
+	}
+}
+
+// TestProbeTag guards the exit-tag selection (2026-07-05 endpoint honest-probe):
+//   - endpoint-based configs (wireguard/awg) → the endpoint tag, even though
+//     outbounds[] contains a selector + direct/block (the old "first non-group
+//     outbound" rule would probe `direct` → false green);
+//   - outbound-based configs → first non-group outbound (iter4: skip selector);
+//   - direct-only config stays probe-able (raw-uplink check);
+//   - nothing usable → "".
+// Options are built as plain structs (probeTag reads only Type/Tag), so the
+// test runs without protocol build tags (with_wireguard/with_awg) — the JSON
+// registry path is exercised by the network-gated tests above.
+func TestProbeTag(t *testing.T) {
+	cases := []struct {
+		name string
+		opts option.Options
+		want string
+	}{
+		{
+			name: "endpoint preferred over selector+direct+block",
+			opts: option.Options{
+				Outbounds: []option.Outbound{
+					{Type: "selector", Tag: "select"},
+					{Type: "direct", Tag: "direct"},
+					{Type: "block", Tag: "block"},
+				},
+				Endpoints: []option.Endpoint{{Type: "wireguard", Tag: "wg"}},
+			},
+			want: "wg",
+		},
+		{
+			name: "selector skipped, exit outbound picked",
+			opts: option.Options{
+				Outbounds: []option.Outbound{
+					{Type: "selector", Tag: "select"},
+					{Type: "vless", Tag: "exit"},
+					{Type: "direct", Tag: "direct"},
+				},
+			},
+			want: "exit",
+		},
+		{
+			name: "direct-only stays probe-able",
+			opts: option.Options{
+				Outbounds: []option.Outbound{{Type: "direct", Tag: "t"}},
+			},
+			want: "t",
+		},
+		{
+			name: "groups only → empty",
+			opts: option.Options{
+				Outbounds: []option.Outbound{{Type: "selector", Tag: "select"}},
+			},
+			want: "",
+		},
+		{
+			name: "empty config → empty",
+			opts: option.Options{},
+			want: "",
+		},
+	}
+	for _, tc := range cases {
+		if got := probeTag(&tc.opts); got != tc.want {
+			t.Fatalf("%s: probeTag=%q, want %q", tc.name, got, tc.want)
+		}
 	}
 }

@@ -9,7 +9,12 @@ shipped standalone).
 
 ## [Unreleased]
 
-### Changed (2026-07-03 — iOS NE memory & build diet, code-review follow-ups)
+### Changed (2026-07-05 — honest per-config ping: endpoints + error classification)
+
+`UrlTestConfig` (the honest per-server side-instance probe) now measures "does the internet actually work through this config" for every protocol, and stops reporting our-side failures as a dead server:
+
+- **WireGuard / AmneziaWG probe through the endpoint.** sing-box 1.13 moved these to `endpoints[]`, so the handler used to bail with "no outbounds" → they were never honestly pinged. `probeTag()` now picks the endpoint tag first (they *are* the exit), driving the probe through the endpoint dialer — the same pattern the WireGuard endpoint's own `readyChecker` uses. For an endpoint-only config the outbounds hold only `select`/`direct`/`block`, so the old "first non-group outbound" rule would have picked `direct` and measured the raw uplink (false green) — endpoint-first avoids that.
+- **Bring-up vs probe error classification.** New `UrlTestConfigResponse.bring_up_failed`: everything before the first probe attempt (config parse, no exit, `RunInstanceQuiet`, not-ready, tag lookup, panic) is flagged bring-up — the app shows blank ("couldn't test"), not a red ×. Only a failure of the probe itself *through* a live outbound is a real dead verdict. A cold-phone bring-up timeout or a port-bind race is no longer misreported as a down server. Backward-compatible (old clients ignore the field; an old core leaves it false = prior behaviour).
 
 Follow-ups from the full-app code review, all aimed at the iOS Network Extension's ~50MB jetsam budget:
 

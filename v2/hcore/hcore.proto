@@ -191,7 +191,9 @@ message BootstrapFetchResponse {
 // self-contained single-outbound config, runs a real probe THROUGH that outbound,
 // measures the RTT, tears down. Does NOT touch the main VPN box (works while the
 // VPN is disconnected). Honest for hysteria2/QUIC + reality: a dead/blocked
-// outbound fails the probe → Error set, DelayMs 0.
+// outbound fails the probe → Error set, DelayMs 0. Endpoint-based exits
+// (wireguard/awg in endpoints[], sing-box 1.13+) are probed the same way — the
+// endpoint's own dialer drives the probe.
 message UrlTestConfigRequest {
   string config_json = 1;   // self-contained sing-box options JSON for ONE server
   string url = 2;           // probe URL; "" => https://www.gstatic.com/generate_204
@@ -200,6 +202,12 @@ message UrlTestConfigRequest {
 message UrlTestConfigResponse {
   int32 delay_ms = 1;       // real RTT through the outbound in ms; 0 on failure
   string error = 2;         // empty on success; transport always OK = soft error
+  // true = failure happened on OUR side BEFORE the probe ever ran through the
+  // outbound (config parse / side-instance bring-up / tag lookup / panic).
+  // The app maps this to "couldn't test" (blank), NOT "server dead" (red x).
+  // false with error set = the side-instance came up and the probe itself
+  // failed through the outbound → honest tested-dead verdict.
+  bool bring_up_failed = 3;
 }
 
 message ChangeInhiveSettingsRequest {
