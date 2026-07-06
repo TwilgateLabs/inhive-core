@@ -9,6 +9,12 @@ shipped standalone).
 
 ## [Unreleased]
 
+### Fixed (2026-07-06 — multi DNS serial fallback under packet-drop censorship)
+
+The `multi` DNS transport's serial mode (`dns/transport/multi/multi.go`) wrapped one shared 10s context around the whole member loop and gave each member no deadline of its own. The underlying UDP/DoH transports have no built-in per-query timeout, so a member pointed at a blackholed resolver (operator DROPS the packet instead of RSTing — common on hostile mobile networks) would block on that shared context and consume the entire budget, and the fallback member never got a turn. Serial fallback was effectively dead against packet-drop censorship (proven: a dead first member hung the full 10s and resolution failed).
+
+Fix: each serial member now runs under a 2.5s per-member deadline (`perServerTimeout`), so a blackholed member yields to the next quickly; a 3–4 member fan still fits inside the outer 10s budget. On overall-budget exhaustion the loop now returns a best-effort cached response instead of the raw context error. Parallel mode was already robust (dead members simply lose the race). Verified with a real boxed integration probe: serial fallback fires through two dead members in ~2.9s, parallel resolves in ~140ms, and `ignore_ranges` drops a poisoned hijack answer. `go vet` clean.
+
 ### Fixed (2026-07-06 — Happ subscription format: real names, hysteria2, no Авто dupes)
 
 Happ exports a subscription as a JSON array of FULL Xray configs (each element carries the node name in a top-level `remarks`, the inner outbound is always tagged generic `proxy`). The importer had three bugs — a live capture (66 configs) produced 105 junk `proxy` entries. All three fixed in `xray2sing/ray2sing/json_ingest.go`:
