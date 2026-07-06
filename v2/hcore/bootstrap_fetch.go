@@ -26,9 +26,9 @@ import (
 	"net/http"
 	"time"
 
-	"github.com/twilgate/inhive-core/v2/config"
 	"github.com/sagernet/sing-box/include"
 	"github.com/sagernet/sing-box/option"
+	"github.com/twilgate/inhive-core/v2/config"
 	"golang.org/x/net/proxy"
 )
 
@@ -82,6 +82,13 @@ func (s *CoreService) BootstrapFetch(ctx context.Context, in *BootstrapFetchRequ
 	// proxy, SOCKS5 on random localhost port). nil InhiveOptions => DefaultInhiveOptions.
 	// Quiet variant skips the cp.cloudflare.com warm-up probe — Cloudflare is blocked
 	// on RU LTE so the probe would burn 4s of the BootstrapFetch budget for nothing.
+	//
+	// NB: BootstrapFetch deliberately keeps the LEGACY translated path (NOT the raw
+	// RunInstanceRaw the ping probes moved to). Its config (bootstrap_endpoint.dart)
+	// is a bare outbound list with NO inbound — the translator synthesises the mixed
+	// inbound whose SOCKS5 port ContentFromURL dials below. BootstrapFetch needs a
+	// working local proxy, not ping-honesty, so the translator is the right tool here;
+	// the raw path is reserved for the probe callers that ship a full app config.
 	inst, instErr := RunInstanceQuiet(ctx, nil, &opts)
 	if instErr != nil {
 		return &BootstrapFetchResponse{

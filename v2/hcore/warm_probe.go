@@ -38,6 +38,8 @@ import (
 	"net"
 	"net/http"
 	"net/url"
+	"strconv"
+	"strings"
 	"sync"
 	"sync/atomic"
 	"time"
@@ -50,6 +52,7 @@ import (
 	"github.com/sagernet/sing-box/option"
 	M "github.com/sagernet/sing/common/metadata"
 	N "github.com/sagernet/sing/common/network"
+	"github.com/sagernet/sing/common/ntp"
 )
 
 const (
@@ -74,8 +77,14 @@ type warmProbeEntry struct {
 	inst *InhiveInstance
 	// allTags is every probeable exit the config exposes, extracted at build time
 	// (endpoints first, then non-group/non-direct/block outbounds). Used when a
-	// probe call passes no explicit tags.
-	allTags  []string
+	// probe call passes no explicit tags. Tags that were DROPPED during a
+	// degrade-retry (see buildWarmInstance) are excluded — they live in dropped.
+	allTags []string
+	// dropped is the set of tags whose outbound/endpoint failed to create/start and
+	// were removed so the rest of the subscription could still be probed. A probe of
+	// a dropped tag reports per-tag bring_up_failed (blank), never a red × — one
+	// broken server must not blank the whole list, nor lie that it is dead.
+	dropped  map[string]bool
 	lastUsed atomic.Int64 // unixnano; touched on every probe cycle
 	// probeMu guards the whole probe cycle for this entry against a concurrent
 	// release/rebuild of the SAME key. Different keys never contend (registry
@@ -137,46 +146,85 @@ func getOrCreateWarmInstance(key, configJSON string) (*warmProbeEntry, bool, err
 	if baseCtx == nil {
 		baseCtx = context.Background()
 	}
-	inst, tags, err := buildWarmInstance(baseCtx, configJSON)
+	inst, tags, dropped, err := buildWarmInstance(baseCtx, configJSON)
 	if err != nil {
 		return nil, false, err
 	}
-	e := &warmProbeEntry{key: key, inst: inst, allTags: tags}
+	e := &warmProbeEntry{key: key, inst: inst, allTags: tags, dropped: dropped}
 	e.touch()
 	warmProbeRegistry.instances[key] = e
 	ensureWarmReaper()
 	return e, true, nil
 }
 
+// maxWarmDegradeRetries caps how many times buildWarmInstance drops a broken
+// outbound/endpoint and retries. Small on purpose: it exists to survive a couple of
+// individually-broken servers in a subscription, not to brute-force a wholly bad
+// config. If bring-up still fails after this, the whole instance is bring_up_failed
+// (every requested tag blanks) — same as before this change.
+const maxWarmDegradeRetries = 3
+
 // buildWarmInstance parses the multi-server config and starts one side-instance
 // holding all its outbounds. Mirrors url_test_config.go bring-up, minus the
 // single-tag probe. ctx MUST be a long-lived context (static.BaseContext), not a
-// request-scoped one — the started box's lifetime is bound to it. Returns the
-// instance AND the list of probeable exit tags extracted from the parsed config
-// (so we never need to re-parse or store the heavy option.Options).
-func buildWarmInstance(ctx context.Context, configJSON string) (*InhiveInstance, []string, error) {
+// request-scoped one — the started box's lifetime is bound to it.
+//
+// DEGRADE-AND-RETRY (ping_arch_proposal §5.4): if bring-up fails because ONE
+// outbound/endpoint could not be created/started (a doomed domain-peer WG, a stub
+// protocol without its build tag, a malformed server from a foreign subscription),
+// the offending tag is removed and bring-up retried. Previously any single broken
+// server failed the whole warm box → the ENTIRE subscription blanked. Now the rest
+// is probed honestly and only the dropped tags blank. Returns the instance, the
+// probeable exit tags of the SURVIVING config, and the set of dropped tags.
+func buildWarmInstance(ctx context.Context, configJSON string) (*InhiveInstance, []string, map[string]bool, error) {
 	if configJSON == "" {
-		return nil, nil, errors.New("empty config_json")
+		return nil, nil, nil, errors.New("empty config_json")
 	}
 	// Enrich ctx with the outbound/inbound/endpoint registries before unmarshal.
 	pctx := include.Context(ctx)
 	var opts option.Options
 	if jsonErr := opts.UnmarshalJSONContext(pctx, []byte(configJSON)); jsonErr != nil {
-		return nil, nil, fmt.Errorf("parse config: %w", jsonErr)
+		return nil, nil, nil, fmt.Errorf("parse config: %w", jsonErr)
 	}
 	if len(opts.Outbounds) == 0 && len(opts.Endpoints) == 0 {
-		return nil, nil, errors.New("config has no outbounds or endpoints")
+		return nil, nil, nil, errors.New("config has no outbounds or endpoints")
 	}
-	tags := probeableExitTags(&opts)
-	inst, instErr := RunInstanceQuiet(pctx, nil, &opts)
-	if instErr != nil {
-		return nil, nil, fmt.Errorf("run instance: %w", instErr)
+
+	dropped := make(map[string]bool)
+	var lastErr error
+	for attempt := 0; attempt <= maxWarmDegradeRetries; attempt++ {
+		// RAW path (like the cold probe): run the app's config verbatim so warm
+		// probes resolve gstatic through the app's multi-DoH directDns fan — NOT
+		// through the legacy balancer default (which sent WG/AWG endpoint resolution
+		// out a random subscription server). See sanitizeSideInstance / RunInstanceRaw.
+		//
+		// RunInstanceRaw sanitises opts IN PLACE (inbound port etc.); pass a fresh
+		// copy each attempt so a prior sanitise/drop does not compound unexpectedly.
+		attemptOpts := opts
+		inst, instErr := RunInstanceRaw(pctx, &attemptOpts)
+		if instErr == nil && inst.Box() != nil {
+			return inst, probeableExitTags(&opts), dropped, nil
+		}
+		if inst != nil {
+			inst.Close()
+		}
+		if instErr == nil {
+			instErr = errors.New("side-instance not ready")
+		}
+		lastErr = instErr
+
+		// Try to identify and drop the single offending exit, then retry.
+		badTag := extractFailingExitTag(instErr, &opts)
+		if badTag == "" || dropped[badTag] {
+			break // can't localise the failure (or already dropped it) — give up
+		}
+		dropped[badTag] = true
+		removeExitTag(&opts, badTag)
+		if len(opts.Outbounds) == 0 && len(opts.Endpoints) == 0 {
+			break // nothing left to bring up
+		}
 	}
-	if inst.Box() == nil {
-		inst.Close()
-		return nil, nil, errors.New("side-instance not ready")
-	}
-	return inst, tags, nil
+	return nil, nil, nil, fmt.Errorf("run instance: %w", lastErr)
 }
 
 // releaseWarmInstance tears down and forgets the instance for key. key "" flushes
@@ -297,13 +345,31 @@ func (s *CoreService) UrlTestConfigWarm(ctx context.Context, in *UrlTestConfigWa
 	if len(tags) == 0 {
 		tags = entry.allTags
 	}
-	if len(tags) == 0 {
+	if len(tags) == 0 && len(entry.dropped) == 0 {
 		// The instance is up but exposes no probeable exit — that is a config
 		// shape problem on OUR side, classify as bring-up.
 		return &UrlTestConfigWarmResponse{Error: "no probeable exits in config", BringUpFailed: true}, nil
 	}
 
-	results := probeAllTags(ctx, boxDialerLookup{b}, tags, url, timeout, int(in.ExpectedStatus))
+	// Split off tags dropped during degrade-retry: they have no dialer in the box,
+	// so report them as per-tag bring_up_failed (blank) directly — never probe (and
+	// never × ) a server we deliberately excluded because IT couldn't be built.
+	var probeTags []string
+	var results []*UrlTestWarmResult
+	for _, tag := range tags {
+		if entry.dropped[tag] {
+			results = append(results, &UrlTestWarmResult{
+				Tag:           tag,
+				Error:         "excluded: outbound failed to build",
+				BringUpFailed: true,
+			})
+			continue
+		}
+		probeTags = append(probeTags, tag)
+	}
+	if len(probeTags) > 0 {
+		results = append(results, probeAllTags(ctx, boxDialerLookup{b}, probeTags, url, timeout, int(in.ExpectedStatus))...)
+	}
 	return &UrlTestConfigWarmResponse{Results: results}, nil
 }
 
@@ -361,7 +427,10 @@ func probeAllTags(ctx context.Context, lookup dialerLookup, tags []string, url s
 func probeSingleTag(ctx context.Context, lookup dialerLookup, tag, url string, timeout time.Duration, expectedStatus int) *UrlTestWarmResult {
 	detour, ok := lookup.Outbound(tag)
 	if !ok {
-		return &UrlTestWarmResult{Tag: tag, Error: "outbound not found: " + tag}
+		// The warm box is up but this tag has no dialer — a config-shape problem on
+		// OUR side (create failed / tag mismatch), never evidence the server is dead.
+		// Per-tag bring-up → the app blanks THIS server, not a red ×.
+		return &UrlTestWarmResult{Tag: tag, Error: "outbound not found: " + tag, BringUpFailed: true}
 	}
 	testCtx, cancel := context.WithTimeout(ctx, timeout)
 	defer cancel()
@@ -386,7 +455,14 @@ func probeSingleTag(ctx context.Context, lookup dialerLookup, tag, url string, t
 	if lastErr == nil {
 		lastErr = errors.New("zero delay")
 	}
-	return &UrlTestWarmResult{Tag: tag, Error: lastErr.Error()}
+	// A probe-hostname DNS-resolution failure is OUR inability to test this tag,
+	// not a dead server — blank, not × (same rule as the cold path). A
+	// connect/handshake failure THROUGH the outbound is an honest tested-dead ×.
+	return &UrlTestWarmResult{
+		Tag:           tag,
+		Error:         lastErr.Error(),
+		BringUpFailed: isProbeDNSFailure(lastErr),
+	}
 }
 
 // probeThroughDetour is our status-aware replacement for urltest.URLTest. It dials
@@ -429,9 +505,13 @@ func probeThroughDetour(ctx context.Context, link string, detour N.Dialer, expec
 		Transport: &http.Transport{
 			DialContext: func(context.Context, string, string) (net.Conn, error) { return conn, nil },
 			TLSClientConfig: &tls.Config{
-				// Match urltest.URLTest defaults (no custom RootCAs needed for the
-				// public generate_204 endpoints).
 				MinVersion: tls.VersionTLS12,
+				// Match urltest.URLTest's TLS defaults so we behave identically on a
+				// device with a skewed clock or a custom root pool: NTP-corrected time
+				// for cert validity, and the box's RootCAs from context. Without Time,
+				// a phone whose wall clock is off fails cert validation → false-dead.
+				Time:    ntp.TimeFuncFromContext(ctx),
+				RootCAs: adapter.RootPoolFromContext(ctx),
 			},
 		},
 		CheckRedirect: func(*http.Request, []*http.Request) error { return http.ErrUseLastResponse },
@@ -463,6 +543,128 @@ func statusOK(code, expectedStatus int) bool {
 		return code == http.StatusNoContent || code == http.StatusOK
 	}
 	return code == expectedStatus
+}
+
+// isProbeDNSFailure reports whether a probe error is a failure to RESOLVE the
+// probe hostname (gstatic) rather than a failure to connect/handshake through the
+// outbound. The former is OUR inability to test (blank), the latter an honest
+// tested-dead verdict (×). sing-box wraps lookup errors as `lookup <domain>: ...`
+// (dns/router.go: E.Cause(err, "lookup ", domain)); Go's own resolver surfaces
+// *net.DNSError. On the raw probe path (app's multi-DoH fan) this should be rare,
+// but classifying it honestly keeps the invariant "× only ever means proven dead".
+func isProbeDNSFailure(err error) bool {
+	if err == nil {
+		return false
+	}
+	var dnsErr *net.DNSError
+	if errors.As(err, &dnsErr) {
+		return true
+	}
+	msg := err.Error()
+	return strings.Contains(msg, "lookup ") ||
+		strings.Contains(msg, "no such host") ||
+		strings.Contains(msg, "server misbehaving")
+}
+
+// extractFailingExitTag pulls the tag of the outbound/endpoint that broke bring-up
+// out of the box's error, so buildWarmInstance can drop just that one and retry.
+// sing-box surfaces two shapes (verified against box.go / adapter/outbound/manager.go):
+//   - by index:  "initialize outbound[N]: ..."  / "initialize endpoint[N]: ..."
+//     → N indexes opts.Outbounds / opts.Endpoints.
+//   - by tag:    "start outbound/<type>[<tag>]: ..." (and other stages)
+//     → the tag is between the last '[' and its ']'.
+//
+// Returns "" if neither shape matches (then the caller stops degrading and reports
+// a whole-instance bring_up_failed, as before). Only ever returns a PROBEABLE exit
+// tag — never direct/block/group — so degrade can't silently delete the plumbing.
+func extractFailingExitTag(err error, opts *option.Options) string {
+	if err == nil || opts == nil {
+		return ""
+	}
+	msg := err.Error()
+	probeable := make(map[string]bool)
+	for _, t := range probeableExitTags(opts) {
+		probeable[t] = true
+	}
+
+	// Index form: "outbound[N]" / "endpoint[N]".
+	if idx, isEndpoint, ok := parseIndexRef(msg); ok {
+		if isEndpoint {
+			if idx >= 0 && idx < len(opts.Endpoints) && probeable[opts.Endpoints[idx].Tag] {
+				return opts.Endpoints[idx].Tag
+			}
+		} else {
+			if idx >= 0 && idx < len(opts.Outbounds) && probeable[opts.Outbounds[idx].Tag] {
+				return opts.Outbounds[idx].Tag
+			}
+		}
+	}
+
+	// Tag form: "...[<tag>]" — take the last bracketed token and accept it only if
+	// it is a known probeable exit.
+	if open := strings.LastIndexByte(msg, '['); open >= 0 {
+		if close := strings.IndexByte(msg[open+1:], ']'); close >= 0 {
+			tag := msg[open+1 : open+1+close]
+			if probeable[tag] {
+				return tag
+			}
+		}
+	}
+	return ""
+}
+
+// parseIndexRef finds an "outbound[N]" or "endpoint[N]" reference in msg and
+// returns (N, isEndpoint, ok). Only the FIRST such reference is used.
+func parseIndexRef(msg string) (int, bool, bool) {
+	for _, ref := range []struct {
+		prefix     string
+		isEndpoint bool
+	}{
+		{"endpoint[", true},
+		{"outbound[", false},
+	} {
+		i := strings.Index(msg, ref.prefix)
+		if i < 0 {
+			continue
+		}
+		rest := msg[i+len(ref.prefix):]
+		close := strings.IndexByte(rest, ']')
+		if close <= 0 {
+			continue
+		}
+		n, convErr := strconv.Atoi(rest[:close])
+		if convErr != nil {
+			continue
+		}
+		return n, ref.isEndpoint, true
+	}
+	return 0, false, false
+}
+
+// removeExitTag deletes the outbound OR endpoint carrying tag from opts (mutating
+// in place). Used by the degrade-retry to drop a single broken exit.
+func removeExitTag(opts *option.Options, tag string) {
+	if opts == nil || tag == "" {
+		return
+	}
+	if len(opts.Endpoints) > 0 {
+		kept := opts.Endpoints[:0]
+		for _, ep := range opts.Endpoints {
+			if ep.Tag != tag {
+				kept = append(kept, ep)
+			}
+		}
+		opts.Endpoints = kept
+	}
+	if len(opts.Outbounds) > 0 {
+		kept := opts.Outbounds[:0]
+		for _, ob := range opts.Outbounds {
+			if ob.Tag != tag {
+				kept = append(kept, ob)
+			}
+		}
+		opts.Outbounds = kept
+	}
 }
 
 // probeHostPort extracts host:port from a probe URL, defaulting the port by scheme.

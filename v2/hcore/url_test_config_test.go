@@ -16,7 +16,13 @@ func TestUrlTestConfig_Direct(t *testing.T) {
 	if testing.Short() {
 		t.Skip("network test")
 	}
-	cfg := `{"outbounds":[{"type":"direct","tag":"t"}]}`
+	// DNS block required now that the ping path is RAW (RunInstanceRaw): the legacy
+	// translator that used to inject a working DNS is gone, so a bare config would
+	// fall back to the system resolver. Real app ping configs carry the multi-DoH
+	// directDns fan; mirror it with a single direct DoH-over-IP so `direct` resolves
+	// gstatic. (Matches testProbeDNS in warm_probe_test.go.)
+	cfg := `{"dns":{"servers":[{"tag":"dns-direct","type":"https","server":"1.1.1.1","detour":"direct"}],"final":"dns-direct"},` +
+		`"outbounds":[{"type":"direct","tag":"t"},{"type":"direct","tag":"direct"}]}`
 	resp, err := (&CoreService{}).UrlTestConfig(context.Background(), &UrlTestConfigRequest{
 		ConfigJson: cfg,
 		Url:        "", // → default https://www.gstatic.com/generate_204
@@ -153,6 +159,7 @@ func TestUrlTestConfig_BringUpClassification(t *testing.T) {
 //   - outbound-based configs → first non-group outbound (iter4: skip selector);
 //   - direct-only config stays probe-able (raw-uplink check);
 //   - nothing usable → "".
+//
 // Options are built as plain structs (probeTag reads only Type/Tag), so the
 // test runs without protocol build tags (with_wireguard/with_awg) — the JSON
 // registry path is exercised by the network-gated tests above.

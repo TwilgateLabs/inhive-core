@@ -1905,10 +1905,15 @@ func (x *UrlTestConfigWarmRequest) GetExpectedStatus() int32 {
 }
 
 type UrlTestWarmResult struct {
-	state         protoimpl.MessageState `protogen:"open.v1"`
-	Tag           string                 `protobuf:"bytes,1,opt,name=tag,proto3" json:"tag,omitempty"`
-	DelayMs       int32                  `protobuf:"varint,2,opt,name=delay_ms,json=delayMs,proto3" json:"delay_ms,omitempty"` // real RTT in ms; 0 on failure
-	Error         string                 `protobuf:"bytes,3,opt,name=error,proto3" json:"error,omitempty"`                     // empty on success
+	state   protoimpl.MessageState `protogen:"open.v1"`
+	Tag     string                 `protobuf:"bytes,1,opt,name=tag,proto3" json:"tag,omitempty"`
+	DelayMs int32                  `protobuf:"varint,2,opt,name=delay_ms,json=delayMs,proto3" json:"delay_ms,omitempty"` // real RTT in ms; 0 on failure
+	Error   string                 `protobuf:"bytes,3,opt,name=error,proto3" json:"error,omitempty"`                     // empty on success
+	// Per-tag analogue of the instance-level bring_up_failed: true = THIS server
+	// could not be tested (probe hostname DNS-resolve failure / dialer-not-found),
+	// NOT that it is dead. The app shows blank for this tag, not a red ×. false with
+	// error set = the probe ran through the outbound and failed → honest tested-dead.
+	BringUpFailed bool `protobuf:"varint,4,opt,name=bring_up_failed,json=bringUpFailed,proto3" json:"bring_up_failed,omitempty"`
 	unknownFields protoimpl.UnknownFields
 	sizeCache     protoimpl.SizeCache
 }
@@ -1962,6 +1967,13 @@ func (x *UrlTestWarmResult) GetError() string {
 		return x.Error
 	}
 	return ""
+}
+
+func (x *UrlTestWarmResult) GetBringUpFailed() bool {
+	if x != nil {
+		return x.BringUpFailed
+	}
+	return false
 }
 
 type UrlTestConfigWarmResponse struct {
@@ -3014,11 +3026,12 @@ const file_v2_hcore_hcore_proto_rawDesc = "" +
 	"\n" +
 	"timeout_ms\x18\x04 \x01(\x05R\ttimeoutMs\x12!\n" +
 	"\finstance_key\x18\x05 \x01(\tR\vinstanceKey\x12'\n" +
-	"\x0fexpected_status\x18\x06 \x01(\x05R\x0eexpectedStatus\"V\n" +
+	"\x0fexpected_status\x18\x06 \x01(\x05R\x0eexpectedStatus\"~\n" +
 	"\x11UrlTestWarmResult\x12\x10\n" +
 	"\x03tag\x18\x01 \x01(\tR\x03tag\x12\x19\n" +
 	"\bdelay_ms\x18\x02 \x01(\x05R\adelayMs\x12\x14\n" +
-	"\x05error\x18\x03 \x01(\tR\x05error\"\x8d\x01\n" +
+	"\x05error\x18\x03 \x01(\tR\x05error\x12&\n" +
+	"\x0fbring_up_failed\x18\x04 \x01(\bR\rbringUpFailed\"\x8d\x01\n" +
 	"\x19UrlTestConfigWarmResponse\x122\n" +
 	"\aresults\x18\x01 \x03(\v2\x18.hcore.UrlTestWarmResultR\aresults\x12&\n" +
 	"\x0fbring_up_failed\x18\x02 \x01(\bR\rbringUpFailed\x12\x14\n" +

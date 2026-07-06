@@ -34,7 +34,6 @@ import (
 	"errors"
 	"time"
 
-	"github.com/sagernet/sing-box/common/urltest"
 	"github.com/sagernet/sing-box/include"
 	"github.com/sagernet/sing-box/option"
 	"github.com/twilgate/inhive-core/v2/config"
@@ -79,10 +78,15 @@ func (s *CoreService) UrlTestConfig(ctx context.Context, in *UrlTestConfigReques
 		return &UrlTestConfigResponse{Error: "no exit outbound or endpoint in config", BringUpFailed: true}, nil
 	}
 
-	// Side-instance: TUN / system-proxy / clash-api all forced off (RunInstanceQuiet).
-	// The 250ms settle delay lives inside RunInstanceQuiet — BEFORE the probe — so
-	// the measured delay is the genuine RTT, not inflated by instance bring-up.
-	inst, instErr := RunInstanceQuiet(ctx, nil, &opts)
+	// Side-instance: RAW path — the app's config runs verbatim (no legacy hiddify
+	// translation), so the probe uses the app's own DNS (multi-DoH directDns fan)
+	// and its selector default = the probed server. sanitizeSideInstance strips only
+	// TUN / clash-api / cache-file and rewrites the listen port. This is what makes a
+	// green ms mean the REAL tunnel works and a red × mean genuinely dead — the old
+	// translated path swapped in udp://1.1.1.1:53 and a balancer default, which
+	// false-dead'd domain servers on hostile networks. The 250ms settle happens
+	// inside the raw bring-up BEFORE the probe, so the measured delay is genuine RTT.
+	inst, instErr := RunInstanceRaw(ctx, &opts)
 	if instErr != nil {
 		return &UrlTestConfigResponse{Error: "run instance: " + instErr.Error(), BringUpFailed: true}, nil
 	}
@@ -99,9 +103,11 @@ func (s *CoreService) UrlTestConfig(ctx context.Context, in *UrlTestConfigReques
 		return &UrlTestConfigResponse{Error: "main outbound not found: " + mainTag, BringUpFailed: true}, nil
 	}
 
-	// urltest.URLTest does a real HTTP HEAD to the probe URL THROUGH the outbound's
-	// own dialer (TCP-over-QUIC for hy2, the detour chain for utproto, etc.) and
-	// requires the response — dead/blocked → error, no false positive.
+	// probeThroughDetour does a real HTTP HEAD to the probe URL THROUGH the outbound's
+	// own dialer (TCP-over-QUIC for hy2, the detour chain for utproto, etc.) AND checks
+	// the response status (204/200) — dead/blocked → error, a hijacked 200-with-body no
+	// longer reads green (status-guard, ping_arch_proposal §5.5). Was urltest.URLTest,
+	// which ignored the status and thus false-alived on captive-portal / MITM answers.
 	//
 	// Best-of-N on the SAME warm side-instance (2026-06-26 ping-flake fix). The old
 	// single shot declared a server dead on ANY first-attempt blip — a cold DNS
@@ -112,6 +118,16 @@ func (s *CoreService) UrlTestConfig(ctx context.Context, in *UrlTestConfigReques
 	// ride warm OS DNS/route state and resolve fast. First success wins; only if ALL
 	// attempts fail do we report a real tested-dead verdict. Total stays within the
 	// caller's `timeout` budget (default 5s, under the app's 7s gRPC guard).
+	//
+	// expectedStatus 204 (STRICT): the probe URL is gstatic/generate_204, which
+	// returns EXACTLY 204 when genuinely reached. Accepting 200 too (the old lenient
+	// default) let a FALSE-ALIVE through — a reality server with a borrowed SNI (e.g.
+	// id.vk.ru) that FAILS auth falls back to proxying the real borrowed site → the
+	// probe's gstatic request hits THAT and gets 200 → "green" ping while no traffic
+	// actually routes. Requiring 204 turns that into a tested-dead × (error
+	// "unexpected status 200"). A working tunnel → real gstatic → 204 → still passes,
+	// so this never false-deads a genuinely-working server. Matches the warm 204
+	// guard. device-log 2026-07-07: #16 pinged green with no internet through it.
 	testCtx, cancel := context.WithTimeout(ctx, timeout)
 	defer cancel()
 
@@ -121,7 +137,7 @@ func (s *CoreService) UrlTestConfig(ctx context.Context, in *UrlTestConfigReques
 			break // overall budget exhausted
 		}
 		attemptCtx, attemptCancel := context.WithTimeout(testCtx, attemptTimeout)
-		delay, terr := urltest.URLTest(attemptCtx, url, detour)
+		delay, terr := probeThroughDetour(attemptCtx, url, detour, 204)
 		attemptCancel()
 		if terr == nil && delay > 0 {
 			return &UrlTestConfigResponse{DelayMs: int32(delay)}, nil
@@ -133,6 +149,13 @@ func (s *CoreService) UrlTestConfig(ctx context.Context, in *UrlTestConfigReques
 		lastErr = errors.New("zero delay") // terr==nil but delay==0 — soft fail, keep trying
 	}
 	if lastErr != nil {
+		// A DNS-resolution failure of the PROBE hostname (gstatic) is OUR inability to
+		// test, not evidence the server is dead — the multi-DoH fan itself couldn't
+		// answer (should be rare on the raw path, but classify honestly): blank, not ×.
+		// A connect/handshake failure THROUGH the outbound is an honest tested-dead ×.
+		if isProbeDNSFailure(lastErr) {
+			return &UrlTestConfigResponse{Error: lastErr.Error(), BringUpFailed: true}, nil
+		}
 		return &UrlTestConfigResponse{Error: lastErr.Error()}, nil
 	}
 	return &UrlTestConfigResponse{Error: "zero delay"}, nil

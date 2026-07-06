@@ -13,6 +13,20 @@ import (
 	N "github.com/sagernet/sing/common/network"
 )
 
+// testProbeDNS is a minimal DNS block for the network tests. Since the ping path
+// moved to the RAW side-instance (RunInstanceRaw — it no longer runs configs
+// through the legacy translator that used to inject a working DNS), a bare
+// outbounds-only config would fall back to the system resolver, which is refused in
+// a sandbox. Real app ping configs always carry the multi-DoH directDns fan; these
+// tests mirror that with a single direct DoH-over-IP so probes can resolve gstatic.
+// (DoH-over-IP = no bootstrap, works offline of a local resolver.) The DoH server's
+// detour is "direct", so the config MUST also carry a {type:direct,tag:direct}
+// outbound (testDirectOutbound) — excluded from probeable exits by probeableExitTags.
+const testProbeDNS = `"dns":{"servers":[{"tag":"dns-direct","type":"https","server":"1.1.1.1","detour":"direct"}],"final":"dns-direct"},`
+
+// testDirectOutbound is the direct outbound the testProbeDNS block detours through.
+const testDirectOutbound = `{"type":"direct","tag":"direct"}`
+
 // ── fakeDialer / fakeLookup ──────────────────────────────────────────────────
 //
 // A fakeDialer forwards every DialContext to a fixed TCP address (an httptest
@@ -123,7 +137,7 @@ func TestProbeAllTags_MixedVerdicts(t *testing.T) {
 	defer srv.Close()
 	host := srv.Listener.Addr().String()
 
-	live := &fakeDialer{target: host}          // healthy exit
+	live := &fakeDialer{target: host}           // healthy exit
 	dead := &fakeDialer{dialErr: net.ErrClosed} // blocked/dead exit
 	lookup := fakeLookup{dialers: map[string]N.Dialer{
 		"live": live,
@@ -380,7 +394,7 @@ func TestUrlTestConfigWarm_RealWarmReuse(t *testing.T) {
 	resetWarmRegistry(t)
 	svc := &CoreService{}
 	key := "test-warm-reuse"
-	cfg := `{"outbounds":[{"type":"direct","tag":"probe"}]}`
+	cfg := `{` + testProbeDNS + `"outbounds":[{"type":"direct","tag":"probe"},` + testDirectOutbound + `]}`
 	defer releaseWarmInstance(key)
 
 	req := &UrlTestConfigWarmRequest{
@@ -449,9 +463,10 @@ func TestUrlTestConfigWarm_DeadTagHonest(t *testing.T) {
 	resetWarmRegistry(t)
 	svc := &CoreService{}
 	key := "test-warm-dead"
-	cfg := `{"outbounds":[` +
+	cfg := `{` + testProbeDNS + `"outbounds":[` +
 		`{"type":"direct","tag":"live"},` +
-		`{"type":"vless","tag":"dead","server":"10.255.255.1","server_port":1,"uuid":"00000000-0000-0000-0000-000000000000"}` +
+		`{"type":"vless","tag":"dead","server":"10.255.255.1","server_port":1,"uuid":"00000000-0000-0000-0000-000000000000"},` +
+		testDirectOutbound +
 		`]}`
 	defer releaseWarmInstance(key)
 

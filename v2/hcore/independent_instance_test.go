@@ -22,7 +22,12 @@ func TestRunInstanceCore_BringUpDeadline(t *testing.T) {
 	cfg := &option.Options{}
 
 	start := time.Now()
-	inst, err := runInstanceCore(ctx, nil, cfg)
+	// Exercise the shared race/leak machinery via the raw build path (the ping
+	// path). The expired ctx makes bringUpCtx born-expired, so runInstanceCore must
+	// take its timeout branch regardless of how fast the real bring-up would be.
+	inst, err := runInstanceCore(ctx, func(serviceCtx, bringUpCtx context.Context) (*InhiveInstance, error) {
+		return startRawSideInstance(serviceCtx, bringUpCtx, cfg)
+	})
 	elapsed := time.Since(start)
 
 	if err == nil {

@@ -9,6 +9,24 @@ shipped standalone).
 
 ## [Unreleased]
 
+## [4.7.11] - 2026-07-07
+
+### Changed (2026-07-07 — cold ping requires exactly HTTP 204)
+
+The cold probe now requires the probe endpoint's exact success code (204 from `generate_204`) instead of accepting any 2xx. A Reality server with a borrowed SNI that fails auth falls back to proxying the real borrowed site and answers the probe with 200 — which used to read as a live, working server even though no traffic routes through it. Requiring 204 turns that into an honest tested-dead ×; a working tunnel reaches the real gstatic (204) and still passes.
+
+### Changed (2026-07-06 — ping runs the app's real config, not a re-translated one)
+
+The per-server ping side-instance previously ran the app's config through the legacy hiddify translator (`config.BuildConfig`), which silently swapped the app's DNS block for a plain `udp://1.1.1.1:53` resolver and injected a round-robin balancer as the selector default. On a hostile network (an operator RST/DROP-blocking UDP:53) a domain-addressed server then failed to resolve inside the probe → the ping reported it dead, while the real tunnel — which uses the app's robust multi-DoH resolver — connected fine. Warm WireGuard/AmneziaWG probes were worse: their probe hostname resolved out a *random* subscription server (the balancer default), so a slow or dead neighbour produced a false verdict.
+
+New `RunInstanceRaw` runs the fully-built app config verbatim (the same raw path the main tunnel uses), stripping only what a side-instance must not have (TUN, clash-api, cache-file, and repointing the mixed inbound to a random loopback port via `sanitizeSideInstance`). The probe now uses the app's own DNS and its selector default = the probed server, so a green ms means the real tunnel would work and a red × means genuinely dead. Both cold (`UrlTestConfig`) and warm (`UrlTestConfigWarm`) probe callers moved to the raw path; `BootstrapFetch` deliberately kept the translated path (its bare-outbound config has no inbound for the translator to synthesise a SOCKS port from). `RunInstanceString` (raw proxy lists) still uses the translator. `go vet` clean; hcore tests pass including the networked ping tests.
+
+### Fixed (2026-07-06 — ping honesty: status-guard on the cold path, DNS-fail is blank not dead, one bad server can't blank the list)
+
+- The cold probe used `urltest.URLTest`, which accepted any HTTP response as success — a captive-portal 200-with-body or a TLS-MITM answer read as a live server. It now uses `probeThroughDetour`, which checks the response status (204/200) exactly like the warm path already did. The warm probe's HTTP client also now takes NTP-corrected time and the box's root-cert pool from context (matching `urltest.URLTest`), so a device with a skewed clock no longer false-deads on cert validation.
+- A failure to resolve the *probe* hostname (gstatic) is now classified as "couldn't test" (blank), not "server dead" (×), on both cold and warm paths (`isProbeDNSFailure`). The invariant is that a red × only ever means a probe that ran through the outbound and failed.
+- The warm instance no longer blanks the *entire* subscription when one server can't be built (a doomed domain-peer WireGuard, a protocol missing its build tag, a malformed server from a foreign subscription). `buildWarmInstance` now drops just the offending outbound/endpoint and retries (up to 3 times); the dropped tags report per-tag `bring_up_failed` (blank) and the rest are probed honestly. Added a `bring_up_failed` field to `UrlTestWarmResult` (proto regenerated).
+
 ### Fixed (2026-07-06 — multi DNS serial fallback under packet-drop censorship)
 
 The `multi` DNS transport's serial mode (`dns/transport/multi/multi.go`) wrapped one shared 10s context around the whole member loop and gave each member no deadline of its own. The underlying UDP/DoH transports have no built-in per-query timeout, so a member pointed at a blackholed resolver (operator DROPS the packet instead of RSTing — common on hostile mobile networks) would block on that shared context and consume the entire budget, and the fallback member never got a turn. Serial fallback was effectively dead against packet-drop censorship (proven: a dead first member hung the full 10s and resolution failed).

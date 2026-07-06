@@ -250,6 +250,11 @@ message UrlTestWarmResult {
   string tag = 1;
   int32 delay_ms = 2;        // real RTT in ms; 0 on failure
   string error = 3;          // empty on success
+  // Per-tag analogue of the instance-level bring_up_failed: true = THIS server
+  // could not be tested (probe hostname DNS-resolve failure / dialer-not-found),
+  // NOT that it is dead. The app shows blank for this tag, not a red ×. false with
+  // error set = the probe ran through the outbound and failed → honest tested-dead.
+  bool bring_up_failed = 4;
 }
 
 message UrlTestConfigWarmResponse {

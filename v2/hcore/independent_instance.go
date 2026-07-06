@@ -7,15 +7,19 @@ import (
 	"io"
 	"net"
 	"net/http"
+	"net/netip"
 	"os"
 	"time"
 
 	"github.com/twilgate/inhive-core/v2/config"
 	"golang.org/x/net/proxy"
 
+	C "github.com/sagernet/sing-box/constant"
 	"github.com/sagernet/sing-box/daemon"
 	"github.com/sagernet/sing-box/experimental/libbox"
 	"github.com/sagernet/sing-box/option"
+	"github.com/sagernet/sing/common"
+	"github.com/sagernet/sing/common/json/badoption"
 )
 
 // getRandomAvailblePort: best-effort port allocation. There IS a TOCTOU race
@@ -45,6 +49,33 @@ func RunInstanceString(ctx context.Context, inhiveSettings *config.InhiveOptions
 	return RunInstance(ctx, inhiveSettings, singconfigs)
 }
 
+// RunInstanceRaw brings up a side-instance from a FULLY-BUILT sing-box config
+// (the app's own buildMultiServerConfig / buildSingboxConfig output) WITHOUT
+// running it through the legacy hiddify InhiveOptions translator (config.BuildConfig
+// with EnableFullConfig=false). This is the same raw path the main tunnel uses
+// (buildconfighelper.go: EnableRawConfig=true → config.ReadSingOptions) — the
+// probe now executes in the SAME configuration semantics it will run in for real:
+// the app's multi-DoH directDns fan, its DNS rules, its selector default = the
+// probed server, its exact outbounds/endpoints. Nothing is silently re-derived.
+//
+// WHY IT MATTERS (ping honesty). The old side-instance path replaced the app's DNS
+// block with udp://1.1.1.1:53 and injected a round-robin balancer as the selector
+// default. On a hostile network (RU LTE RST-blocking UDP:53) a domain-addressed
+// server failed to resolve → dial error → tested-dead ×, while the REAL tunnel
+// (multi-DoH) connected fine. And warm WG/AWG probes resolved gstatic through a
+// RANDOM subscription server (balancer default). Both false-deads vanish once the
+// probe runs the app's config verbatim.
+//
+// sanitizeSideInstance strips only what a side-instance must not have (TUN,
+// clash-api, cache-file) and rewrites a listen inbound to a random port; DNS,
+// route, outbounds and endpoints are left byte-for-byte as the app built them.
+func RunInstanceRaw(ctx context.Context, opts *option.Options) (instance *InhiveInstance, err error) {
+	defer config.RecoverPanicToError("RunInstanceRaw", func(panicErr error) { err = panicErr })
+	return runInstanceCore(ctx, func(serviceCtx, bringUpCtx context.Context) (*InhiveInstance, error) {
+		return startRawSideInstance(serviceCtx, bringUpCtx, opts)
+	})
+}
+
 // bringUpBudget caps how long a side-instance is allowed to spend coming up
 // (config build + service start + outbound/DNS init + settle) before we give up
 // and tear it down. The service's own Start() path binds ports and initialises
@@ -60,7 +91,9 @@ const bringUpBudget = 8 * time.Second
 
 func RunInstance(ctx context.Context, inhiveSettings *config.InhiveOptions, singconfig *option.Options) (instance *InhiveInstance, err error) {
 	defer config.RecoverPanicToError("RunInstance", func(panicErr error) { err = panicErr })
-	hservice, err := runInstanceCore(ctx, inhiveSettings, singconfig)
+	hservice, err := runInstanceCore(ctx, func(serviceCtx, bringUpCtx context.Context) (*InhiveInstance, error) {
+		return runInstanceCoreBlocking(serviceCtx, bringUpCtx, inhiveSettings, singconfig)
+	})
 	if err != nil {
 		return nil, err
 	}
@@ -79,16 +112,22 @@ func RunInstance(ctx context.Context, inhiveSettings *config.InhiveOptions, sing
 // do not need the probe and should use this variant.
 func RunInstanceQuiet(ctx context.Context, inhiveSettings *config.InhiveOptions, singconfig *option.Options) (instance *InhiveInstance, err error) {
 	defer config.RecoverPanicToError("RunInstanceQuiet", func(panicErr error) { err = panicErr })
-	return runInstanceCore(ctx, inhiveSettings, singconfig)
+	return runInstanceCore(ctx, func(serviceCtx, bringUpCtx context.Context) (*InhiveInstance, error) {
+		return runInstanceCoreBlocking(serviceCtx, bringUpCtx, inhiveSettings, singconfig)
+	})
 }
 
 // runInstanceCore brings a side-instance up under a hard deadline. The actual
-// bring-up (runInstanceCoreBlocking) runs in a goroutine because the underlying
-// service Start() is not context-cancellable; we race it against bringUpBudget.
-// On timeout we return a bring_up-classified error immediately, and the goroutine
-// closes whatever instance it eventually produces so nothing leaks (leak-safe:
-// exactly one of the two owners closes the instance).
-func runInstanceCore(ctx context.Context, inhiveSettings *config.InhiveOptions, singconfig *option.Options) (*InhiveInstance, error) {
+// bring-up (via `build`) runs in a goroutine because the underlying service
+// Start() is not context-cancellable; we race it against bringUpBudget. On timeout
+// we return a bring_up-classified error immediately, and the goroutine closes
+// whatever instance it eventually produces so nothing leaks (leak-safe: exactly
+// one of the two owners closes the instance).
+//
+// `build(serviceCtx, bringUpCtx)` is the caller-supplied synchronous bring-up:
+// the legacy translated path (runInstanceCoreBlocking) or the raw path
+// (runInstanceCoreBlockingRaw). Both share this identical race/leak machinery.
+func runInstanceCore(ctx context.Context, build func(serviceCtx, bringUpCtx context.Context) (*InhiveInstance, error)) (*InhiveInstance, error) {
 	type result struct {
 		inst *InhiveInstance
 		err  error
@@ -113,7 +152,7 @@ func runInstanceCore(ctx context.Context, inhiveSettings *config.InhiveOptions, 
 		// crash the whole host process, not just fail the probe.
 		func() {
 			defer config.RecoverPanicToError("runInstanceCore.worker", func(panicErr error) { err = panicErr })
-			inst, err = runInstanceCoreBlocking(ctx, bringUpCtx, inhiveSettings, singconfig)
+			inst, err = build(ctx, bringUpCtx)
 		}()
 		select {
 		case done <- result{inst, err}:
@@ -201,6 +240,110 @@ func runInstanceCoreBlocking(serviceCtx, bringUpCtx context.Context, inhiveSetti
 		StartedService: instance,
 		ListenPort:     inhiveSettings.InboundOptions.MixedPort,
 	}, nil
+}
+
+// startRawSideInstance starts `opts` AS-IS (no legacy translation), after
+// sanitizeSideInstance strips TUN / clash-api / cache-file and rewrites a listen
+// inbound to a random port. Mirrors runInstanceCoreBlocking's start + settle +
+// leak-safe teardown. Returns the SOCKS/mixed listen port in ListenPort so
+// BootstrapFetch's ContentFromURL can dial it; 0 if the config exposes no listen
+// inbound (ping probes never use the inbound — they drive the outbound dialer
+// directly via probeThroughDetour — so a probe-only config with no inbound is
+// fine).
+func startRawSideInstance(serviceCtx, bringUpCtx context.Context, opts *option.Options) (*InhiveInstance, error) {
+	if opts == nil {
+		return nil, fmt.Errorf("nil options")
+	}
+	listenPort, err := sanitizeSideInstance(opts)
+	if err != nil {
+		return nil, err
+	}
+	// Same no-op PlatformHandler + NoPlatformLogWriter rationale as the translated
+	// path: keep the box off data/clash.db (main instance holds the exclusive lock).
+	if err := libbox.CheckConfigOptions(opts); err != nil {
+		return nil, err
+	}
+	svc := daemon.NewStartedService(daemon.ServiceOptions{
+		Context:             serviceCtx,
+		Debug:               static.debug,
+		LogMaxLines:         0,
+		Handler:             &noopPlatformHandler{},
+		NoPlatformLogWriter: true,
+	})
+	if err := svc.StartOrReloadServiceOptions(*opts); err != nil {
+		return nil, err
+	}
+	instance := svc
+
+	// Settle delay — identical to the translated path: give async outbound init a
+	// beat, honour the bring-up deadline, and close a wedged instance before bailing.
+	select {
+	case <-time.After(250 * time.Millisecond):
+	case <-bringUpCtx.Done():
+		_ = instance.CloseService()
+		return nil, bringUpCtx.Err()
+	}
+	return &InhiveInstance{
+		StartedService: instance,
+		ListenPort:     listenPort,
+	}, nil
+}
+
+// sanitizeSideInstance strips from a fully-built app config ONLY what a
+// side-instance must not carry, mutating opts in place. It deliberately does NOT
+// touch dns / route / outbounds / endpoints — that is the whole point of the raw
+// path: the probe runs the app's config verbatim (its multi-DoH directDns fan, its
+// selector default = the probed server), so a green ms means the real tunnel would
+// work and a red × means it is genuinely dead.
+//
+//   - clash-api OFF + cache-file OFF (experimental): the API port would collide
+//     with the main box and cache-file would fight for data/clash.db's lock.
+//   - TUN inbounds dropped: a side-instance must never touch the system network
+//     stack (the main VPN box owns TUN); leaving it would also demand elevated
+//     capabilities the probe path does not have.
+//   - the FIRST listen-based inbound (mixed/socks/http) is repointed to a random
+//     127.0.0.1 port so BootstrapFetch's SOCKS dial has a target and two
+//     side-instances never fight for the same port. If the config has no listen
+//     inbound (a pure probe config), none is added — probes don't use it.
+//
+// Returns the chosen listen port (0 when there is no listen inbound).
+func sanitizeSideInstance(opts *option.Options) (uint16, error) {
+	// Experimental: clash-api and cache-file off. Keep any other experimental
+	// fields the app set (v2ray stats etc. — harmless in a side-instance).
+	if opts.Experimental != nil {
+		opts.Experimental.ClashAPI = nil
+		opts.Experimental.CacheFile = nil
+	}
+
+	// Drop TUN inbounds; rewrite the first listen inbound to a random port.
+	var listenPort uint16
+	kept := make([]option.Inbound, 0, len(opts.Inbounds))
+	portAssigned := false
+	for _, inb := range opts.Inbounds {
+		if inb.Type == C.TypeTun {
+			continue // side-instance never owns TUN
+		}
+		if !portAssigned {
+			if lw, ok := inb.Options.(option.ListenOptionsWrapper); ok {
+				port, err := getRandomAvailblePort()
+				if err != nil {
+					return 0, err
+				}
+				lo := lw.TakeListenOptions()
+				lo.ListenPort = port
+				// Force loopback: a side-instance must not expose a proxy on a
+				// routable interface.
+				lo.Listen = common.Ptr(badoption.Addr(netip.MustParseAddr("127.0.0.1")))
+				lw.ReplaceListenOptions(lo)
+				inb.Options = lw
+				listenPort = port
+				portAssigned = true
+			}
+		}
+		kept = append(kept, inb)
+	}
+	opts.Inbounds = kept
+	return listenPort, nil
 }
 
 // dialer, err := s.libbox.GetInstance().Router().Dialer(context.Background())
@@ -306,8 +449,8 @@ func (s *InhiveInstance) Ping(url string) (time.Duration, error) {
 // but also can't pass nil (daemon calls handler methods unconditionally).
 type noopPlatformHandler struct{}
 
-func (*noopPlatformHandler) ServiceStop() error                                { return nil }
-func (*noopPlatformHandler) ServiceReload() error                              { return nil }
+func (*noopPlatformHandler) ServiceStop() error                                    { return nil }
+func (*noopPlatformHandler) ServiceReload() error                                  { return nil }
 func (*noopPlatformHandler) SystemProxyStatus() (*daemon.SystemProxyStatus, error) { return nil, nil }
-func (*noopPlatformHandler) SetSystemProxyEnabled(bool) error                  { return nil }
-func (*noopPlatformHandler) WriteDebugMessage(string)                          {}
+func (*noopPlatformHandler) SetSystemProxyEnabled(bool) error                      { return nil }
+func (*noopPlatformHandler) WriteDebugMessage(string)                              {}
