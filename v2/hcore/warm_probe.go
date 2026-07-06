@@ -322,7 +322,18 @@ func (s *CoreService) ReleaseWarmProbe(ctx context.Context, in *ReleaseWarmProbe
 // worker pool (matches sing-box urltest group's concurrency cap of 10). Each tag's
 // verdict is independent and honest.
 func probeAllTags(ctx context.Context, lookup dialerLookup, tags []string, url string, timeout time.Duration, expectedStatus int) []*UrlTestWarmResult {
-	const maxConcurrency = 10
+	// Пробы — сетевой I/O, не CPU, поэтому конкурентность высокая: на LTE каждый
+	// пинг медленного/заблоченного сервера ест полный timeout, и при cap=10
+	// список из 60+ серверов стакался в 7 волн → >69s → Dart-дедлайн → весь
+	// список blank. На Wi-Fi пробы летели быстро и cap=10 хватало. Поднято до 32
+	// (64 сервера = 2 волны вместо 7). Device-log 2026-07-06 (LTE warm timeout).
+	maxConcurrency := len(tags)
+	if maxConcurrency > 32 {
+		maxConcurrency = 32
+	}
+	if maxConcurrency < 1 {
+		maxConcurrency = 1
+	}
 	results := make([]*UrlTestWarmResult, len(tags))
 
 	var wg sync.WaitGroup
