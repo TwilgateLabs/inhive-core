@@ -47,11 +47,44 @@ type singboxObfs struct {
 	Password string `json:"password"`
 }
 
+// stringOrList unmarshals BOTH a scalar string ("h2") and an array
+// (["h2","http/1.1"]). sing-box's own `badoption.Listable[string]` marshals a
+// SINGLE-element list AS a bare string, so a sing-box outbound that we emitted
+// (alpn=["h2"] → "h2") and then round-trip back through THIS parser (the app
+// stores a parsed server's uri as its sing-box-outbound JSON and re-parses it on
+// every ping/connect) would otherwise fail `[]string` unmarshal → the whole
+// outbound is dropped → the server shows blank in ping and can't connect. This
+// bit every alpn-bearing node (gRPC/xhttp/hysteria2) coming from a Happ/sing-box
+// subscription; plain TCP+reality (no alpn) was unaffected. 2026-07-06.
+type stringOrList []string
+
+func (s *stringOrList) UnmarshalJSON(data []byte) error {
+	var v any
+	if err := json.Unmarshal(data, &v); err != nil {
+		return err
+	}
+	switch t := v.(type) {
+	case string:
+		if t != "" {
+			*s = []string{t}
+		}
+	case []any:
+		out := make([]string, 0, len(t))
+		for _, e := range t {
+			if str, ok := e.(string); ok && str != "" {
+				out = append(out, str)
+			}
+		}
+		*s = out
+	}
+	return nil
+}
+
 type singboxTLS struct {
-	Enabled    bool     `json:"enabled"`
-	ServerName string   `json:"server_name"`
-	Insecure   bool     `json:"insecure"`
-	ALPN       []string `json:"alpn"`
+	Enabled    bool         `json:"enabled"`
+	ServerName string       `json:"server_name"`
+	Insecure   bool         `json:"insecure"`
+	ALPN       stringOrList `json:"alpn"`
 	UTLS       *struct {
 		Enabled     bool   `json:"enabled"`
 		Fingerprint string `json:"fingerprint"`
