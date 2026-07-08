@@ -14,12 +14,14 @@ import (
 	"github.com/twilgate/inhive-core/v2/config"
 	"golang.org/x/net/proxy"
 
+	"github.com/sagernet/sing-box/adapter"
 	C "github.com/sagernet/sing-box/constant"
 	"github.com/sagernet/sing-box/daemon"
 	"github.com/sagernet/sing-box/experimental/libbox"
 	"github.com/sagernet/sing-box/option"
 	"github.com/sagernet/sing/common"
 	"github.com/sagernet/sing/common/json/badoption"
+	"github.com/sagernet/sing/service"
 )
 
 // getRandomAvailblePort: best-effort port allocation. There IS a TOCTOU race
@@ -35,6 +37,34 @@ func getRandomAvailblePort() (uint16, error) {
 	port := uint16(listener.Addr().(*net.TCPAddr).Port)
 	listener.Close()
 	return port, nil
+}
+
+// sideInstanceContext returns the context a side-instance box must run under.
+//
+// On Android the ping / bootstrap side-instance MUST carry the platform
+// interface so its outbound dialer protects its sockets via
+// VpnService.protect(fd). Without it, every dial returns EPERM
+// ("operation not permitted") while the main TUN is up: the un-protected
+// side-instance socket is captured by the VPN route and the kernel refuses the
+// connect, so every server false-reads as dead (confirmed on-device 2026-07-08:
+// `dial tcp <srv>: operation not permitted`, and even `lookup <host>: dial tcp
+// 9.9.9.9:443: operation not permitted` for the multi-DoH resolver). This is the
+// exact registration the main tunnel does (start.go StartService).
+//
+// Gated to Android on purpose: iOS runs the probe inside the NE core (whose dials
+// never loop back through the TUN) or a no-TUN standalone core, and Windows'
+// wintun does not EPERM own-process sockets — both work today, so we leave their
+// side-instance context byte-identical to avoid regressing the just-stabilised
+// iOS ping path. baseContext (libbox.FromContext) does NOT pre-register
+// adapter.PlatformInterface, so MustRegister here is a first registration (no
+// double-register panic). See [[core-crash-fixes-ping-sweep]] neighbour work.
+func sideInstanceContext(serviceCtx context.Context) context.Context {
+	if !C.IsAndroid || static.globalPlatformInterface == nil {
+		return serviceCtx
+	}
+	ctx := libbox.FromContext(serviceCtx, static.globalPlatformInterface)
+	service.MustRegister[adapter.PlatformInterface](ctx, libbox.WrapPlatformInterface(static.globalPlatformInterface))
+	return ctx
 }
 
 func RunInstanceString(ctx context.Context, inhiveSettings *config.InhiveOptions, proxiesInput string) (*InhiveInstance, error) {
@@ -215,7 +245,7 @@ func runInstanceCoreBlocking(serviceCtx, bringUpCtx context.Context, inhiveSetti
 		return nil, err
 	}
 	svc := daemon.NewStartedService(daemon.ServiceOptions{
-		Context:             serviceCtx,
+		Context:             sideInstanceContext(serviceCtx),
 		Debug:               static.debug,
 		LogMaxLines:         0,
 		Handler:             &noopPlatformHandler{},
@@ -264,7 +294,7 @@ func startRawSideInstance(serviceCtx, bringUpCtx context.Context, opts *option.O
 		return nil, err
 	}
 	svc := daemon.NewStartedService(daemon.ServiceOptions{
-		Context:             serviceCtx,
+		Context:             sideInstanceContext(serviceCtx),
 		Debug:               static.debug,
 		LogMaxLines:         0,
 		Handler:             &noopPlatformHandler{},
