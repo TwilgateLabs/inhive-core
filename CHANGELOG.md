@@ -9,6 +9,14 @@ shipped standalone).
 
 ## [Unreleased]
 
+### Fixed (2026-07-08 — bad subscription server can no longer crash the process during the ping sweep)
+
+Three startup crashes were observed while the background outbound-monitoring ping sweep tested a third-party subscription (~52 servers). All three killed the whole process and the VPN service; each is now contained so one bad server degrades to a failed probe instead of a process abort.
+
+- **xhttp packet-up config no longer panics.** `transport/v2rayxhttp/client.go` `(*Client).DialContext` called `panic("`scMaxEachPostBytes` should be bigger than 8192")` when a server advertised `sc_max_each_post_bytes` ≤ 8192. That function already returns an error, so the panic is now a returned `E.New(...)` — a malformed server config fails its dial instead of aborting.
+- **The ping tester goroutine now recovers panics.** The `go func()` in `common/monitoring/outbound_monitoring.go` `executeTask` had no recover, so any panic in any outbound's dial path killed the process. A `recover()` now converts a panic into a returned error + a logged failed `testOutcome` (delay = timeout). This is the keystone safety net — it contains any future dial-path panic, not just the xhttp one.
+- **UDP-NAT copy fault contained.** A `sigpanic` (0xc0000005) was seen inside `sing@v0.8.4` `udpnat2.(*natConn).WaitReadPacket` via `runtime.selectgo`, reached through `route.(*ConnectionManager).packetConnectionCopy`. That copy goroutine now recovers the fault and tears the single packet conn down cleanly instead of faulting the process. Root nil in the upstream `sing` module is left as follow-up (a `sing` bump is WIP/risky); the recover is the low-risk in-tree containment.
+
 ## [4.7.11] - 2026-07-07
 
 ### Changed (2026-07-07 — cold ping requires exactly HTTP 204)
