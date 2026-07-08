@@ -9,6 +9,12 @@ shipped standalone).
 
 ## [Unreleased]
 
+## [4.7.20] - 2026-07-08
+
+### Fixed (2026-07-08 — Android ping honesty: side-instance sockets now bypass the tunnel)
+
+The per-server ping side-instance ran without the sing-box platform interface in its context, so its outbound dialer never called `VpnService.protect(fd)`. While the main TUN was up, every probe dial (including the multi-DoH resolver) returned `EPERM` ("operation not permitted") — the un-protected socket got captured by the VPN route and the kernel refused the connect — so **every server false-read as dead** on Android. `sideInstanceContext()` now registers the platform interface into the side-instance context on Android (gated to Android on purpose: iOS runs the probe inside the NE / no-TUN standalone core, and Windows wintun doesn't EPERM own-process sockets, so both are left byte-identical to avoid regressing the just-stabilised iOS ping path). Confirmed on-device: EPERM gone, connected ping matches iOS.
+
 ### Fixed (2026-07-08 — bad subscription server can no longer crash the process during the ping sweep)
 
 Three startup crashes were observed while the background outbound-monitoring ping sweep tested a third-party subscription (~52 servers). All three killed the whole process and the VPN service; each is now contained so one bad server degrades to a failed probe instead of a process abort.
