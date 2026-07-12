@@ -9,6 +9,12 @@ shipped standalone).
 
 ## [Unreleased]
 
+### Fixed (log delivery — Logs tab audit 2026-07-13)
+
+- Log subscriber queue grew from 1 to 256 lines: bursts (connect handshake) no longer lose most lines before reaching the client stream.
+- Log broadcaster keeps a 200-line history and replays it to new subscribers — startup/config errors emitted before the app subscribes (iOS NE especially) are no longer lost.
+- Package-level sing-box log calls inside hcore are routed to the log stream from Setup onward (previously stderr-only until the first tunnel start re-pointed the std logger).
+
 ### Fixed (ping honesty audit 2026-07-12 — kill blank verdicts)
 
 - **Deterministic config failures are now an honest ✗, not a blank.** New `config_rejected` field on `UrlTestConfigResponse` / `UrlTestWarmResult`: parse errors, configs without an exit, stubbed/unsupported outbound types and missing SIP003 plugins would fail a real connection identically, so "couldn't test" was a lie. Transient bring-up failures (bind race, timeout, panic) keep the old "couldn't test" class.

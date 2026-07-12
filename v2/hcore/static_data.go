@@ -64,8 +64,11 @@ type InhiveInstance struct {
 
 var static = &InhiveInstance{
 	CoreState:                 CoreStates_STOPPED,
-	coreInfoObserver:          monitoring.NewBroadcaster[*CoreInfoResponse](context.Background()),
-	logObserver:               monitoring.NewBroadcaster[*LogMessage](context.Background()),
+	coreInfoObserver: monitoring.NewBroadcaster[*CoreInfoResponse](context.Background()),
+	// История 200 строк: подписчик (вкладка «Логи» в app) получает реплей
+	// того, что ядро успело написать ДО подписки — ошибки старта, ранний
+	// bring-up. Критично на iOS: NE-процесс живёт до gRPC-подписки app.
+	logObserver:               monitoring.NewBroadcasterWithHistory[*LogMessage](context.Background(), 200),
 	systemInfoObserver:        monitoring.NewBroadcaster[*SystemInfo](context.Background()),
 	outboundsInfoObserver:     monitoring.NewBroadcaster[*OutboundGroupList](context.Background()),
 	mainOutboundsInfoObserver: monitoring.NewBroadcaster[*OutboundGroupList](context.Background()),

@@ -112,6 +112,11 @@ func Setup(params *SetupRequest, platformInterface libbox.PlatformInterface) err
 	if err != nil {
 		return E.Cause(err, "create logger")
 	}
+	// Пакетные log.Info/Error внутри hcore до этого уходили в stderr-дефолт и
+	// не доезжали до вкладки «Логи» (std перенаправляется на box-фабрику лишь
+	// после коннекта, instance.go). Ранний период Setup→первый старт теперь
+	// тоже идёт через LogInterface → logObserver → gRPC stream.
+	log.SetStdLogger(factory.Logger())
 
 	Log(LogLevel_DEBUG, LogType_CORE, fmt.Sprintf("StartGrpcServerByMode %s %d\n", params.Listen, params.Mode))
 	switch params.Mode {
