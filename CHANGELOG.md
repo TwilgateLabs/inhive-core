@@ -9,6 +9,8 @@ shipped standalone).
 
 ## [Unreleased]
 
+## [4.7.30] - 2026-07-13
+
 ### Fixed (log delivery — Logs tab audit 2026-07-13)
 
 - Log subscriber queue grew from 1 to 256 lines: bursts (connect handshake) no longer lose most lines before reaching the client stream.
