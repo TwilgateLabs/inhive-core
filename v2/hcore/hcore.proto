@@ -208,6 +208,14 @@ message UrlTestConfigResponse {
   // false with error set = the side-instance came up and the probe itself
   // failed through the outbound → honest tested-dead verdict.
   bool bring_up_failed = 3;
+  // Refinement of bring_up_failed: true = the failure is DETERMINISTIC and
+  // config-level (parse error / unknown or stubbed outbound type / plugin not
+  // found / no exit in config). The SAME config would fail identically at
+  // connect time, so "couldn't test" would be a lie — the server is unusable
+  // for this client. The app maps bring_up_failed+config_rejected to an honest
+  // red × instead of blank. bring_up_failed=true with config_rejected=false
+  // stays "couldn't test" (transient local failure: bind race, timeout, panic).
+  bool config_rejected = 4;
 }
 
 // UrlTestConfigWarm — ping v2. Same honesty + disconnected moat as UrlTestConfig,
@@ -255,6 +263,9 @@ message UrlTestWarmResult {
   // NOT that it is dead. The app shows blank for this tag, not a red ×. false with
   // error set = the probe ran through the outbound and failed → honest tested-dead.
   bool bring_up_failed = 4;
+  // Per-tag analogue of UrlTestConfigResponse.config_rejected: deterministic
+  // config-level failure (outbound failed to BUILD) → honest × , not blank.
+  bool config_rejected = 5;
 }
 
 message UrlTestConfigWarmResponse {

@@ -9,6 +9,14 @@ shipped standalone).
 
 ## [Unreleased]
 
+### Fixed (ping honesty audit 2026-07-12 — kill blank verdicts)
+
+- **Deterministic config failures are now an honest ✗, not a blank.** New `config_rejected` field on `UrlTestConfigResponse` / `UrlTestWarmResult`: parse errors, configs without an exit, stubbed/unsupported outbound types and missing SIP003 plugins would fail a real connection identically, so "couldn't test" was a lie. Transient bring-up failures (bind race, timeout, panic) keep the old "couldn't test" class.
+- **`psiphon` gets a removed-outbound stub.** The outbound was unregistered (breaks Go 1.26 TLS) but ray2sing and the app parser still emit `type:psiphon` — such a config failed the *whole* parse (`unknown outbound type`), so its ping was an eternal blank and the tunnel start died with a cryptic error. With the stub the config parses and the create fails deterministically → honest ✗ in the ping, readable error in the log.
+- **The probe can no longer outlive its budget.** Platform resolvers (getaddrinfo / Android DnsResolver) are not context-cancellable; a stalled resolve made the gRPC handler outlive the app's deadline → the app saw a timeout → blank verdict (the LTE "grpc-domain nodes ping forever/blank" symptom). `probeThroughDetourGuarded` races the probe against its context, so the core always answers within the budget — a stalled dial is an honest "unreachable within budget" ✗ (the live tunnel would stall the same way).
+- **Cold WireGuard/AWG/WARP endpoints no longer false-✗.** The endpoint's dialer sends packets before the WG handshake completes (the 250 ms settle doesn't cover it), so the first cold probe often timed out on a живом сервере. The probe now waits for the endpoint's `IsReady()` (up to ⅓ of the budget) before dialing; warm cycles are a no-op.
+- **A panic inside a warm per-tag probe is no longer reported as server-dead.** The recover handler set `Error` without `BringUpFailed`, so our own code bug read as an honest ✗ for that server.
+
 ## [4.7.23] - 2026-07-12
 
 ### Fixed (ping honesty — CDN/domain server-ping false-✗ and blanks)

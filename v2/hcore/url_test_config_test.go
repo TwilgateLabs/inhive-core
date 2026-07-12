@@ -2,6 +2,7 @@ package hcore
 
 import (
 	"context"
+	"errors"
 	"testing"
 	"time"
 
@@ -215,6 +216,58 @@ func TestProbeTag(t *testing.T) {
 	for _, tc := range cases {
 		if got := probeTag(&tc.opts); got != tc.want {
 			t.Fatalf("%s: probeTag=%q, want %q", tc.name, got, tc.want)
+		}
+	}
+}
+
+// TestUrlTestConfig_ConfigRejected: детерминированные конфиг-фейлы обязаны нести
+// config_rejected=true — приложение мапит их в честный × («сервер непригоден для
+// этого клиента»: боевой коннект упал бы так же), а НЕ в пустоту. Транзиентные
+// bring-up фейлы config_rejected нести НЕ должны (их обрабатывает stale+retry).
+func TestUrlTestConfig_ConfigRejected(t *testing.T) {
+	for name, cfg := range map[string]string{
+		"garbage json": `{not json`,
+		"no exits":     `{"outbounds":[]}`,
+		// psiphon снят с регистрации (Go 1.26 TLS), но имеет стаб — парс проходит,
+		// create даёт детерминированную ошибку → bring-up → config_rejected.
+		"stubbed psiphon": `{"outbounds":[{"type":"psiphon","tag":"p","server":"1.2.3.4","server_port":443}]}`,
+	} {
+		resp, err := (&CoreService{}).UrlTestConfig(context.Background(), &UrlTestConfigRequest{ConfigJson: cfg})
+		if err != nil {
+			t.Fatalf("%s: unexpected hard error: %v", name, err)
+		}
+		if !resp.BringUpFailed {
+			t.Fatalf("%s: expected bring-up class, got probe-failed (%s)", name, resp.Error)
+		}
+		if !resp.ConfigRejected {
+			t.Fatalf("%s: deterministic config failure must carry config_rejected (err=%s)", name, resp.Error)
+		}
+	}
+}
+
+// TestIsDeterministicBringUpError: маркеры create/initialize-стадии — deterministic;
+// транзиентные корни (timeout, bind) — нет.
+func TestIsDeterministicBringUpError(t *testing.T) {
+	det := []string{
+		"initialize outbound[0]: psiphon outbound is not available in this build",
+		"initialize endpoint[0]: bad private key",
+		"parse config: unknown outbound type: psiphon",
+		"create outbound: plugin not found: fancy-plugin",
+		"initialize outbound[2]: WireGuard outbound is deprecated in sing-box 1.11.0",
+	}
+	for _, s := range det {
+		if !isDeterministicBringUpError(errors.New(s)) {
+			t.Fatalf("expected deterministic: %s", s)
+		}
+	}
+	transient := []string{
+		"side-instance bring-up exceeded 8s: context deadline exceeded",
+		"start outbound/vless[proxy]: dial tcp 1.2.3.4:443: connection refused",
+		"listen tcp 127.0.0.1:64321: bind: address already in use",
+	}
+	for _, s := range transient {
+		if isDeterministicBringUpError(errors.New(s)) {
+			t.Fatalf("expected transient: %s", s)
 		}
 	}
 }

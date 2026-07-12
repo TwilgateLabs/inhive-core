@@ -52,7 +52,7 @@ func (s *CoreService) UrlTestConfig(ctx context.Context, in *UrlTestConfigReques
 	})
 
 	if in.ConfigJson == "" {
-		return &UrlTestConfigResponse{Error: "empty config_json", BringUpFailed: true}, nil
+		return &UrlTestConfigResponse{Error: "empty config_json", BringUpFailed: true, ConfigRejected: true}, nil
 	}
 
 	url := in.Url
@@ -68,14 +68,17 @@ func (s *CoreService) UrlTestConfig(ctx context.Context, in *UrlTestConfigReques
 	// endpoint registries — the bare gRPC ctx must be enriched first.
 	ctx = include.Context(ctx)
 
+	// ConfigRejected на детерминированных фейлах (parse / no-exit / stubbed type /
+	// plugin not found): тот же конфиг точно так же упадёт при подключении, «не
+	// смогли протестировать» было бы враньём — приложение мапит это в честный ×.
 	var opts option.Options
 	if jsonErr := opts.UnmarshalJSONContext(ctx, []byte(in.ConfigJson)); jsonErr != nil {
-		return &UrlTestConfigResponse{Error: "parse config: " + jsonErr.Error(), BringUpFailed: true}, nil
+		return &UrlTestConfigResponse{Error: "parse config: " + jsonErr.Error(), BringUpFailed: true, ConfigRejected: true}, nil
 	}
 
 	mainTag := probeTag(&opts)
 	if mainTag == "" {
-		return &UrlTestConfigResponse{Error: "no exit outbound or endpoint in config", BringUpFailed: true}, nil
+		return &UrlTestConfigResponse{Error: "no exit outbound or endpoint in config", BringUpFailed: true, ConfigRejected: true}, nil
 	}
 
 	// Side-instance: RAW path — the app's config runs verbatim (no legacy hiddify
@@ -88,7 +91,14 @@ func (s *CoreService) UrlTestConfig(ctx context.Context, in *UrlTestConfigReques
 	// inside the raw bring-up BEFORE the probe, so the measured delay is genuine RTT.
 	inst, instErr := RunInstanceRaw(ctx, &opts)
 	if instErr != nil {
-		return &UrlTestConfigResponse{Error: "run instance: " + instErr.Error(), BringUpFailed: true}, nil
+		// Детерминированный create-fail (initialize outbound: стаб/битые опции/плагин)
+		// → ConfigRejected (честный ×). Транзиентный (bind-гонка, bring-up timeout,
+		// паника) → обычный bring_up_failed (couldn't test).
+		return &UrlTestConfigResponse{
+			Error:          "run instance: " + instErr.Error(),
+			BringUpFailed:  true,
+			ConfigRejected: isDeterministicBringUpError(instErr),
+		}, nil
 	}
 	defer inst.Close()
 
@@ -100,7 +110,9 @@ func (s *CoreService) UrlTestConfig(ctx context.Context, in *UrlTestConfigReques
 	// (adapter/outbound/manager.go: m.endpoint.Get(tag)) — one lookup covers both.
 	detour, ok := b.Outbound().Outbound(mainTag)
 	if !ok {
-		return &UrlTestConfigResponse{Error: "main outbound not found: " + mainTag, BringUpFailed: true}, nil
+		// Бокс поднялся, но тега нет — конфиг-шейп нашего же билдера; боевой коннект
+		// с тем же конфигом упрётся туда же → детерминированный «недоступен».
+		return &UrlTestConfigResponse{Error: "main outbound not found: " + mainTag, BringUpFailed: true, ConfigRejected: true}, nil
 	}
 
 	// probeThroughDetour does a real HTTP HEAD to the probe URL THROUGH the outbound's
@@ -117,7 +129,10 @@ func (s *CoreService) UrlTestConfig(ctx context.Context, in *UrlTestConfigReques
 	// instance — attempt 1 gets the big slice for the cold handshake, attempts 2-3
 	// ride warm OS DNS/route state and resolve fast. First success wins; only if ALL
 	// attempts fail do we report a real tested-dead verdict. Total stays within the
-	// caller's `timeout` budget (default 5s, under the app's 7s gRPC guard).
+	// caller's `timeout` budget (default 5s; the app awaits the RPC for
+	// timeoutMs+9000 — bridge.dart pingOutbound — so bring-up 8s + probe budget
+	// always fit under the Dart deadline as long as the probe honours testCtx;
+	// probeThroughDetourGuarded enforces that even for uncancellable dials).
 	//
 	// expectedStatus 204 (STRICT): the probe URL is gstatic/generate_204, which
 	// returns EXACTLY 204 when genuinely reached. Accepting 200 too (the old lenient
@@ -131,13 +146,20 @@ func (s *CoreService) UrlTestConfig(ctx context.Context, in *UrlTestConfigReques
 	testCtx, cancel := context.WithTimeout(ctx, timeout)
 	defer cancel()
 
+	// Endpoint-исходы (wireguard/awg/warp) начинают WG-handshake асинхронно после
+	// старта бокса; DialContext НЕ ждёт готовности туннеля — холодная проба до
+	// завершения рукопожатия просто теряла пакеты и давала false-× (settle 250ms
+	// его не покрывает). Дожидаемся IsReady() в пределах куска бюджета; не готов —
+	// проба всё равно пойдёт и честно провалится по бюджету.
+	waitDetourReady(testCtx, detour, timeout/3)
+
 	var lastErr error
 	for _, attemptTimeout := range splitProbeBudget(timeout) {
 		if testCtx.Err() != nil {
 			break // overall budget exhausted
 		}
 		attemptCtx, attemptCancel := context.WithTimeout(testCtx, attemptTimeout)
-		delay, terr := probeThroughDetour(attemptCtx, url, detour, 204)
+		delay, terr := probeThroughDetourGuarded(attemptCtx, url, detour, 204)
 		attemptCancel()
 		if terr == nil && delay > 0 {
 			return &UrlTestConfigResponse{DelayMs: int32(delay)}, nil

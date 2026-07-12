@@ -358,10 +358,13 @@ func (s *CoreService) UrlTestConfigWarm(ctx context.Context, in *UrlTestConfigWa
 	var results []*UrlTestWarmResult
 	for _, tag := range tags {
 		if entry.dropped[tag] {
+			// Outbound не СОБРАЛСЯ (create-fail при bring-up) — детерминированный
+			// конфиг-фейл: боевой коннект с этим сервером упадёт так же → честный ×.
 			results = append(results, &UrlTestWarmResult{
-				Tag:           tag,
-				Error:         "excluded: outbound failed to build",
-				BringUpFailed: true,
+				Tag:            tag,
+				Error:          "excluded: outbound failed to build",
+				BringUpFailed:  true,
+				ConfigRejected: true,
 			})
 			continue
 		}
@@ -411,7 +414,9 @@ func probeAllTags(ctx context.Context, lookup dialerLookup, tags []string, url s
 			defer wg.Done()
 			defer func() { <-sem }()
 			defer config.RecoverPanicToError("warmProbeTag", func(e error) {
-				results[i] = &UrlTestWarmResult{Tag: tag, Error: e.Error()}
+				// Паника — баг НАШЕГО кода, никогда не свидетельство смерти сервера:
+				// без BringUpFailed она читалась как честный × (false-dead).
+				results[i] = &UrlTestWarmResult{Tag: tag, Error: e.Error(), BringUpFailed: true}
 			})
 			results[i] = probeSingleTag(ctx, lookup, tag, url, timeout, expectedStatus)
 		}(i, tag)
@@ -435,13 +440,17 @@ func probeSingleTag(ctx context.Context, lookup dialerLookup, tag, url string, t
 	testCtx, cancel := context.WithTimeout(ctx, timeout)
 	defer cancel()
 
+	// Endpoint-исходы (WG/AWG/WARP): дождаться handshake-готовности, иначе холодный
+	// первый цикл false-×'ит (см. waitDetourReady). Тёплые циклы — мгновенный no-op.
+	waitDetourReady(testCtx, detour, timeout/3)
+
 	var lastErr error
 	for _, attemptTimeout := range splitProbeBudget(timeout) {
 		if testCtx.Err() != nil {
 			break
 		}
 		attemptCtx, attemptCancel := context.WithTimeout(testCtx, attemptTimeout)
-		delay, terr := probeThroughDetour(attemptCtx, url, detour, expectedStatus)
+		delay, terr := probeThroughDetourGuarded(attemptCtx, url, detour, expectedStatus)
 		attemptCancel()
 		if terr == nil && delay > 0 {
 			return &UrlTestWarmResult{Tag: tag, DelayMs: int32(delay)}
@@ -543,6 +552,97 @@ func statusOK(code, expectedStatus int) bool {
 		return code == http.StatusNoContent || code == http.StatusOK
 	}
 	return code == expectedStatus
+}
+
+// probeThroughDetourGuarded races probeThroughDetour against ctx. Нужна потому,
+// что не весь тракт дайла контекст-отменяем: платформенные резолверы (getaddrinfo
+// на darwin/windows, DnsResolver на Android) могут блокировать dial дольше любого
+// бюджета — тогда handler переживал Dart-дедлайн (timeoutMs+9000), gRPC-вызов
+// умирал на стороне приложения и юзер видел ПУСТОТУ вместо вердикта. Гонка
+// гарантирует ответ строго в бюджете: залипшая попытка бросается (goroutine
+// дорабатывает в фоне и гасится recover'ом), а истёкший ctx классифицируется
+// выше как честный × — «на этой сети сейчас сервер не отвечает за бюджет» верно
+// и для боевого коннекта, проба = боевой конфиг.
+func probeThroughDetourGuarded(ctx context.Context, link string, detour N.Dialer, expectedStatus int) (uint16, error) {
+	type probeResult struct {
+		delay uint16
+		err   error
+	}
+	ch := make(chan probeResult, 1)
+	go func() {
+		defer config.RecoverPanicToError("probeThroughDetour", func(e error) {
+			ch <- probeResult{0, e}
+		})
+		delay, err := probeThroughDetour(ctx, link, detour, expectedStatus)
+		ch <- probeResult{delay, err}
+	}()
+	select {
+	case r := <-ch:
+		return r.delay, r.err
+	case <-ctx.Done():
+		return 0, fmt.Errorf("probe budget exhausted: %w", ctx.Err())
+	}
+}
+
+// readyChecker — эндпоинты wireguard/awg/warp репортят готовность туннеля
+// (protocol/wireguard/endpoint.go IsReady). Обычные outbounds интерфейс не
+// реализуют — для них waitDetourReady no-op.
+type readyChecker interface{ IsReady() bool }
+
+// waitDetourReady ждёт готовности endpoint-исхода перед пробой (максимум max,
+// с ранним выходом по ctx). WG-handshake стартует асинхронно после старта бокса;
+// дайл до готовности молча теряет пакеты → false-× холодного эндпоинта. Не
+// дождались — не приговор: проба пойдёт и вынесет вердикт по своему бюджету.
+func waitDetourReady(ctx context.Context, detour any, max time.Duration) {
+	rc, ok := detour.(readyChecker)
+	if !ok || rc.IsReady() {
+		return
+	}
+	deadline := time.Now().Add(max)
+	ticker := time.NewTicker(100 * time.Millisecond)
+	defer ticker.Stop()
+	for {
+		select {
+		case <-ctx.Done():
+			return
+		case <-ticker.C:
+			if rc.IsReady() || time.Now().After(deadline) {
+				return
+			}
+		}
+	}
+}
+
+// isDeterministicBringUpError распознаёт КОНФИГ-УРОВНЕВЫЙ детерминированный
+// провал bring-up: тот же конфиг идентично упадёт и при боевом подключении,
+// поэтому «не смогли протестировать» (blank) было бы враньём — приложение мапит
+// такой bring_up_failed+config_rejected в честный ×. Транзиентные корни (bind-
+// гонка, bring-up timeout, паника) сюда НЕ входят — они остаются blank.
+// Маркеры — фразы create/initialize-стадии sing-box (box.go startOutbounds) и
+// стабов removed-протоколов (include/registry.go); start-стадия («start
+// outbound/…») сознательно не матчится: там уже возможен сетевой I/O.
+func isDeterministicBringUpError(err error) bool {
+	if err == nil {
+		return false
+	}
+	msg := err.Error()
+	for _, marker := range []string{
+		"parse config:",
+		"initialize outbound",
+		"initialize endpoint",
+		"create outbound",
+		"create endpoint",
+		"unknown outbound type",
+		"unknown endpoint type",
+		"not available in this build",
+		"is deprecated",
+		"plugin not found",
+	} {
+		if strings.Contains(msg, marker) {
+			return true
+		}
+	}
+	return false
 }
 
 // isProbeDNSFailure reports whether a probe error is a failure to RESOLVE the
