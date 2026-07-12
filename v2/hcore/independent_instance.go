@@ -59,11 +59,32 @@ func getRandomAvailblePort() (uint16, error) {
 // adapter.PlatformInterface, so MustRegister here is a first registration (no
 // double-register panic). See [[core-crash-fixes-ping-sweep]] neighbour work.
 func sideInstanceContext(serviceCtx context.Context) context.Context {
-	if !C.IsAndroid || static.globalPlatformInterface == nil {
+	if static.globalPlatformInterface == nil {
 		return serviceCtx
 	}
+	// libbox.FromContext (baseContext) registers the platform `type:local` DNS
+	// transport when the platform interface exposes a LocalDNSTransport.
+	//
+	// InHive P3 (2026-07-12): do this on iOS too (was Android-only). On a fail-closed
+	// whitelist the probe's DoH-over-IP fan is dropped, and the native darwin
+	// `type:local` falls back to the Go resolver → /etc/resolv.conf unreadable in the
+	// iOS sandbox → default nameserver [::1]:53 → connection refused. So a side-instance
+	// with a DOMAIN server address (e.g. cdn.inhive.net) has NO working resolver and the
+	// dial dies before the outbound — the backend false-deads (×), while its literal-IP
+	// twin has nothing to resolve and pings green. Routing `type:local` to the platform
+	// resolver (iOS: Swift LocalResolver → getaddrinfo on the underlying non-VPN network,
+	// bypassing TUN) makes the probe resolve the server domain EXACTLY like the live
+	// tunnel. gstatic / payload hosts resolve REMOTELY at the exit, so only the server
+	// address needed this. See the IP-vs-domain probe-divergence trace.
 	ctx := libbox.FromContext(serviceCtx, static.globalPlatformInterface)
-	service.MustRegister[adapter.PlatformInterface](ctx, libbox.WrapPlatformInterface(static.globalPlatformInterface))
+	// protect(fd) via VpnService.protect is ANDROID-ONLY: without it an Android
+	// side-instance socket is captured by the main TUN route → EPERM (device-log
+	// 2026-07-08). iOS NE / no-TUN standalone never loop own-process sockets through a
+	// TUN, so registering the PlatformInterface adapter there is unnecessary — we keep
+	// the settled iOS path byte-identical except for the now-working type:local resolver.
+	if C.IsAndroid {
+		service.MustRegister[adapter.PlatformInterface](ctx, libbox.WrapPlatformInterface(static.globalPlatformInterface))
+	}
 	return ctx
 }
 
@@ -340,10 +361,19 @@ func startRawSideInstance(serviceCtx, bringUpCtx context.Context, opts *option.O
 func sanitizeSideInstance(opts *option.Options) (uint16, error) {
 	// Experimental: clash-api and cache-file off. Keep any other experimental
 	// fields the app set (v2ray stats etc. — harmless in a side-instance).
-	if opts.Experimental != nil {
-		opts.Experimental.ClashAPI = nil
-		opts.Experimental.CacheFile = nil
+	// InHive P0 (2026-07-12): monitoring OFF — паразитный OutboundMonitoring в
+	// side-instance гоняет конкурирующие URL-тесты через тот же outbound, что
+	// меряет проба, и на общем xmux h2-клиенте (xhttp) травит транспорт →
+	// io.ErrClosedPipe → false-×. box.go пропускает создание при Disabled=true.
+	if opts.Experimental == nil {
+		opts.Experimental = &option.ExperimentalOptions{}
 	}
+	opts.Experimental.ClashAPI = nil
+	opts.Experimental.CacheFile = nil
+	if opts.Experimental.Monitoring == nil {
+		opts.Experimental.Monitoring = &option.MonitoringOptions{}
+	}
+	opts.Experimental.Monitoring.Disabled = true
 
 	// Drop TUN inbounds; rewrite the first listen inbound to a random port.
 	var listenPort uint16

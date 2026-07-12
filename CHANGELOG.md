@@ -9,6 +9,15 @@ shipped standalone).
 
 ## [Unreleased]
 
+## [4.7.23] - 2026-07-12
+
+### Fixed (ping honesty — CDN/domain server-ping false-✗ and blanks)
+
+- **iOS side-instance can now resolve a domain server address.** `sideInstanceContext()` registered the platform interface (→ the Swift `LocalResolver` for `type:local`) **only on Android**; on iOS the probe's side-instance had no working resolver on a fail-closed whitelist (DoH-over-IP dropped, native darwin `type:local` falls back to `[::1]:53` → refused), so a backend on a **domain** address (e.g. `cdn.inhive.net`) false-✗'d before the dial while its literal-IP twin pinged green. The Android-only gate is lifted (any platform with a `globalPlatformInterface`); the `VpnService.protect(fd)` `MustRegister` stays Android-only. The probe now resolves the server domain exactly like the live tunnel. Windows is a no-op (no platform interface).
+- **Parasitic `OutboundMonitoring` no longer runs inside a probe / pingOnly instance.** A `NewOutboundMonitoring` was created unconditionally in **every** box (`box.go`), including each per-server side-instance and the standalone ping host, where it ran its own competing URL-tests (5s cap) through the same outbounds the real probe was measuring — on a shared xhttp/xmux h2 client it poisoned the transport (`io.ErrClosedPipe`) → false-✗. A new `experimental.monitoring.disabled` gates creation; `sanitizeSideInstance` sets it for side-instances and the app emits it for pingOnly configs. The live tunnel keeps monitoring (mode-watcher). Monitoring methods are now nil-receiver-safe.
+- **A server whose address can't be resolved now reads as tested-dead (✗), not blank.** `isProbeDNSFailure` matched *any* `lookup …` error and so mis-classified a **server-address** resolution failure as "our inability to test" → `BringUpFailed` (blank). It now only blanks when the **probe target** (gstatic) itself fails to resolve; an unresolvable server address is an honest ✗ (it's unreachable for the user too). This is why grpc/domain backends showed empty instead of ✗.
+- **Probe budget is one attempt on the full budget** (was best-of-3 60/20/20): the 20% retries were shorter than a cold xhttp/reality handshake and inherited a half-torn transport, and the UI hysteresis already absorbs transient flakes.
+
 ## [4.7.20] - 2026-07-08
 
 ### Fixed (2026-07-08 — Android ping honesty: side-instance sockets now bypass the tunnel)

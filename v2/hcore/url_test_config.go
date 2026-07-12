@@ -153,7 +153,7 @@ func (s *CoreService) UrlTestConfig(ctx context.Context, in *UrlTestConfigReques
 		// test, not evidence the server is dead — the multi-DoH fan itself couldn't
 		// answer (should be rare on the raw path, but classify honestly): blank, not ×.
 		// A connect/handshake failure THROUGH the outbound is an honest tested-dead ×.
-		if isProbeDNSFailure(lastErr) {
+		if isProbeDNSFailure(lastErr, probeURLHost(url)) {
 			return &UrlTestConfigResponse{Error: lastErr.Error(), BringUpFailed: true}, nil
 		}
 		return &UrlTestConfigResponse{Error: lastErr.Error()}, nil
@@ -200,18 +200,19 @@ func probeTag(opts *option.Options) string {
 	return ""
 }
 
-// splitProbeBudget divides the probe budget across best-of-N attempts. The first
-// attempt gets the largest slice (it pays the cold DNS+TCP+TLS+WS handshake); the
-// rest are smaller because they ride warm OS state and should resolve quickly.
-// 60% / 20% / 20% — three shots inside one budget (5s → 3s, 1s, 1s).
+// splitProbeBudget returns the probe attempt schedule.
+//
+// InHive P2 (2026-07-12): ОДИН заход на ВЕСЬ бюджет. Раньше делили 60/20/20 на
+// best-of-3, но: (а) 20%-ретраи (~2.2с) заведомо короче холодного establish
+// xhttp-через-CDN / reality-handshake → второй-третий заходы гарантированно
+// не успевали и только жгли время; (б) после отменённой первой попытки ретраи
+// наследовали полу-оторванный транспорт (лингерящие WithoutCancel GET/POST
+// травили общий xmux-клиент); (в) UI-гистерезис (_hysteresisVerdict, 2 подряд
+// dead) уже глушит транзиентные флейки — второй слой ретраев был избыточен и
+// вреден. Теперь холодный xhttp/reality получает весь бюджет (11с) одним куском.
 func splitProbeBudget(total time.Duration) []time.Duration {
 	if total <= 0 {
 		total = urlTestConfigDefaultTimeout
 	}
-	first := total * 3 / 5
-	rest := (total - first) / 2
-	if rest <= 0 {
-		return []time.Duration{total}
-	}
-	return []time.Duration{first, rest, rest}
+	return []time.Duration{total}
 }

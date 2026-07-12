@@ -461,7 +461,7 @@ func probeSingleTag(ctx context.Context, lookup dialerLookup, tag, url string, t
 	return &UrlTestWarmResult{
 		Tag:           tag,
 		Error:         lastErr.Error(),
-		BringUpFailed: isProbeDNSFailure(lastErr),
+		BringUpFailed: isProbeDNSFailure(lastErr, probeURLHost(url)),
 	}
 }
 
@@ -552,18 +552,38 @@ func statusOK(code, expectedStatus int) bool {
 // (dns/router.go: E.Cause(err, "lookup ", domain)); Go's own resolver surfaces
 // *net.DNSError. On the raw probe path (app's multi-DoH fan) this should be rare,
 // but classifying it honestly keeps the invariant "× only ever means proven dead".
-func isProbeDNSFailure(err error) bool {
-	if err == nil {
+func isProbeDNSFailure(err error, probeHost string) bool {
+	if err == nil || probeHost == "" {
 		return false
 	}
+	probeHost = strings.TrimSuffix(probeHost, ".")
+	// Blank ONLY when the PROBE TARGET (gstatic) itself failed to resolve — that is
+	// OUR inability to test, not a verdict on the server. A failure to resolve the
+	// SERVER's OWN address (e.g. a grpc backend on a domain that doesn't resolve /
+	// resolves too slowly on the operator DNS) means the server is unreachable for the
+	// user too → honest tested-dead × , NEVER blank. The old code matched ANY
+	// "lookup ..." error and so mis-blanked every domain-server backend whose address
+	// wouldn't resolve — that is why grpc/domain nodes showed empty instead of ×.
+	// (InHive 2026-07-12)
 	var dnsErr *net.DNSError
 	if errors.As(err, &dnsErr) {
-		return true
+		return strings.TrimSuffix(dnsErr.Name, ".") == probeHost
 	}
 	msg := err.Error()
-	return strings.Contains(msg, "lookup ") ||
-		strings.Contains(msg, "no such host") ||
-		strings.Contains(msg, "server misbehaving")
+	return strings.Contains(msg, "lookup "+probeHost)
+}
+
+// probeURLHost returns the hostname of the probe URL (e.g. www.gstatic.com), used to
+// tell a probe-TARGET DNS failure (blank) apart from a SERVER-address one (×).
+func probeURLHost(link string) string {
+	if link == "" {
+		link = urlTestConfigDefaultURL
+	}
+	u, err := url.Parse(link)
+	if err != nil {
+		return ""
+	}
+	return u.Hostname()
 }
 
 // extractFailingExitTag pulls the tag of the outbound/endpoint that broke bring-up
