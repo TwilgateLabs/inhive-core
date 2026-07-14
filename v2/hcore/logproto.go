@@ -26,10 +26,7 @@ func Log(level LogLevel, typ LogType, message ...any) {
 }
 
 func (s *CoreService) LogListener(req *LogRequest, stream grpc.ServerStreamingServer[LogMessage]) (err error) {
-	// 256 = реплей истории (200) + запас на бурст. Старый Subscribe(1) молча
-	// дропал почти весь connect-хендшейк: пока goroutine писала строку N в
-	// stream, N+1..N+k упирались в полный канал (аудит 2026-07-13).
-	logSub := static.logObserver.SubscribeWithReplay(256)
+	logSub := static.logObserver.Subscribe(1)
 	defer static.logObserver.Unsubscribe(logSub)
 
 	for {
