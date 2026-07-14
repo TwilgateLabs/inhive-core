@@ -15,8 +15,12 @@ package hcore
 
 import (
 	"context"
+	"os"
+	"path/filepath"
 	"runtime"
 	"runtime/metrics"
+	runtimeDebug "runtime/debug"
+	"runtime/pprof"
 	"strconv"
 	"time"
 
@@ -28,6 +32,69 @@ import (
 // поймать тренд роста памяти за минуты до упора в лимит, достаточно редко
 // чтобы сам лог не стал шумом.
 const memSamplerInterval = 10 * time.Second
+
+// Диагностика jetsam-инцидента 2026-07-14 (iPhone Никиты: NE рос ~30→50MB за
+// час обычного трафика и убивался per-process-limit). Три инструмента:
+//   - каждый 6-й тик (60с) строка сэмпла дублируется в persistent-файл
+//     <group>/Library/Caches/inhive-diag/mem.log — переживает смерть NE и
+//     ЧИТАЕТСЯ с мака (devicectl пускает только в Library/Documents/tmp
+//     группового контейнера, потому Caches, а не workingDir);
+//   - при phys_footprint > memDiagProfileAtBytes — одноразовый дамп heap- и
+//     goroutine-профилей туда же (go tool pprof назовёт утечку поимённо);
+//   - каждый 12-й тик (120с) + при footprint > memFreeOSAtBytes —
+//     runtimeDebug.FreeOSMemory(): jetsam считает phys_footprint, а Go-scavenger
+//     отдаёт освобождённые страницы ОС лениво (разово это уже делает start.go
+//     после старта — здесь периодически). Гейт iOS/Android как в start.go.
+const (
+	memDiagFileMaxBytes  = 512 * 1024
+	memDiagProfileAtBytes = 42 << 20
+	memFreeOSAtBytes      = 40 << 20
+)
+
+// memDiagDir возвращает каталог диагностики (создавая его) или "" если
+// недоступен. iOS-only: на остальных платформах достаточно лог-стрима.
+func memDiagDir() string {
+	if runtime.GOOS != "ios" || sWorkingPath == "" {
+		return ""
+	}
+	dir := filepath.Join(sWorkingPath, "..", "Library", "Caches", "inhive-diag")
+	if err := os.MkdirAll(dir, 0o755); err != nil {
+		return ""
+	}
+	return dir
+}
+
+// memDiagAppend дописывает строку в mem.log с грубой ротацией по размеру.
+func memDiagAppend(dir, line string) {
+	if dir == "" {
+		return
+	}
+	path := filepath.Join(dir, "mem.log")
+	if st, err := os.Stat(path); err == nil && st.Size() > memDiagFileMaxBytes {
+		_ = os.Rename(path, filepath.Join(dir, "mem.prev.log"))
+	}
+	f, err := os.OpenFile(path, os.O_APPEND|os.O_CREATE|os.O_WRONLY, 0o644)
+	if err != nil {
+		return
+	}
+	defer f.Close()
+	_, _ = f.WriteString(time.Now().Format("2006-01-02 15:04:05") + " " + line + "\n")
+}
+
+// memDiagProfiles пишет heap+goroutine профили (раз на процесс).
+func memDiagProfiles(dir string) {
+	if dir == "" {
+		return
+	}
+	if hf, err := os.Create(filepath.Join(dir, "heap_high.pprof")); err == nil {
+		_ = pprof.WriteHeapProfile(hf)
+		hf.Close()
+	}
+	if gf, err := os.Create(filepath.Join(dir, "goroutine_high.pprof")); err == nil {
+		_ = pprof.Lookup("goroutine").WriteTo(gf, 0)
+		gf.Close()
+	}
+}
 
 // startMemSampler привязывает сэмплер к box-контексту. Идемпотентно: каждый
 // вызов гасит предыдущий сэмплер перед запуском нового. Зеркалит
@@ -80,30 +147,56 @@ func runMemSampler(ctx context.Context) {
 	ticker := time.NewTicker(memSamplerInterval)
 	defer ticker.Stop()
 
+	diagDir := memDiagDir()
+	tick := 0
+	profileDumped := false
+	var lastFreeOS time.Time
+	mobile := runtime.GOOS == "ios" || runtime.GOOS == "android"
+
 	for {
 		select {
 		case <-ctx.Done():
 			return
 		case <-ticker.C:
+			tick++
 			metrics.Read(samples)
 			heap := samples[0].Value.Uint64()
 			sys := samples[1].Value.Uint64()
 			gc := samples[2].Value.Uint64()
 			goroutines := runtime.NumGoroutine()
+			footprint := libbox.PhysFootprintBytes()
 
-			if footprint := libbox.PhysFootprintBytes(); footprint > 0 {
-				Log(LogLevel_INFO, LogType_CORE,
-					"mem: phys_footprint=", formatMB(footprint),
-					" heap=", formatMB(heap),
-					" sys=", formatMB(sys),
-					" goroutines=", goroutines,
-					" gc=", gc)
-			} else {
-				Log(LogLevel_INFO, LogType_CORE,
-					"mem: heap=", formatMB(heap),
-					" sys=", formatMB(sys),
-					" goroutines=", goroutines,
-					" gc=", gc)
+			line := "mem: heap=" + formatMB(heap) +
+				" sys=" + formatMB(sys) +
+				" goroutines=" + strconv.Itoa(goroutines) +
+				" gc=" + strconv.FormatUint(gc, 10)
+			if footprint > 0 {
+				line = "mem: phys_footprint=" + formatMB(uint64(footprint)) +
+					" heap=" + formatMB(heap) +
+					" sys=" + formatMB(sys) +
+					" goroutines=" + strconv.Itoa(goroutines) +
+					" gc=" + strconv.FormatUint(gc, 10)
+			}
+			Log(LogLevel_INFO, LogType_CORE, line)
+
+			if tick%6 == 0 {
+				memDiagAppend(diagDir, line)
+			}
+
+			// Профили один раз при подходе к лимиту — пока процесс ещё жив.
+			if !profileDumped && footprint > memDiagProfileAtBytes {
+				profileDumped = true
+				memDiagProfiles(diagDir)
+				memDiagAppend(diagDir, "profiles dumped at "+formatMB(uint64(footprint)))
+				Log(LogLevel_WARNING, LogType_CORE,
+					"mem: high-water ", formatMB(uint64(footprint)), " — heap/goroutine profiles dumped")
+			}
+
+			// Периодический возврат страниц ОС (jetsam считает phys_footprint).
+			if mobile && (tick%12 == 0 ||
+				(footprint > memFreeOSAtBytes && time.Since(lastFreeOS) > time.Minute)) {
+				lastFreeOS = time.Now()
+				runtimeDebug.FreeOSMemory()
 			}
 		}
 	}

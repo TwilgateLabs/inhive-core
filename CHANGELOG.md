@@ -9,6 +9,10 @@ shipped standalone).
 
 ## [Unreleased]
 
+### Added (iOS memory diagnostics — jetsam hunt 2026-07-14)
+
+- Memory sampler persists a 60-second trajectory to the shared container (survives extension death, readable from a paired Mac), dumps heap/goroutine profiles once when the footprint nears the iOS limit, and periodically returns freed pages to the OS (jetsam counts physical footprint, Go's scavenger releases lazily).
+
 ### Fixed (hotfix 4.7.31 — iOS tunnel instability introduced in 4.7.30)
 
 - ChangeInhiveSettings now MERGES a partial settings JSON onto the current options instead of resetting everything to defaults — the 4.7.30 log-level push after NE start wiped all engine options (incl. clash secret, WARP, rules) and persisted the stub to the engine DB, so a Control-Center start brought the tunnel up with default options (VPN icon on, no working tunnel). The DB now stores the full merged state.
