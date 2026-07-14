@@ -9,6 +9,11 @@ shipped standalone).
 
 ## [Unreleased]
 
+### Fixed (hotfix 4.7.31 — iOS tunnel instability introduced in 4.7.30)
+
+- ChangeInhiveSettings now MERGES a partial settings JSON onto the current options instead of resetting everything to defaults — the 4.7.30 log-level push after NE start wiped all engine options (incl. clash secret, WARP, rules) and persisted the stub to the engine DB, so a Control-Center start brought the tunnel up with default options (VPN icon on, no working tunnel). The DB now stores the full merged state.
+- ChangeInhiveSettings is serialized with a mutex and publishes options as an atomic snapshot swap — the 4.7.30 push raced the tunnel start which read the options object mid-replace (suspected cause of iOS self-disconnects).
+
 ## [4.7.30] - 2026-07-13
 
 ### Fixed (log delivery — Logs tab audit 2026-07-13)

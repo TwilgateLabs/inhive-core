@@ -5,6 +5,7 @@ import (
 	"context"
 	"encoding/json"
 	"os"
+	"sync"
 
 	"github.com/twilgate/inhive-core/v2/config"
 	"github.com/twilgate/inhive-core/v2/db"
@@ -125,56 +126,75 @@ func (s *CoreService) ChangeInhiveSettings(ctx context.Context, in *ChangeInhive
 	return ChangeInhiveSettings(in, true)
 }
 
-func ChangeInhiveSettings(in *ChangeInhiveSettingsRequest, insert bool) (*CoreInfoResponse, error) {
-	static.InhiveOptions = config.DefaultInhiveOptions()
-	defer func() {
-		switch static.InhiveOptions.LogLevel {
-		case "debug":
-			static.logLevel = LogLevel_DEBUG
-		case "info":
-			static.logLevel = LogLevel_INFO
-		case "warn":
-			static.logLevel = LogLevel_WARNING
-		case "error":
-			static.logLevel = LogLevel_ERROR
-		case "fatal":
-			static.logLevel = LogLevel_FATAL
-		case "trace":
-			static.logLevel = LogLevel_TRACE
-		default:
-			static.logLevel = LogLevel_INFO
-		}
-		static.debug = static.debug || static.logLevel <= LogLevel_DEBUG
-	}()
+// Сериализует конкурентные ChangeInhiveSettings (RPC из app может прилететь
+// параллельно со стартом туннеля — регрессия 4.7.30 на iOS).
+var changeSettingsMu sync.Mutex
 
-	if in.InhiveSettingsJson == "" {
-		return &CoreInfoResponse{}, nil
+// ChangeInhiveSettings принимает как ПОЛНЫЙ settings JSON, так и PARTIAL
+// ({"log-level":"warn"}, {"daita-enabled":true}) — partial МЕРЖИТСЯ поверх
+// текущих опций. До 2026-07-14 семантика была replace-all: partial сбрасывал
+// все остальные поля в дефолт и персистил огрызок в БД — следующий Setup
+// NE-процесса (iOS: каждый connect и шторка-старт) поднимался с дефолтами.
+// Плюс static.InhiveOptions подменялся без синхронизации прямо во время
+// чтения его стартом туннеля. Теперь: копия → merge → атомарная подмена
+// указателя (читатели видят либо старый, либо новый снапшот целиком), в БД
+// уходит полное смерженное состояние.
+func ChangeInhiveSettings(in *ChangeInhiveSettingsRequest, insert bool) (*CoreInfoResponse, error) {
+	changeSettingsMu.Lock()
+	defer changeSettingsMu.Unlock()
+
+	opts := config.DefaultInhiveOptions()
+	if static.InhiveOptions != nil {
+		*opts = *static.InhiveOptions
 	}
-	if insert {
+
+	if in.InhiveSettingsJson != "" {
+		if err := json.Unmarshal([]byte(in.InhiveSettingsJson), opts); err != nil {
+			return nil, err
+		}
+		if opts.Warp.WireguardConfigStr != "" {
+			if err := json.Unmarshal([]byte(opts.Warp.WireguardConfigStr), &opts.Warp.WireguardConfig); err != nil {
+				return nil, err
+			}
+		}
+		if opts.Warp2.WireguardConfigStr != "" {
+			if err := json.Unmarshal([]byte(opts.Warp2.WireguardConfigStr), &opts.Warp2.WireguardConfig); err != nil {
+				return nil, err
+			}
+		}
+	}
+
+	static.InhiveOptions = opts
+	switch opts.LogLevel {
+	case "debug":
+		static.logLevel = LogLevel_DEBUG
+	case "info":
+		static.logLevel = LogLevel_INFO
+	case "warn":
+		static.logLevel = LogLevel_WARNING
+	case "error":
+		static.logLevel = LogLevel_ERROR
+	case "fatal":
+		static.logLevel = LogLevel_FATAL
+	case "trace":
+		static.logLevel = LogLevel_TRACE
+	default:
+		static.logLevel = LogLevel_INFO
+	}
+	static.debug = static.debug || static.logLevel <= LogLevel_DEBUG
+
+	if insert && in.InhiveSettingsJson != "" {
+		full, err := json.Marshal(opts)
+		if err != nil {
+			return nil, err
+		}
 		settings := db.GetTable[hcommon.AppSettings]()
 		settings.UpdateInsert(&hcommon.AppSettings{
 			Id:    "InHiveSettingsJson",
-			Value: in.InhiveSettingsJson,
+			Value: string(full),
 		})
 	}
 
-	err := json.Unmarshal([]byte(in.InhiveSettingsJson), static.InhiveOptions)
-	if err != nil {
-		return nil, err
-	}
-
-	if static.InhiveOptions.Warp.WireguardConfigStr != "" {
-		err := json.Unmarshal([]byte(static.InhiveOptions.Warp.WireguardConfigStr), &static.InhiveOptions.Warp.WireguardConfig)
-		if err != nil {
-			return nil, err
-		}
-	}
-	if static.InhiveOptions.Warp2.WireguardConfigStr != "" {
-		err := json.Unmarshal([]byte(static.InhiveOptions.Warp2.WireguardConfigStr), &static.InhiveOptions.Warp2.WireguardConfig)
-		if err != nil {
-			return nil, err
-		}
-	}
 	return &CoreInfoResponse{}, nil
 }
 
