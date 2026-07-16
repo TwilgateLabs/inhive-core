@@ -9,6 +9,11 @@ shipped standalone).
 
 ## [Unreleased]
 
+### Fixed (iOS NE memory — jetsam prevention, audit 2026-07-16)
+
+- xhttp/SplitHTTP transport now bounds total in-flight upload bytes on iOS (byte-weighted semaphore, ~8MB budget). Previously each proxied connection uploaded via its own goroutine with no cross-connection cap, so heavy multi-connection load (feed scrolling) piled up dozens of concurrent POST buffers — 24MB / 56% of Go heap in the device profile, the acute cause of jetsam kills at the ~50MB NE limit. Small posts still run in parallel (no throughput loss); only large spikes get backpressure. Non-iOS is unbounded (RAM available, throughput prioritized).
+- OOM-killer now actually protects against the per-process memory limit on iOS. It was injected without a memory limit, so it ran only the system-wide memory-pressure monitor — which stays silent when iOS kills the extension for exceeding its own ~50MB budget while the device has GBs free. It now polls the real per-process available memory (os_proc_available_memory) and, when the budget runs low, resets connections and returns memory instead of dying.
+
 ### Added (iOS memory diagnostics — jetsam hunt 2026-07-14)
 
 - Memory sampler persists a 60-second trajectory to the shared container (survives extension death, readable from a paired Mac), dumps heap/goroutine profiles once when the footprint nears the iOS limit, and periodically returns freed pages to the OS (jetsam counts physical footprint, Go's scavenger releases lazily).
