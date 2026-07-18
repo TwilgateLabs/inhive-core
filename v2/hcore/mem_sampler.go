@@ -26,6 +26,7 @@ import (
 
 	"github.com/twilgate/inhive-core/v2/config"
 	"github.com/sagernet/sing-box/experimental/libbox"
+	xhttp "github.com/sagernet/sing-box/transport/v2rayxhttp"
 )
 
 // memSamplerInterval — период сэмплирования. 10с: достаточно часто чтобы
@@ -180,7 +181,11 @@ func runMemSampler(ctx context.Context) {
 			Log(LogLevel_INFO, LogType_CORE, line)
 
 			if tick%6 == 0 {
-				memDiagAppend(diagDir, line)
+				// inhive build-129: enrich the persistent diag line with the xhttp
+				// write-chunk histogram to finalize the h2 write-scratch cap from
+				// real device data (see v2rayxhttp/chunkhist.go). Diag-file only —
+				// keeps the gRPC log stream clean. Remove with the instrumentation.
+				memDiagAppend(diagDir, line+" "+xhttp.ChunkSizeHistogram())
 			}
 
 			// Профили один раз при подходе к лимиту — пока процесс ещё жив.

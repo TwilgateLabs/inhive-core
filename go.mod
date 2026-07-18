@@ -273,6 +273,11 @@ replace github.com/Psiphon-Labs/quic-go => ./sing-box/replace/psiphon-quic-go
 
 replace github.com/Psiphon-Labs/psiphon-tls => ./sing-box/replace/psiphon-tls
 
+// inhive fork: caps the h2 client write scratch 512KB→64KB (frameScratchBufferLen)
+// to stop iOS NE jetsam on stream-up xhttp (512KB×N streams = 30MB). One-line
+// semantic change; re-copy + re-apply on upstream x/net bumps. See http2/transport.go.
+replace golang.org/x/net => ./sing-box/replace/x-net
+
 replace github.com/openlibrecommunity/olcrtc => github.com/TwilgateLabs/inhive-olcrtc v0.0.4-inhive
 
 replace github.com/zarazaex69/j => github.com/TwilgateLabs/inhive-j-deps v0.0.2-inhive

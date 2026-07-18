@@ -9,9 +9,23 @@ shipped standalone).
 
 ## [Unreleased]
 
-### Fixed (iOS NE memory — jetsam prevention, audit 2026-07-16)
+## [4.7.32] - 2026-07-18
 
-- xhttp/SplitHTTP transport now bounds total in-flight upload bytes on iOS (byte-weighted semaphore, ~8MB budget). Previously each proxied connection uploaded via its own goroutine with no cross-connection cap, so heavy multi-connection load (feed scrolling) piled up dozens of concurrent POST buffers — 24MB / 56% of Go heap in the device profile, the acute cause of jetsam kills at the ~50MB NE limit. Small posts still run in parallel (no throughput loss); only large spikes get backpressure. Non-iOS is unbounded (RAM available, throughput prioritized).
+### Fixed (iOS NE jetsam — xhttp write-scratch, device heap-profiled 2026-07-18)
+
+- Forked `golang.org/x/net` to cap the HTTP/2 client write scratch buffer from 512KB to 64KB per stream (`http2/transport.go` `frameScratchBufferLen`, dual `replace` → `sing-box/replace/x-net`). A Go h2 xhttp server advertises a 1MB max frame, so upstream sized each stream's write scratch at 512KB — and on stream-up/stream-one that buffer is held for the whole stream life. A device heap profile (iPhone 14 NE, TikTok over WiFi) showed `writeRequestBody` holding 30MB = 68% of the ~50MB NE budget across ~60 streams → jetsam. 64KB comfortably fits the real ~8KB upstream chunks (larger writes just split into more frames; h2 throughput is gated by flow-control windows, not frame size), cutting that 30MB to ~4MB with zero throughput cost. Removed band-aids `streamSlots`/`uploadBudget` stay dead — this fixes the actual buffer instead of throttling traffic around it. All platforms inherit the smaller cap harmlessly.
+- Added a lightweight histogram of real xhttp write-chunk sizes to the device diag log (`v2rayxhttp/chunkhist.go`, surfaced via the memory sampler) to size the cap from measured data, not a guess. Device data confirmed 64KB: the largest real chunk was 63KB and none exceeded 64KB, so nothing fragments and the footprint held at ~35MB under a heavy feed (was 49MB → jetsam). Kept as low-cost ongoing telemetry to catch any future chunk-size drift.
+
+### Fixed (transport dial-path tunnel-wedge — pre-release audit 2026-07-18)
+
+- gRPC transport: the connection dial is now bounded by a 15s timeout. `WithReturnConnectionError` implies a blocking dial, and it was passed the box-lifetime context (no deadline) — so a blackholed server hung the dial forever, holding the connect mutex and leaking the caller's route dial-semaphore slot. The circuit-breaker couldn't see it (health only updates after the dial returns, which it never did), so once the global dial cap filled with zombies every new dial across all outbounds was dropped and the whole tunnel wedged until a config switch. Same class as the xhttp upload-budget leak; found by a pre-release sweep of every transport dial path. The bound applies only to connection setup; established streams are unaffected.
+- HTTPUpgrade transport: the upgrade handshake (`request.Write` + `http.ReadResponse`) now runs under a 15s deadline and closes the connection on any handshake error, mirroring the WebSocket client. Previously it had no deadline and ignored the context — a server that accepted the TCP/TLS connection then went silent hung the dial forever with the same tunnel-wedge/fd-leak consequences.
+
+### Fixed (iOS throughput — packet-up upload throttle 2026-07-18)
+
+- Removed the iOS xhttp upload-byte semaphore (added 2026-07-16, see below — never shipped in a dated release). On packet-up CDN configs it crushed upload to ~1.3 Mbit/s versus ~91 in a stock client on the exact same config (ping 644 vs 191 ms). The budget was global per-server and its release ran only after the POST returned, but the CDN POST is built with a cancel-free context and no timeout — so a stalled POST never returned its bytes to the pool, the pool drained to zero, and every further upload (plus DNS-in-tunnel and the proxied session's flow-control updates) blocked, freezing downloads "at half" and zeroing speed tests. It also guarded the wrong thing: the real jetsam hog is stream-mode, not packet-up (packet-up is already bounded per-connection by the upload pipe), and memory spikes are now caught by the OOM-killer + circuit-breaker + mixed TUN stack. This is the twin of the stream-slot cap removed a build earlier; it was simply left live. Non-iOS never had it.
+
+### Fixed (iOS NE memory — jetsam prevention, audit 2026-07-16)
 - OOM-killer now actually protects against the per-process memory limit on iOS. It was injected without a memory limit, so it ran only the system-wide memory-pressure monitor — which stays silent when iOS kills the extension for exceeding its own ~50MB budget while the device has GBs free. It now polls the real per-process available memory (os_proc_available_memory) and, when the budget runs low, resets connections and returns memory instead of dying.
 
 ### Added (iOS memory diagnostics — jetsam hunt 2026-07-14)
