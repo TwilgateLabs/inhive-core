@@ -13,6 +13,12 @@ shipped standalone).
 
 - Hot-add: new `AddOutbound`/`RemoveOutbound` gRPC RPCs — add a server (share-link URI or a single sing-box outbound JSON, same parse pipeline as `Parse`) into the *running* box and register it as a member of the requested selectors, with no restart and no dropped connections. Removal detaches selector membership first (selection falls back with an interrupt), then removes from the manager. Enables cross-subscription dual-tunnel switching with zero reconnects; per added outbound the cost is one idle struct. Selector (sing-box fork) gained thread-safe dynamic membership (`AddMember`/`RemoveMember` under an RWMutex; the hot dial path still reads only the atomic selected value).
 
+### Changed (iOS NE memory / idle quiescence)
+
+- iOS: the URL-test carousel no longer probes every server every 5 minutes on a connected tunnel. A watcher was keeping it perpetually awake (it re-touched the monitor on each event); that constant TLS handshaking was pure idle waste in the Network Extension and preceded out-of-memory kills. The carousel now sleeps when the server list isn't open; on-device it dropped idle GC from a steady churn to ~0-1/min and kept the background footprint a flat line. Server-list pings still work on demand.
+- iOS: dropped the closed-connection history ring from 1000 to 50 entries (~1.35MB reclaimed in the tight NE budget). Active connection tracking is unchanged.
+- iOS: removed a redundant heartbeat loop (duplicated the memory sampler and did a stop-the-world `ReadMemStats` every minute) and three dead broadcaster goroutines that were never published to.
+
 ## [4.7.32] - 2026-07-18
 
 ### Fixed (iOS NE jetsam — xhttp write-scratch, device heap-profiled 2026-07-18)
