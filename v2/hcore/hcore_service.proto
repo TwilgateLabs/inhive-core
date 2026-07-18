@@ -32,6 +32,10 @@ service Core {
   rpc Stop (hcommon.Empty) returns (CoreInfoResponse);
   rpc Restart (StartRequest) returns (CoreInfoResponse);
   rpc SelectOutbound (SelectOutboundRequest) returns (hcommon.Response);
+  // Hot-add: добавить outbound в живой box + в селекторы без рестарта
+  // (кросс-подписочный dual без реконнекта). См. AddOutboundRequest.
+  rpc AddOutbound (AddOutboundRequest) returns (AddOutboundResponse);
+  rpc RemoveOutbound (RemoveOutboundRequest) returns (hcommon.Response);
   rpc UrlTest (UrlTestRequest) returns (hcommon.Response);
   rpc UrlTestActive (hcommon.Empty) returns (hcommon.Response);
   // SpeedTest — измеряет download/upload speed через outbound[outbound_tag].

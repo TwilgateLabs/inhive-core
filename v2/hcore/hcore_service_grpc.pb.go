@@ -37,6 +37,8 @@ const (
 	Core_Stop_FullMethodName                  = "/hcore.Core/Stop"
 	Core_Restart_FullMethodName               = "/hcore.Core/Restart"
 	Core_SelectOutbound_FullMethodName        = "/hcore.Core/SelectOutbound"
+	Core_AddOutbound_FullMethodName           = "/hcore.Core/AddOutbound"
+	Core_RemoveOutbound_FullMethodName        = "/hcore.Core/RemoveOutbound"
 	Core_UrlTest_FullMethodName               = "/hcore.Core/UrlTest"
 	Core_UrlTestActive_FullMethodName         = "/hcore.Core/UrlTestActive"
 	Core_SpeedTest_FullMethodName             = "/hcore.Core/SpeedTest"
@@ -78,6 +80,10 @@ type CoreClient interface {
 	Stop(ctx context.Context, in *hcommon.Empty, opts ...grpc.CallOption) (*CoreInfoResponse, error)
 	Restart(ctx context.Context, in *StartRequest, opts ...grpc.CallOption) (*CoreInfoResponse, error)
 	SelectOutbound(ctx context.Context, in *SelectOutboundRequest, opts ...grpc.CallOption) (*hcommon.Response, error)
+	// Hot-add: добавить outbound в живой box + в селекторы без рестарта
+	// (кросс-подписочный dual без реконнекта). См. AddOutboundRequest.
+	AddOutbound(ctx context.Context, in *AddOutboundRequest, opts ...grpc.CallOption) (*AddOutboundResponse, error)
+	RemoveOutbound(ctx context.Context, in *RemoveOutboundRequest, opts ...grpc.CallOption) (*hcommon.Response, error)
 	UrlTest(ctx context.Context, in *UrlTestRequest, opts ...grpc.CallOption) (*hcommon.Response, error)
 	UrlTestActive(ctx context.Context, in *hcommon.Empty, opts ...grpc.CallOption) (*hcommon.Response, error)
 	// SpeedTest — измеряет download/upload speed через outbound[outbound_tag].
@@ -319,6 +325,26 @@ func (c *coreClient) SelectOutbound(ctx context.Context, in *SelectOutboundReque
 	return out, nil
 }
 
+func (c *coreClient) AddOutbound(ctx context.Context, in *AddOutboundRequest, opts ...grpc.CallOption) (*AddOutboundResponse, error) {
+	cOpts := append([]grpc.CallOption{grpc.StaticMethod()}, opts...)
+	out := new(AddOutboundResponse)
+	err := c.cc.Invoke(ctx, Core_AddOutbound_FullMethodName, in, out, cOpts...)
+	if err != nil {
+		return nil, err
+	}
+	return out, nil
+}
+
+func (c *coreClient) RemoveOutbound(ctx context.Context, in *RemoveOutboundRequest, opts ...grpc.CallOption) (*hcommon.Response, error) {
+	cOpts := append([]grpc.CallOption{grpc.StaticMethod()}, opts...)
+	out := new(hcommon.Response)
+	err := c.cc.Invoke(ctx, Core_RemoveOutbound_FullMethodName, in, out, cOpts...)
+	if err != nil {
+		return nil, err
+	}
+	return out, nil
+}
+
 func (c *coreClient) UrlTest(ctx context.Context, in *UrlTestRequest, opts ...grpc.CallOption) (*hcommon.Response, error) {
 	cOpts := append([]grpc.CallOption{grpc.StaticMethod()}, opts...)
 	out := new(hcommon.Response)
@@ -466,6 +492,10 @@ type CoreServer interface {
 	Stop(context.Context, *hcommon.Empty) (*CoreInfoResponse, error)
 	Restart(context.Context, *StartRequest) (*CoreInfoResponse, error)
 	SelectOutbound(context.Context, *SelectOutboundRequest) (*hcommon.Response, error)
+	// Hot-add: добавить outbound в живой box + в селекторы без рестарта
+	// (кросс-подписочный dual без реконнекта). См. AddOutboundRequest.
+	AddOutbound(context.Context, *AddOutboundRequest) (*AddOutboundResponse, error)
+	RemoveOutbound(context.Context, *RemoveOutboundRequest) (*hcommon.Response, error)
 	UrlTest(context.Context, *UrlTestRequest) (*hcommon.Response, error)
 	UrlTestActive(context.Context, *hcommon.Empty) (*hcommon.Response, error)
 	// SpeedTest — измеряет download/upload speed через outbound[outbound_tag].
@@ -551,6 +581,12 @@ func (UnimplementedCoreServer) Restart(context.Context, *StartRequest) (*CoreInf
 }
 func (UnimplementedCoreServer) SelectOutbound(context.Context, *SelectOutboundRequest) (*hcommon.Response, error) {
 	return nil, status.Error(codes.Unimplemented, "method SelectOutbound not implemented")
+}
+func (UnimplementedCoreServer) AddOutbound(context.Context, *AddOutboundRequest) (*AddOutboundResponse, error) {
+	return nil, status.Error(codes.Unimplemented, "method AddOutbound not implemented")
+}
+func (UnimplementedCoreServer) RemoveOutbound(context.Context, *RemoveOutboundRequest) (*hcommon.Response, error) {
+	return nil, status.Error(codes.Unimplemented, "method RemoveOutbound not implemented")
 }
 func (UnimplementedCoreServer) UrlTest(context.Context, *UrlTestRequest) (*hcommon.Response, error) {
 	return nil, status.Error(codes.Unimplemented, "method UrlTest not implemented")
@@ -881,6 +917,42 @@ func _Core_SelectOutbound_Handler(srv interface{}, ctx context.Context, dec func
 	return interceptor(ctx, in, info, handler)
 }
 
+func _Core_AddOutbound_Handler(srv interface{}, ctx context.Context, dec func(interface{}) error, interceptor grpc.UnaryServerInterceptor) (interface{}, error) {
+	in := new(AddOutboundRequest)
+	if err := dec(in); err != nil {
+		return nil, err
+	}
+	if interceptor == nil {
+		return srv.(CoreServer).AddOutbound(ctx, in)
+	}
+	info := &grpc.UnaryServerInfo{
+		Server:     srv,
+		FullMethod: Core_AddOutbound_FullMethodName,
+	}
+	handler := func(ctx context.Context, req interface{}) (interface{}, error) {
+		return srv.(CoreServer).AddOutbound(ctx, req.(*AddOutboundRequest))
+	}
+	return interceptor(ctx, in, info, handler)
+}
+
+func _Core_RemoveOutbound_Handler(srv interface{}, ctx context.Context, dec func(interface{}) error, interceptor grpc.UnaryServerInterceptor) (interface{}, error) {
+	in := new(RemoveOutboundRequest)
+	if err := dec(in); err != nil {
+		return nil, err
+	}
+	if interceptor == nil {
+		return srv.(CoreServer).RemoveOutbound(ctx, in)
+	}
+	info := &grpc.UnaryServerInfo{
+		Server:     srv,
+		FullMethod: Core_RemoveOutbound_FullMethodName,
+	}
+	handler := func(ctx context.Context, req interface{}) (interface{}, error) {
+		return srv.(CoreServer).RemoveOutbound(ctx, req.(*RemoveOutboundRequest))
+	}
+	return interceptor(ctx, in, info, handler)
+}
+
 func _Core_UrlTest_Handler(srv interface{}, ctx context.Context, dec func(interface{}) error, interceptor grpc.UnaryServerInterceptor) (interface{}, error) {
 	in := new(UrlTestRequest)
 	if err := dec(in); err != nil {
@@ -1105,6 +1177,14 @@ var Core_ServiceDesc = grpc.ServiceDesc{
 		{
 			MethodName: "SelectOutbound",
 			Handler:    _Core_SelectOutbound_Handler,
+		},
+		{
+			MethodName: "AddOutbound",
+			Handler:    _Core_AddOutbound_Handler,
+		},
+		{
+			MethodName: "RemoveOutbound",
+			Handler:    _Core_RemoveOutbound_Handler,
 		},
 		{
 			MethodName: "UrlTest",

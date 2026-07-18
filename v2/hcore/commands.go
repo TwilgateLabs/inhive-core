@@ -10,6 +10,7 @@ import (
 	"github.com/twilgate/inhive-core/v2/config"
 	hcommon "github.com/twilgate/inhive-core/v2/hcommon"
 	"github.com/sagernet/sing-box/adapter"
+	"github.com/sagernet/sing-box/log"
 	"github.com/sagernet/sing-box/protocol/group"
 
 	"github.com/sagernet/sing-box/common/monitoring"
@@ -160,6 +161,127 @@ func (h *InhiveInstance) SelectOutbound(in *SelectOutboundRequest) (*hcommon.Res
 		Code:    hcommon.ResponseCode_OK,
 		Message: "",
 	}, nil
+}
+
+// ── Hot-add (2026-07-19) ────────────────────────────────────────────────────
+//
+// Динамическое добавление/удаление outbound'ов в ЖИВОЙ box без рестарта.
+// Мотивация: кросс-подписочный dual-tunnel (клиент выбирает сервер, которого
+// нет в активном конфиге) раньше требовал полной пересборки box = разрыв всех
+// соединений. OutboundManager.Create/Remove апстрима уже умеют started-режим
+// (manager.go: LegacyStart всех стадий при started), router и clash API
+// резолвят по тегу лениво; блокером было только статичное членство Selector —
+// закрыто AddMember/RemoveMember (protocol/group/selector.go, наш форк).
+
+func (s *CoreService) AddOutbound(ctx context.Context, in *AddOutboundRequest) (resp *AddOutboundResponse, err error) {
+	defer config.RecoverPanicToError("CoreService.AddOutbound", func(e error) {
+		Log(LogLevel_FATAL, LogType_CORE, e.Error())
+		resp = &AddOutboundResponse{}
+		err = e
+	})
+	return static.AddOutbound(in)
+}
+
+func (h *InhiveInstance) AddOutbound(in *AddOutboundRequest) (*AddOutboundResponse, error) {
+	box := h.Box()
+	if box == nil {
+		return nil, E.New("add outbound: core not started")
+	}
+	// Тот же парс-пайплайн, что у Parse RPC: share-link ИЛИ sing-box JSON
+	// (одиночный outbound-объект оборачивается в outbounds:[...] внутри).
+	opts, parseErr := config.ParseConfig(h.Context(), &config.ReadOptions{Content: in.Content}, true, static.InhiveOptions, false)
+	if parseErr != nil {
+		return nil, E.Cause(parseErr, "add outbound: parse")
+	}
+	// Берём только «настоящие» серверные outbound'ы: парсер может дописать
+	// служебные (selector/urltest/direct/block/dns) — их в живой box не тащим.
+	systemTypes := map[string]bool{
+		"selector": true, "urltest": true, "direct": true, "block": true, "dns": true,
+	}
+	var real []int
+	for i := range opts.Outbounds {
+		if !systemTypes[opts.Outbounds[i].Type] {
+			real = append(real, i)
+		}
+	}
+	if len(real) == 0 {
+		return nil, E.New("add outbound: no usable outbound in content")
+	}
+	// Первый «настоящий» — главный (его тег идёт в селекторы и в ответ);
+	// остальные (helper'ы вида utproto-пары с detour) создаются как есть.
+	mainIdx := real[0]
+	if in.TagOverride != "" {
+		opts.Outbounds[mainIdx].Tag = in.TagOverride
+	}
+	logFactory := h.CoreLogFactory
+	if logFactory == nil {
+		logFactory = log.NewNOPFactory()
+	}
+	for _, i := range real {
+		ob := opts.Outbounds[i]
+		createErr := box.Outbound().Create(
+			h.Context(),
+			box.Router(),
+			logFactory.NewLogger("outbound/hotadd["+ob.Tag+"]"),
+			ob.Tag,
+			ob.Type,
+			ob.Options,
+		)
+		if createErr != nil {
+			return nil, E.Cause(createErr, "add outbound: create ", ob.Tag)
+		}
+	}
+	mainTag := opts.Outbounds[mainIdx].Tag
+	created, loaded := box.Outbound().Outbound(mainTag)
+	if !loaded {
+		return nil, E.New("add outbound: created outbound vanished: ", mainTag)
+	}
+	for _, selectorTag := range in.SelectorTags {
+		groupOutbound, isLoaded := box.Outbound().Outbound(selectorTag)
+		if !isLoaded {
+			return nil, E.New("add outbound: selector not found: ", selectorTag)
+		}
+		selector, isSelector := groupOutbound.(*group.Selector)
+		if !isSelector {
+			return nil, E.New("add outbound: not a selector: ", selectorTag)
+		}
+		selector.AddMember(mainTag, created)
+	}
+	Log(LogLevel_INFO, LogType_CORE, "hot-add outbound: ", mainTag,
+		" -> selectors ", fmt.Sprint(in.SelectorTags))
+	return &AddOutboundResponse{OutboundTag: mainTag}, nil
+}
+
+func (s *CoreService) RemoveOutbound(ctx context.Context, in *RemoveOutboundRequest) (resp *hcommon.Response, err error) {
+	defer config.RecoverPanicToError("CoreService.RemoveOutbound", func(e error) {
+		Log(LogLevel_FATAL, LogType_CORE, e.Error())
+		resp = &hcommon.Response{Code: hcommon.ResponseCode_FAILED, Message: e.Error()}
+		err = e
+	})
+	return static.RemoveOutbound(in)
+}
+
+func (h *InhiveInstance) RemoveOutbound(in *RemoveOutboundRequest) (*hcommon.Response, error) {
+	box := h.Box()
+	if box == nil {
+		return nil, E.New("remove outbound: core not started")
+	}
+	// Порядок обязателен: сперва членство во ВСЕХ селекторах (RemoveMember
+	// переводит selected на default/первый и interrupt'ит соединения), потом
+	// manager.Remove — иначе selected селектора держит закрытый outbound.
+	for _, ob := range box.Outbound().Outbounds() {
+		if selector, isSelector := ob.(*group.Selector); isSelector {
+			selector.RemoveMember(in.OutboundTag)
+		}
+	}
+	if removeErr := box.Outbound().Remove(in.OutboundTag); removeErr != nil {
+		return &hcommon.Response{
+			Code:    hcommon.ResponseCode_FAILED,
+			Message: removeErr.Error(),
+		}, removeErr
+	}
+	Log(LogLevel_INFO, LogType_CORE, "hot-remove outbound: ", in.OutboundTag)
+	return &hcommon.Response{Code: hcommon.ResponseCode_OK}, nil
 }
 
 func (s *CoreService) UrlTest(ctx context.Context, in *UrlTestRequest) (resp *hcommon.Response, err error) {

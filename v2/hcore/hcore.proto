@@ -306,6 +306,33 @@ message SelectOutboundRequest {
   string outbound_tag = 2;
 }
 
+// Hot-add (2026-07-19): динамическое добавление outbound'а в ЖИВОЙ box без
+// рестарта. content = share-link URI ИЛИ одиночный sing-box outbound JSON
+// (тот же парс-пайплайн, что у Parse). Созданный outbound добавляется членом
+// в каждый селектор из selector_tags (обычно select-tun/select-proxy).
+// Существующий тег заменяется (семантика manager.Create). Память NE: +1
+// спящая структура на outbound — дёшево; смысл фичи — переключение на сервер
+// вне активного конфига (кросс-подписочный dual) БЕЗ пересборки и разрыва.
+message AddOutboundRequest {
+  string content = 1;
+  repeated string selector_tags = 2;
+  // Необязательное переименование: если задан — outbound получает этот тег
+  // вместо тега из content (слот-тег должен совпадать с prefs клиента).
+  string tag_override = 3;
+}
+
+message AddOutboundResponse {
+  // Итоговый тег созданного outbound'а (после override).
+  string outbound_tag = 1;
+}
+
+// Обратная операция: сначала членство во всех селекторах, потом
+// manager.Remove (иначе dangling из selected). Удаление выбранного члена
+// переводит селектор на default/первый член с interrupt'ом соединений.
+message RemoveOutboundRequest {
+  string outbound_tag = 1;
+}
+
 message UrlTestRequest {
   string tag = 1;
 }
