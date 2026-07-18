@@ -22,9 +22,12 @@ type InhiveInstance struct {
 	coreInfoObserver          *monitoring.Broadcaster[*CoreInfoResponse]
 	CoreState                 CoreStates
 	logObserver               *monitoring.Broadcaster[*LogMessage]
-	systemInfoObserver        *monitoring.Broadcaster[*SystemInfo]
-	outboundsInfoObserver     *monitoring.Broadcaster[*OutboundGroupList]
-	mainOutboundsInfoObserver *monitoring.Broadcaster[*OutboundGroupList]
+	// systemInfoObserver/outboundsInfoObserver/mainOutboundsInfoObserver
+	// удалены (NE-quiescence 2026-07-19): dead code. Соответствующие RPC идут
+	// другим путём — SystemInfo через per-subscriber тикер (commands.go),
+	// Outbounds/MainOutbounds через AllProxiesInfoStream (proxy_info.go). Эти
+	// три Broadcaster'а никто не Publish/Subscribe, но каждый держал горутину
+	// watchContext навсегда.
 	lock                      sync.Mutex
 	globalPlatformInterface   libbox.PlatformInterface
 	previousStartRequest      *StartRequest
@@ -66,9 +69,6 @@ var static = &InhiveInstance{
 	CoreState:                 CoreStates_STOPPED,
 	coreInfoObserver:          monitoring.NewBroadcaster[*CoreInfoResponse](context.Background()),
 	logObserver:               monitoring.NewBroadcaster[*LogMessage](context.Background()),
-	systemInfoObserver:        monitoring.NewBroadcaster[*SystemInfo](context.Background()),
-	outboundsInfoObserver:     monitoring.NewBroadcaster[*OutboundGroupList](context.Background()),
-	mainOutboundsInfoObserver: monitoring.NewBroadcaster[*OutboundGroupList](context.Background()),
 	modeStateObserver:         monitoring.NewBroadcaster[*ModeStateResponse](context.Background()),
 }
 

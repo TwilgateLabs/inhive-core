@@ -245,11 +245,25 @@ func StartService(ctx context.Context, in *StartRequest) (coreResponse *CoreInfo
 	// Mode-2 recommendations on the ModeStateListener stream. Bound to the
 	// daemon context so it dies with the engine; Stop() also cancels it
 	// explicitly so we don't rely on goroutine-after-shutdown semantics.
+	//
+	// NE-quiescence (2026-07-19): НЕ запускаем на iOS. Причины: (1) на iOS
+	// Mode-2→Mode-1 recovery всё равно не advance'ится автоматически (см.
+	// urltest_watcher.go doc), т.е. watcher полу-функционален; (2) он
+	// подписан на группу "" и на каждом событии зовёт OutboundsHistory("")
+	// → Touch() → OutboundMonitoring-карусель НИКОГДА не уходит в idleTimeout
+	// → 5-мин URLTest TLS-пробы всех outbound'ов крутятся вечно на
+	// подключённом туннеле (SecTrust-шум = триггер jetsam в NE). Без watcher
+	// карусель усыпляется штатно, когда UI не открыт; UI-пинги на iOS идут
+	// отдельным on-demand путём (clash-delay). На iOS кросс-мод свитч всё
+	// равно инициирует app (рестарт NE), не ядро.
 	if boxCtx := static.Context(); boxCtx != nil {
-		startModeWatcher(boxCtx, static)
+		if !C.IsIos {
+			startModeWatcher(boxCtx, static)
+		}
 		// Read-only сэмплер памяти в лог (mem_sampler.go) — бьётся к тому же
 		// box-контексту, гаснет в Stop(). Помогает видеть память ядра на
-		// устройстве без Xcode (инцидент 2026-06-25).
+		// устройстве без Xcode (инцидент 2026-06-25). НУЖЕН на iOS (jetsam-
+		// диагностика) — вне iOS-гейта.
 		startMemSampler(boxCtx)
 	}
 

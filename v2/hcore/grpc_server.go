@@ -23,6 +23,7 @@ import (
 	"github.com/twilgate/inhive-core/v2/db"
 	hcommon "github.com/twilgate/inhive-core/v2/hcommon"
 	hutils "github.com/twilgate/inhive-core/v2/hutils"
+	C "github.com/sagernet/sing-box/constant"
 	"github.com/sagernet/sing-box/experimental/libbox"
 	"github.com/sagernet/sing-box/log"
 	E "github.com/sagernet/sing/common/exceptions"
@@ -81,7 +82,15 @@ func Setup(params *SetupRequest, platformInterface libbox.PlatformInterface) err
 
 	// Heartbeat: post-mortem trail for silent process death. sync.Once so
 	// repeated Setup() (mode OLD + GRPC) don't spawn duplicate goroutines.
-	startHeartbeatOnce.Do(func() { go heartbeatLoop(sWorkingPath) })
+	//
+	// NE-quiescence (2026-07-19): не запускаем на iOS. heartbeatLoop дублирует
+	// mem_sampler (тот пишет persistent mem.log в тот же App Group Caches,
+	// покрывая post-mortem-кейс) и при этом раз в минуту делает
+	// runtime.ReadMemStats — это stop-the-world пауза в NE. mem_sampler
+	// использует дешёвый runtime/metrics без STW.
+	if !C.IsIos {
+		startHeartbeatOnce.Do(func() { go heartbeatLoop(sWorkingPath) })
+	}
 
 	// Audit Q1.3-fix: restore CWD = workingDir on mobile platforms.
 	// sing-box upstream resolves embedded geosite/geoip/rule-set paths
