@@ -9,6 +9,10 @@ shipped standalone).
 
 ## [Unreleased]
 
+### Added
+
+- Hot-add: new `AddOutbound`/`RemoveOutbound` gRPC RPCs — add a server (share-link URI or a single sing-box outbound JSON, same parse pipeline as `Parse`) into the *running* box and register it as a member of the requested selectors, with no restart and no dropped connections. Removal detaches selector membership first (selection falls back with an interrupt), then removes from the manager. Enables cross-subscription dual-tunnel switching with zero reconnects; per added outbound the cost is one idle struct. Selector (sing-box fork) gained thread-safe dynamic membership (`AddMember`/`RemoveMember` under an RWMutex; the hot dial path still reads only the atomic selected value).
+
 ## [4.7.32] - 2026-07-18
 
 ### Fixed (iOS NE jetsam — xhttp write-scratch, device heap-profiled 2026-07-18)
