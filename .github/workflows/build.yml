@@ -32,6 +32,35 @@ jobs:
       - name: Download dependencies
         run: go mod download
 
+      # Диагностика, а не проверка — шаг НИКОГДА не роняет сборку.
+      # Существует ради одного вопроса: почему ld на раннере говорит
+      # «skipping incompatible» про libcronet.a, который локально разбирается
+      # как валидный ar с ELF x86-64 внутри. Дважды на этот вопрос отвечали
+      # догадкой и дважды неверно, поэтому ответ теперь печатается фактом:
+      # что реально лежит по пути, какого размера, и что видит `file` в
+      # первом члене архива. Как только причина ясна — чинить линковку и
+      # убирать вместе с фильтром MAIN+CRONET.
+      - name: Diagnose cronet archive (never fails)
+        continue-on-error: true
+        run: |
+          LIB=$(find "$(go env GOMODCACHE)/github.com/sagernet/cronet-go/lib" \
+                  -maxdepth 1 -name 'linux_amd64@*' -type d 2>/dev/null | head -1)
+          echo "lib dir: ${LIB:-<НЕ НАЙДЕН>}"
+          [ -n "$LIB" ] || exit 0
+          ls -la "$LIB"
+          for f in "$LIB"/libcronet.a "$LIB"/libcronet.so; do
+            [ -e "$f" ] && { echo "--- $f ---"; file "$f"; }
+          done
+          if [ -f "$LIB/libcronet.a" ]; then
+            echo "--- первый ELF-член архива ---"
+            ar t "$LIB/libcronet.a" 2>/dev/null | head -3
+            M=$(ar t "$LIB/libcronet.a" 2>/dev/null | grep -m1 '\.o$')
+            [ -n "$M" ] && { cd /tmp && ar x "$LIB/libcronet.a" "$M" && file "$M"; }
+            echo "--- ld видит архив как ---"
+            ld -verbose 2>/dev/null | head -2
+            readelf -h "$LIB/libcronet.a" 2>&1 | head -12 || true
+          fi
+
       # Один шаг считает и теги, и списки пакетов; дальше шаги их переиспользуют.
       #
       # ТЕГИ читаются ИЗ Makefile (BASE_TAGS), а не дублируются здесь строкой:
@@ -69,19 +98,14 @@ jobs:
           #   cmd/bydll        — требует предсобранную DLL
           #   platform/desktop — требует CGO-заголовки
           #   profile/test     — тестовые фикстуры
-          #   cmd/main, xray2sing/cmd — main-пакеты, которые ЛИНКУЮТСЯ, а
-          #     with_naive_outbound требует при линковке статическую
-          #     libcronet.a. `extract-lib --target linux/amd64` отдаёт только
-          #     libcronet.so (проверено: шаг отработал, в /tmp/cronet-lib лежит
-          #     11MB .so и ни одного .a) — статики для linux в пакете нет.
-          #     На Windows этой проблемы нет: там тег with_purego, cronet
-          #     грузится динамически в рантайме, .a не нужна.
-          #     ⚠️ ВАЖНО: КОМПИЛЯЦИЯ naive-пути при этом проверяется — падает
-          #     только линковка бинарей. Все библиотечные пакеты, включая
-          #     protocol/naive, собираются и вет-ятся с полным набором тегов.
-          #     Если понадобится проверять и линковку — нужен статический
-          #     срез cronet для linux, это отдельная задача.
-          EXCL='(inhive-core/cmd/bydll|inhive-core/cmd/main|inhive-core/platform/desktop|inhive-core/v2/profile/test|xray2sing/cmd)'
+          #
+          # ⚠️ Пакетов, падающих на ЛИНКОВКЕ cronet, здесь НЕТ и быть не должно:
+          # они отбираются вычисляемым признаком ниже (MAIN+CRONET), а не именем.
+          # Ручной список этот класс уже дважды пропускал — сначала cmd/main и
+          # xray2sing/cmd, потом tun_bench и корень модуля xray2sing. Каждый
+          # промах = красная сборка и письмо. Признак «главный пакет + cronet в
+          # дереве зависимостей» ловит их все и переживёт появление новых.
+          EXCL='(inhive-core/cmd/bydll|inhive-core/platform/desktop|inhive-core/v2/profile/test)'
 
           # Апстримные пакеты sing-box, которых нет в НАШЕМ графе модулей (их
           # зависимостей нет в go.sum, потому что мы их не собираем и не
@@ -129,7 +153,24 @@ jobs:
           # не очередное имя в grep: иначе каждый новый тест-онли пакет будет
           # ронять CI и его снова придётся чинить руками. go vet такие пакеты
           # обрабатывает штатно, поэтому в vet-список они входят.
-          go list -e -tags "$TAGS" -f '{{.ImportPath}} {{if or .Error .DepsErrors}}BROKEN{{else}}OK{{end}} {{if .GoFiles}}HASGO{{else}}NOGO{{end}} {{if or .TestGoFiles .XTestGoFiles}}HASTEST{{else}}NOTEST{{end}}' \
+          # Пятое поле — ВЫЧИСЛЯЕМЫЙ признак линковки cronet: `MAIN+CRONET`
+          # означает «главный пакет, который линкуется, и cronet у него в дереве
+          # зависимостей». Такие пропускаются на шаге build.
+          #
+          # Почему вообще пропускаются: на раннере GNU ld отвергает libcronet.a
+          # («skipping incompatible»), хотя архив валидный — проверено разбором
+          # файла: настоящий `ar`, члены внутри ELF 64-bit x86-64 (dispatcher.o,
+          # tls.o, ...). Значит ОБЕ прежние формулировки в этом файле были
+          # неверны: и «статического среза для linux не существует», и «архив
+          # несовместим». Настоящая причина пока НЕ установлена; её печатает
+          # диагностический шаг выше, чтобы следующий разбор шёл от факта, а не
+          # от очередной догадки. До тех пор пропускается только ЛИНКОВКА.
+          #
+          # Что при этом НЕ теряется: библиотечные пакеты не линкуются вовсе, их
+          # компиляция проверяется целиком — включая protocol/naive и
+          # protocol/naive/quic с полным набором тегов. go vet тоже не линкует,
+          # поэтому vet-список остаётся полным.
+          go list -e -tags "$TAGS" -f '{{.ImportPath}} {{if or .Error .DepsErrors}}BROKEN{{else}}OK{{end}} {{if .GoFiles}}HASGO{{else}}NOGO{{end}} {{if or .TestGoFiles .XTestGoFiles}}HASTEST{{else}}NOTEST{{end}} {{if eq .Name "main"}}MAIN{{else}}LIB{{end}}{{range .Deps}}{{if eq . "github.com/sagernet/cronet-go"}}+CRONET{{end}}{{end}}' \
             $MODULES 2>/dev/null > /tmp/all.txt
           grep -v -E "$EXCL" /tmp/all.txt > /tmp/kept.txt
 
@@ -139,11 +180,27 @@ jobs:
             exit 1
           fi
 
-          awk '$2=="OK" && $3=="HASGO"   {print $1}' /tmp/kept.txt > /tmp/pkgs-build.txt
-          awk '$2=="OK"                  {print $1}' /tmp/kept.txt > /tmp/pkgs-vet.txt
-          awk '$2=="OK" && $4=="HASTEST" {print $1}' /tmp/kept.txt > /tmp/pkgs-test.txt
+          awk '$2=="OK" && $3=="HASGO" && $5!="MAIN+CRONET" {print $1}' /tmp/kept.txt > /tmp/pkgs-build.txt
+          awk '$2=="OK"                                     {print $1}' /tmp/kept.txt > /tmp/pkgs-vet.txt
+
+          # Тесты гоняются БЕЗ with_naive_outbound — по той же причине линковки:
+          # тест собирается в исполняемый бинарь, поэтому ЛЮБОЙ пакет с cronet в
+          # зависимостях упал бы так же, как main. С полным набором тегов из
+          # прогона выпали бы libbox, v2/config, v2/hcore и — самое ценное —
+          # xray2sing/ray2sing, корпус-гард парсера. Без одного этого тега cronet
+          # не попадает в зависимости НИ ОДНОГО тестового пакета (проверено
+          # go list по всем трём модулям), и прогон остаётся полным. Компиляция
+          # самого naive проверена шагами build/vet выше, так что тег не теряется
+          # из проверки — он теряется только из линковки тестовых бинарей.
+          TAGS_TEST=$(echo "$TAGS" | sed 's/,with_naive_outbound//; s/with_naive_outbound,//')
+          echo "tags_test=$TAGS_TEST" >> "$GITHUB_OUTPUT"
+          go list -e -tags "$TAGS_TEST" -f '{{.ImportPath}} {{if or .Error .DepsErrors}}BROKEN{{else}}OK{{end}} {{if or .TestGoFiles .XTestGoFiles}}HASTEST{{else}}NOTEST{{end}}' \
+            $MODULES 2>/dev/null | grep -v -E "$EXCL" \
+            | awk '$2=="OK" && $3=="HASTEST" {print $1}' > /tmp/pkgs-test.txt
 
           echo "build: $(wc -l < /tmp/pkgs-build.txt), vet: $(wc -l < /tmp/pkgs-vet.txt), test: $(wc -l < /tmp/pkgs-test.txt)"
+          echo "--- пропущено на линковке (cronet) ---"
+          awk '$5=="MAIN+CRONET" {print "  " $1}' /tmp/kept.txt
 
       - name: Verify build
         run: go build -tags "${{ steps.ctx.outputs.tags }}" $(cat /tmp/pkgs-build.txt)
@@ -152,8 +209,13 @@ jobs:
         run: go vet -tags "${{ steps.ctx.outputs.tags }}" $(cat /tmp/pkgs-vet.txt)
 
       # Тесты в модулях sing-box/xray2sing до этого не запускались НИ РАЗУ —
-      # они лежали вне `./...`. Запускаются с теми же тегами: без них часть
-      # падает не по существу, а на заглушках (например transport/v2rayxhttp
-      # без with_utls: "uTLS ... is not included in this build").
+      # они лежали вне `./...`. Теги обязательны: без них часть падает не по
+      # существу, а на заглушках (например transport/v2rayxhttp без with_utls:
+      # "uTLS ... is not included in this build"). Набор тегов здесь свой —
+      # tags_test, полный минус with_naive_outbound; почему — см. шаг ctx.
+      #
+      # ⚠️ Зелёный прогон этого шага пока НЕ наблюдался: до сих пор сборка
+      # падала раньше, на шаге build, и до тестов очередь не доходила. Первый
+      # прогон, дошедший сюда, и будет первым фактическим запуском.
       - name: Run tests
-        run: go test -tags "${{ steps.ctx.outputs.tags }}" -count=1 -timeout 10m $(cat /tmp/pkgs-test.txt)
+        run: go test -tags "${{ steps.ctx.outputs.tags_test }}" -count=1 -timeout 10m $(cat /tmp/pkgs-test.txt)
