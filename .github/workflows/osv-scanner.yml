@@ -55,7 +55,13 @@ jobs:
     uses: "google/osv-scanner-action/.github/workflows/osv-scanner-reusable.yml@9a498708959aeaef5ef730655706c5a1df1edbc2"  # v2.3.8
     with:
       # Explicit Go lockfiles only — skip submodule/vendored npm/yarn deps (Tailscale web UI).
+      # --config обязателен: reusable workflow НЕ подхватывает .osv-scanner.toml из
+      # корня репозитория автоматически (проверено 2026-07-19 — без флага прогон
+      # оставался красным на GO-2026-5932, хотя локально с --config он зелёный).
+      # Без этой строки файл исключений существует и не действует — то есть ровно
+      # тот класс «защита есть, но молчит», который мы чиним по всему проекту.
       scan-args: |-
+        --config=.osv-scanner.toml
         --lockfile=go.mod
         --lockfile=xray2sing/go.mod
     permissions:
@@ -68,6 +74,7 @@ jobs:
     uses: "google/osv-scanner-action/.github/workflows/osv-scanner-reusable-pr.yml@9a498708959aeaef5ef730655706c5a1df1edbc2"  # v2.3.8
     with:
       scan-args: |-
+        --config=.osv-scanner.toml
         --lockfile=go.mod
         --lockfile=xray2sing/go.mod
     permissions:
