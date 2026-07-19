@@ -1,0 +1,31 @@
+# OSV-Scanner ignore list.
+#
+# Правило: сюда попадает ТОЛЬКО то, что доказано недостижимо в наших артефактах,
+# с указанием, чем именно доказано. Не «пока не чиним» и не «шумит» — такие
+# записи превращают сканер в декорацию, и следующая настоящая находка утонет
+# среди заглушённых. Каждая запись обязана переживать вопрос «а если завтра
+# кто-то начнёт использовать этот пакет?» — поэтому проверка достижимости
+# указана явно и воспроизводима.
+
+[[IgnoredVulns]]
+id = "GO-2026-5932"
+# golang.org/x/crypto/openpgp: «unmaintained, unsafe by design».
+#
+# Почему не чиним обновлением: исправленной версии НЕ СУЩЕСТВУЕТ и не появится.
+# В записи vuln.go.dev диапазон — `introduced: 0` без `fixed`: пакет объявлен
+# небезопасным целиком и заморожен. Подъём x/crypto 0.52.0 → 0.54.0 ничего не
+# изменит — сканер помечает весь модуль, хотя дефект только в подпакете openpgp.
+#
+# Почему безопасно игнорировать — проверено, а не предположено (2026-07-19):
+#   grep -rn "crypto/openpgp" --include="*.go" .   → ни одного импорта
+#   go mod why golang.org/x/crypto/openpgp
+#     → "main module does not need package golang.org/x/crypto/openpgp"
+# То есть уязвимый код не попадает ни в DLL, ни в AAR, ни в xcframework.
+# x/crypto нужен нам ради других подпакетов (curve25519/chacha20poly1305/hkdf),
+# openpgp тянется только как часть модуля.
+#
+# Когда пересмотреть: если в дереве появится импорт любого `crypto/openpgp/...`
+# — заглушку снять немедленно, достижимость станет реальной. Проверять той же
+# командой `go mod why`.
+reason = "openpgp is unreachable: no import anywhere in the tree, and `go mod why` reports the main module does not need it. No fixed version exists (introduced:0, no fix) — upgrading x/crypto cannot clear it. Re-check with `go mod why golang.org/x/crypto/openpgp` if any openpgp import appears."
+ignoreUntil = 2027-01-19
