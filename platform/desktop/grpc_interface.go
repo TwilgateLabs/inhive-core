@@ -6,8 +6,8 @@ import (
 	"fmt"
 	"runtime/debug"
 
-	hcore "github.com/twilgate/inhive-core/v2/hcore"
 	"github.com/sagernet/sing-box/log"
+	hcore "github.com/twilgate/inhive-core/v2/hcore"
 )
 
 //export StartCoreGrpcServer

@@ -2,8 +2,8 @@
 package hcore
 
 import (
-	"github.com/twilgate/inhive-core/v2/service_manager"
 	"github.com/sagernet/sing-box/adapter"
+	"github.com/twilgate/inhive-core/v2/service_manager"
 )
 
 type inhiveMainServiceManager struct{}

@@ -21,10 +21,10 @@ import (
 	"time"
 
 	"github.com/sagernet/sing-box/adapter"
-	"github.com/sagernet/sing/common/ntp"
-	"github.com/twilgate/inhive-core/v2/config"
 	E "github.com/sagernet/sing/common/exceptions"
 	M "github.com/sagernet/sing/common/metadata"
+	"github.com/sagernet/sing/common/ntp"
+	"github.com/twilgate/inhive-core/v2/config"
 )
 
 const (

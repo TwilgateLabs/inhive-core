@@ -4,8 +4,8 @@ import (
 	"fmt"
 	"testing"
 
-	"github.com/twilgate/inhive-core/v2/profile"
 	"github.com/sagernet/sing-box/experimental/libbox"
+	"github.com/twilgate/inhive-core/v2/profile"
 )
 
 func TestAddByContent(t *testing.T) {

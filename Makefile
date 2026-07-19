@@ -22,6 +22,20 @@ CRONET_GO_VERSION := $(shell cat sing-box/.github/CRONET_GO_VERSION)
 # (2026-07-02 аудит) был ошибкой: риск jetsam теоретический, а сам jetsam уже
 # закрыт dial-cap 256 + thread-cap 512 + mem-ceiling 32MB. Возврат 2026-07-04.
 BASE_TAGS=with_gvisor,with_quic,with_wireguard,with_utls,with_clash_api,with_grpc,with_awg,tfogo_checklinkname0,with_olcrtc,with_naive_outbound
+# FMT_DIRS — границы НАШЕГО кода для gofmt. Единственный источник истины:
+# CI (.github/workflows/build.yml) читает этот список sed'ом так же, как
+# BASE_TAGS — не дублировать его строкой ни в workflow, ни в скриптах.
+# Что внутри и что снаружи (проверено по факту 2026-07-19):
+#   v2/ cmd/ platform/ hygiene/ — наш код core-модуля;
+#   xray2sing/ — тоже НАШ (upstream.toml: «не форк — оригинальный код»,
+#     Xray для него лишь семантический эталон), мержей апстрима не бывает;
+#   sing-box/ НЕ входит НАМЕРЕННО: вендоренный форк, регулярно
+#     синхронизируется с апстримом — переформатирование 56 его файлов
+#     превратит каждый будущий бамп в стену конфликтов;
+#   .claude/ не входит: служебный каталог, не собирается.
+# *.pb.go внутри FMT_DIRS исключаются фильтром в fmt/fmt-check: их владелец —
+# protoc-gen-go (цель protos), ручная правка перезаписывается генератором.
+FMT_DIRS=./v2 ./cmd ./platform ./hygiene ./xray2sing
 TAGS=$(BASE_TAGS)
 IOS_TAGS=$(BASE_TAGS)
 # with_dhcp убран из iOS-тагов (2026-07-02): DHCP-DNS discovery в iOS NE не
@@ -84,6 +98,32 @@ protos:
 	# protoc --js_out=import_style=commonjs,binary:./extension/html/rpc/ --grpc-web_out=import_style=commonjs,mode=grpcwebtext:./extension/html/rpc/ $(shell find v2 -name "*.proto") $(shell find extension -name "*.proto")
 	# npx browserify extension/html/rpc/extension.js >extension/html/rpc.js
 
+
+# fmt / fmt-check — форматирование НАШЕГО кода (границы и почему именно
+# такие — см. FMT_DIRS выше). fmt чинит, fmt-check только проверяет — его
+# зовёт CI-гейт (build.yml, шаг «Check gofmt»), поэтому логика проверки и
+# список каталогов живут здесь ОДИН раз.
+# `|| true` на grep обязателен: когда всё чисто, grep выходит с кодом 1 и
+# без него уронил бы рецепт на ровном месте.
+.PHONY: fmt fmt-check
+fmt:
+	@FILES=$$(gofmt -l $(FMT_DIRS) | grep -v '\.pb\.go$$' || true); \
+	if [ -n "$$FILES" ]; then \
+		gofmt -w $$FILES; \
+		echo "gofmt -w применён к:"; echo "$$FILES"; \
+	else \
+		echo "gofmt: уже чисто ($(FMT_DIRS))"; \
+	fi
+
+fmt-check:
+	@FILES=$$(gofmt -l $(FMT_DIRS) | grep -v '\.pb\.go$$' || true); \
+	if [ -n "$$FILES" ]; then \
+		echo "ERROR: файлы не отформатированы gofmt:"; \
+		echo "$$FILES"; \
+		echo "Починить: make fmt (из корня inhive-core)"; \
+		exit 1; \
+	fi; \
+	echo "gofmt clean: $(FMT_DIRS)"
 
 lib_install: prepare
 	go install -v github.com/sagernet/gomobile/cmd/gomobile@v0.1.12

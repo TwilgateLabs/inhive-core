@@ -3,8 +3,8 @@ package cmd
 import (
 	"os"
 
-	"github.com/twilgate/inhive-core/v2/hutils"
 	"github.com/spf13/cobra"
+	"github.com/twilgate/inhive-core/v2/hutils"
 )
 
 var commandGenerateCertification = &cobra.Command{

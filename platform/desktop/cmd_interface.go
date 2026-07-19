@@ -10,8 +10,8 @@ import (
 	"runtime/debug"
 	"unsafe"
 
-	"github.com/twilgate/inhive-core/cmd"
 	"github.com/sagernet/sing-box/log"
+	"github.com/twilgate/inhive-core/cmd"
 )
 
 //export parseCli

@@ -2,9 +2,9 @@
 package hcore
 
 import (
-	"github.com/twilgate/inhive-core/v2/service_manager"
 	daemon "github.com/sagernet/sing-box/daemon"
 	"github.com/sagernet/sing-box/log"
+	"github.com/twilgate/inhive-core/v2/service_manager"
 )
 
 var _ log.PlatformWriter = (*LogInterface)(nil)

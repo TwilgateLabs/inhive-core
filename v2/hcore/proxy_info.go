@@ -5,14 +5,14 @@ import (
 	"strings"
 	"time"
 
-	"github.com/twilgate/inhive-core/v2/config"
-	hcommon "github.com/twilgate/inhive-core/v2/hcommon"
 	"github.com/sagernet/sing-box/adapter"
 	"github.com/sagernet/sing-box/common/monitoring"
 	G "github.com/sagernet/sing-box/protocol/group"
 	"github.com/sagernet/sing-box/protocol/group/balancer"
 	E "github.com/sagernet/sing/common/exceptions"
 	"github.com/sagernet/sing/service"
+	"github.com/twilgate/inhive-core/v2/config"
+	hcommon "github.com/twilgate/inhive-core/v2/hcommon"
 	"google.golang.org/grpc"
 
 	timestamppb "google.golang.org/protobuf/types/known/timestamppb"

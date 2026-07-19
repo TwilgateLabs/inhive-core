@@ -7,11 +7,11 @@ import (
 	"runtime"
 	"time"
 
-	"github.com/twilgate/inhive-core/v2/config"
-	hcommon "github.com/twilgate/inhive-core/v2/hcommon"
 	"github.com/sagernet/sing-box/adapter"
 	"github.com/sagernet/sing-box/log"
 	"github.com/sagernet/sing-box/protocol/group"
+	"github.com/twilgate/inhive-core/v2/config"
+	hcommon "github.com/twilgate/inhive-core/v2/hcommon"
 
 	"github.com/sagernet/sing-box/common/monitoring"
 	E "github.com/sagernet/sing/common/exceptions"

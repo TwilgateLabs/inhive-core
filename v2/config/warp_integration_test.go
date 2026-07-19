@@ -117,9 +117,9 @@ func buildFlutterStyleEndpoint(wgConfig *WarpWireguardConfig, reserved []int) ma
 		"mtu":         1330,
 		"peers": []map[string]interface{}{
 			{
-				"address":    "162.159.192.1",
-				"port":       2408,
-				"public_key": wgConfig.PeerPublicKey,
+				"address":                       "162.159.192.1",
+				"port":                          2408,
+				"public_key":                    wgConfig.PeerPublicKey,
 				"allowed_ips":                   []string{"0.0.0.0/0", "::/0"},
 				"reserved":                      reserved,
 				"persistent_keepalive_interval": 25,

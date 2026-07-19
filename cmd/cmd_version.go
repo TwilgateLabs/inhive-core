@@ -5,8 +5,8 @@ import (
 	"runtime"
 	"runtime/debug"
 
-	HC "github.com/twilgate/inhive-core/v2/hcommon/constants"
 	C "github.com/sagernet/sing-box/constant"
+	HC "github.com/twilgate/inhive-core/v2/hcommon/constants"
 
 	"github.com/spf13/cobra"
 )

@@ -2,8 +2,8 @@
 package hcore
 
 import (
-	"github.com/twilgate/inhive-core/v2/config"
 	"github.com/sagernet/sing-box/log"
+	"github.com/twilgate/inhive-core/v2/config"
 )
 
 func errorWrapper(state MessageType, err error) (*CoreInfoResponse, error) {

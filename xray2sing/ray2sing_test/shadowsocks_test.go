@@ -28,7 +28,6 @@ func TestShadowsocks(t *testing.T) {
 	ray2sing.CheckUrlAndJson(url, expectedJSON, t)
 }
 
-
 func TestShadowsocksEIHBase64(t *testing.T) {
 	// EIH extension: https://github.com/Shadowsocks-NET/shadowsocks-specs/blob/main/2022-2-shadowsocks-2022-extensible-identity-headers.md
 	// Named as "multi-user" in https://sing-box.sagernet.org/configuration/inbound/shadowsocks/#structure
@@ -53,7 +52,6 @@ func TestShadowsocksEIHBase64(t *testing.T) {
 
 	ray2sing.CheckUrlAndJson(url, expectedJSON, t)
 }
-
 
 func TestShadowsocksEIHPlain(t *testing.T) {
 	// EIH extension: https://github.com/Shadowsocks-NET/shadowsocks-specs/blob/main/2022-2-shadowsocks-2022-extensible-identity-headers.md

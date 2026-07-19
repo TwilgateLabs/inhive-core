@@ -9,9 +9,9 @@ import (
 	"os"
 	"strings"
 
-	"github.com/twilgate/xray2sing/ray2sing"
 	"github.com/sagernet/sing-box/experimental/libbox"
 	_ "github.com/sagernet/sing-box/include"
+	"github.com/twilgate/xray2sing/ray2sing"
 )
 
 var examples = map[string][]string{

@@ -7,14 +7,14 @@ import (
 	"os"
 	"sync"
 
+	"github.com/sagernet/sing-box/common/daita"
+	C "github.com/sagernet/sing-box/constant"
+	"github.com/sagernet/sing-box/experimental/libbox"
+	"github.com/sagernet/sing-box/option"
 	"github.com/twilgate/inhive-core/v2/config"
 	"github.com/twilgate/inhive-core/v2/db"
 	hcommon "github.com/twilgate/inhive-core/v2/hcommon"
 	hutils "github.com/twilgate/inhive-core/v2/hutils"
-	C "github.com/sagernet/sing-box/constant"
-	"github.com/sagernet/sing-box/experimental/libbox"
-	"github.com/sagernet/sing-box/common/daita"
-	"github.com/sagernet/sing-box/option"
 )
 
 func BuildConfigJson(ctx context.Context, in *StartRequest) (string, error) {

@@ -21,9 +21,9 @@ import (
 	"context"
 	"time"
 
-	"github.com/twilgate/inhive-core/v2/config"
 	"github.com/sagernet/sing-box/adapter"
 	"github.com/sagernet/sing-box/common/monitoring"
+	"github.com/twilgate/inhive-core/v2/config"
 )
 
 const (

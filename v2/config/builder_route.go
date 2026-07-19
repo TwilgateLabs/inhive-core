@@ -4,10 +4,10 @@ package config
 import (
 	"time"
 
+	mDNS "github.com/miekg/dns"
 	C "github.com/sagernet/sing-box/constant"
 	sdns "github.com/sagernet/sing-box/dns"
 	"github.com/sagernet/sing-box/option"
-	mDNS "github.com/miekg/dns"
 	"github.com/sagernet/sing/common/json/badoption"
 )
 

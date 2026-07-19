@@ -4,8 +4,8 @@ import (
 	"context"
 	"fmt"
 
-	"github.com/twilgate/xray2sing/ray2sing"
 	"github.com/sagernet/sing-box/log"
+	"github.com/twilgate/xray2sing/ray2sing"
 
 	"github.com/spf13/cobra"
 )

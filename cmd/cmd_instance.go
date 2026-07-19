@@ -5,10 +5,10 @@ import (
 	"os/signal"
 	"syscall"
 
-	hcore "github.com/twilgate/inhive-core/v2/hcore"
 	"github.com/sagernet/sing-box/experimental/libbox"
 	"github.com/sagernet/sing-box/log"
 	"github.com/spf13/cobra"
+	hcore "github.com/twilgate/inhive-core/v2/hcore"
 )
 
 var commandInstance = &cobra.Command{

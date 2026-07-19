@@ -18,16 +18,16 @@ import (
 	"os"
 	"path/filepath"
 	"runtime"
-	"runtime/metrics"
 	runtimeDebug "runtime/debug"
+	"runtime/metrics"
 	"runtime/pprof"
 	"strconv"
 	"strings"
 	"time"
 
-	"github.com/twilgate/inhive-core/v2/config"
 	"github.com/sagernet/sing-box/experimental/libbox"
 	xhttp "github.com/sagernet/sing-box/transport/v2rayxhttp"
+	"github.com/twilgate/inhive-core/v2/config"
 )
 
 // memSamplerInterval — период сэмплирования. 10с: достаточно часто чтобы
@@ -48,7 +48,7 @@ const memSamplerInterval = 10 * time.Second
 //     отдаёт освобождённые страницы ОС лениво (разово это уже делает start.go
 //     после старта — здесь периодически). Гейт iOS/Android как в start.go.
 const (
-	memDiagFileMaxBytes  = 512 * 1024
+	memDiagFileMaxBytes   = 512 * 1024
 	memDiagProfileAtBytes = 42 << 20
 	memFreeOSAtBytes      = 40 << 20
 )

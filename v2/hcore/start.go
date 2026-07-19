@@ -10,15 +10,15 @@ import (
 	"sync"
 	"time"
 
-	"github.com/twilgate/inhive-core/v2/config"
-	"github.com/twilgate/inhive-core/v2/db"
-	hcommon "github.com/twilgate/inhive-core/v2/hcommon"
-	service_manager "github.com/twilgate/inhive-core/v2/service_manager"
 	"github.com/sagernet/sing-box/adapter"
 	C "github.com/sagernet/sing-box/constant"
 	"github.com/sagernet/sing-box/experimental/libbox"
 	"github.com/sagernet/sing-box/option"
 	"github.com/sagernet/sing/service"
+	"github.com/twilgate/inhive-core/v2/config"
+	"github.com/twilgate/inhive-core/v2/db"
+	hcommon "github.com/twilgate/inhive-core/v2/hcommon"
+	service_manager "github.com/twilgate/inhive-core/v2/service_manager"
 )
 
 func (s *CoreService) Start(ctx context.Context, in *StartRequest) (resp *CoreInfoResponse, err error) {

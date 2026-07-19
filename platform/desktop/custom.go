@@ -14,10 +14,10 @@ import (
 	"strconv"
 	"unsafe"
 
-	hcore "github.com/twilgate/inhive-core/v2/hcore"
-	ray2sing "github.com/twilgate/xray2sing/ray2sing"
 	"github.com/sagernet/sing-box/experimental/libbox"
 	"github.com/sagernet/sing-box/log"
+	hcore "github.com/twilgate/inhive-core/v2/hcore"
+	ray2sing "github.com/twilgate/xray2sing/ray2sing"
 )
 
 func main() {}

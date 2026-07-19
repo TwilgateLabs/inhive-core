@@ -9,11 +9,11 @@ import (
 	"fmt"
 	"os"
 
-	"github.com/twilgate/xray2sing/ray2sing"
 	"github.com/sagernet/sing-box/experimental/libbox"
 	"github.com/sagernet/sing-box/option"
 	"github.com/sagernet/sing/common/batch"
 	SJ "github.com/sagernet/sing/common/json"
+	"github.com/twilgate/xray2sing/ray2sing"
 	"github.com/xmdhs/clash2singbox/convert"
 	"github.com/xmdhs/clash2singbox/model/clash"
 	"gopkg.in/yaml.v3"

@@ -60,9 +60,9 @@ func RunStandalone(ctx context.Context, inhiveSettingPath string, configPath str
 }
 
 type ConfigResult struct {
-	Config                string
-	RefreshInterval       int
-	InhiveOptions *config.InhiveOptions
+	Config          string
+	RefreshInterval int
+	InhiveOptions   *config.InhiveOptions
 }
 
 func readAndBuildConfig(ctx context.Context, inhiveSettingPath string, configPath string, defaultConfig *config.InhiveOptions) (ConfigResult, error) {

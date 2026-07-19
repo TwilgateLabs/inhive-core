@@ -5,8 +5,8 @@ import (
 	"context"
 	"time"
 
-	hcommon "github.com/twilgate/inhive-core/v2/hcommon"
 	C "github.com/sagernet/sing-box/constant"
+	hcommon "github.com/twilgate/inhive-core/v2/hcommon"
 )
 
 func (s *CoreService) Close(ctx context.Context, closeReq *CloseRequest) (resp *hcommon.Empty, err error) {

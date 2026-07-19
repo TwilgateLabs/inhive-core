@@ -1,8 +1,8 @@
 package cmd
 
 import (
-	hcore "github.com/twilgate/inhive-core/v2/hcore"
 	"github.com/sagernet/sing-box/experimental/libbox"
+	hcore "github.com/twilgate/inhive-core/v2/hcore"
 
 	"github.com/spf13/cobra"
 )

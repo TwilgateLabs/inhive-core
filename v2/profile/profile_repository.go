@@ -6,12 +6,12 @@ import (
 	"os"
 	"time"
 
+	"github.com/sagernet/sing-box/option"
 	"github.com/twilgate/inhive-core/v2/config"
 	"github.com/twilgate/inhive-core/v2/db"
 	"github.com/twilgate/inhive-core/v2/hcommon"
 	"github.com/twilgate/inhive-core/v2/hcommon/request"
 	hcore "github.com/twilgate/inhive-core/v2/hcore"
-	"github.com/sagernet/sing-box/option"
 )
 
 const (

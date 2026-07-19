@@ -7,34 +7,34 @@ import (
 	"sync/atomic"
 	"time"
 
-	"github.com/twilgate/inhive-core/v2/config"
 	"github.com/sagernet/sing-box/common/monitoring"
 	"github.com/sagernet/sing-box/daemon"
 	"github.com/sagernet/sing-box/experimental/libbox"
 	"github.com/sagernet/sing-box/log"
+	"github.com/twilgate/inhive-core/v2/config"
 )
 
 type InhiveInstance struct {
 	StartedService *daemon.StartedService
-	InhiveOptions *config.InhiveOptions
+	InhiveOptions  *config.InhiveOptions
 	// activeConfigPath string
-	CoreLogFactory            log.Factory
-	coreInfoObserver          *monitoring.Broadcaster[*CoreInfoResponse]
-	CoreState                 CoreStates
-	logObserver               *monitoring.Broadcaster[*LogMessage]
+	CoreLogFactory   log.Factory
+	coreInfoObserver *monitoring.Broadcaster[*CoreInfoResponse]
+	CoreState        CoreStates
+	logObserver      *monitoring.Broadcaster[*LogMessage]
 	// systemInfoObserver/outboundsInfoObserver/mainOutboundsInfoObserver
 	// удалены (NE-quiescence 2026-07-19): dead code. Соответствующие RPC идут
 	// другим путём — SystemInfo через per-subscriber тикер (commands.go),
 	// Outbounds/MainOutbounds через AllProxiesInfoStream (proxy_info.go). Эти
 	// три Broadcaster'а никто не Publish/Subscribe, но каждый держал горутину
 	// watchContext навсегда.
-	lock                      sync.Mutex
-	globalPlatformInterface   libbox.PlatformInterface
-	previousStartRequest      *StartRequest
-	debug                     bool
-	ListenPort                uint16
-	BaseContext               context.Context
-	endPauseTimer             *time.Timer // only for ios
+	lock                    sync.Mutex
+	globalPlatformInterface libbox.PlatformInterface
+	previousStartRequest    *StartRequest
+	debug                   bool
+	ListenPort              uint16
+	BaseContext             context.Context
+	endPauseTimer           *time.Timer // only for ios
 
 	logLevel LogLevel
 
@@ -44,7 +44,7 @@ type InhiveInstance struct {
 	// by the watcher. Default 1 (primary sing-box carousel). Stored atomically
 	// because it's read by the watcher goroutine on every probe-window tick
 	// and written by gRPC handlers.
-	currentMode      atomic.Int32
+	currentMode       atomic.Int32
 	modeStateObserver *monitoring.Broadcaster[*ModeStateResponse]
 	// modeWatcherCancel tears down the active urltest watcher when the VPN
 	// service stops or restarts. Nil when no service is running.
@@ -66,10 +66,10 @@ type InhiveInstance struct {
 }
 
 var static = &InhiveInstance{
-	CoreState:                 CoreStates_STOPPED,
-	coreInfoObserver:          monitoring.NewBroadcaster[*CoreInfoResponse](context.Background()),
-	logObserver:               monitoring.NewBroadcaster[*LogMessage](context.Background()),
-	modeStateObserver:         monitoring.NewBroadcaster[*ModeStateResponse](context.Background()),
+	CoreState:         CoreStates_STOPPED,
+	coreInfoObserver:  monitoring.NewBroadcaster[*CoreInfoResponse](context.Background()),
+	logObserver:       monitoring.NewBroadcaster[*LogMessage](context.Background()),
+	modeStateObserver: monitoring.NewBroadcaster[*ModeStateResponse](context.Background()),
 }
 
 func init() {

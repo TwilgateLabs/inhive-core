@@ -314,7 +314,7 @@ func TestCrossPath_ShareLinkVsJSON(t *testing.T) {
 			link:    "vless://" + u + "@cdn.example.com:443?type=ws&security=tls&sni=cdn.example.com&fp=chrome&path=%2Fp&host=cdn.example.com&encryption=none#n",
 			jsonCfg: `{"protocol":"vless","settings":{"vnext":[{"address":"cdn.example.com","port":443,"users":[{"id":"` + u + `","encryption":"none"}]}]},"streamSettings":{"network":"ws","security":"tls","tlsSettings":{"serverName":"cdn.example.com","fingerprint":"chrome"},"wsSettings":{"path":"/p","headers":{"Host":"cdn.example.com"}}}}`,
 			singbox: `{"type":"vless","tag":"n","server":"cdn.example.com","server_port":443,"uuid":"` + u + `","tls":{"enabled":true,"server_name":"cdn.example.com","utls":{"enabled":true,"fingerprint":"chrome"}},"transport":{"type":"ws","path":"/p","headers":{"Host":"cdn.example.com"}}}`,
-			clash: "proxies:\n  - name: n\n    type: vless\n    server: cdn.example.com\n    port: 443\n    uuid: " + u + "\n    tls: true\n    servername: cdn.example.com\n    client-fingerprint: chrome\n    network: ws\n    ws-opts:\n      path: /p\n      headers:\n        Host: cdn.example.com\n",
+			clash:   "proxies:\n  - name: n\n    type: vless\n    server: cdn.example.com\n    port: 443\n    uuid: " + u + "\n    tls: true\n    servername: cdn.example.com\n    client-fingerprint: chrome\n    network: ws\n    ws-opts:\n      path: /p\n      headers:\n        Host: cdn.example.com\n",
 		},
 		{
 			name:    "trojan_ws_tls",
@@ -328,7 +328,7 @@ func TestCrossPath_ShareLinkVsJSON(t *testing.T) {
 			link:    "vless://" + u + "@cdn.example.com:443?type=grpc&security=tls&sni=cdn.example.com&fp=chrome&serviceName=gsvc&encryption=none#n",
 			jsonCfg: `{"protocol":"vless","settings":{"vnext":[{"address":"cdn.example.com","port":443,"users":[{"id":"` + u + `","encryption":"none"}]}]},"streamSettings":{"network":"grpc","security":"tls","tlsSettings":{"serverName":"cdn.example.com","fingerprint":"chrome"},"grpcSettings":{"serviceName":"gsvc"}}}`,
 			singbox: `{"type":"vless","tag":"n","server":"cdn.example.com","server_port":443,"uuid":"` + u + `","tls":{"enabled":true,"server_name":"cdn.example.com","utls":{"enabled":true,"fingerprint":"chrome"}},"transport":{"type":"grpc","service_name":"gsvc"}}`,
-			clash: "proxies:\n  - name: n\n    type: vless\n    server: cdn.example.com\n    port: 443\n    uuid: " + u + "\n    tls: true\n    servername: cdn.example.com\n    client-fingerprint: chrome\n    network: grpc\n    grpc-opts:\n      grpc-service-name: gsvc\n",
+			clash:   "proxies:\n  - name: n\n    type: vless\n    server: cdn.example.com\n    port: 443\n    uuid: " + u + "\n    tls: true\n    servername: cdn.example.com\n    client-fingerprint: chrome\n    network: grpc\n    grpc-opts:\n      grpc-service-name: gsvc\n",
 		},
 		{
 			// REALITY + the uTLS fingerprint across every dialect. The Clash and
@@ -338,7 +338,7 @@ func TestCrossPath_ShareLinkVsJSON(t *testing.T) {
 			link:    "vless://" + u + "@1.2.3.4:443?type=tcp&security=reality&sni=www.example.org&fp=chrome&pbk=PUBKEY123&sid=ab12&encryption=none#n",
 			jsonCfg: `{"protocol":"vless","settings":{"vnext":[{"address":"1.2.3.4","port":443,"users":[{"id":"` + u + `","encryption":"none"}]}]},"streamSettings":{"network":"tcp","security":"reality","realitySettings":{"serverName":"www.example.org","publicKey":"PUBKEY123","shortId":"ab12","fingerprint":"chrome"}}}`,
 			singbox: `{"type":"vless","tag":"n","server":"1.2.3.4","server_port":443,"uuid":"` + u + `","tls":{"enabled":true,"server_name":"www.example.org","utls":{"enabled":true,"fingerprint":"chrome"},"reality":{"enabled":true,"public_key":"PUBKEY123","short_id":"ab12"}}}`,
-			clash: "proxies:\n  - name: n\n    type: vless\n    server: 1.2.3.4\n    port: 443\n    uuid: " + u + "\n    tls: true\n    servername: www.example.org\n    client-fingerprint: chrome\n    reality-opts:\n      public-key: PUBKEY123\n      short-id: ab12\n",
+			clash:   "proxies:\n  - name: n\n    type: vless\n    server: 1.2.3.4\n    port: 443\n    uuid: " + u + "\n    tls: true\n    servername: www.example.org\n    client-fingerprint: chrome\n    reality-opts:\n      public-key: PUBKEY123\n      short-id: ab12\n",
 		},
 		{
 			// vmess is the protocol where all three transcoders hand-rolled their
@@ -347,7 +347,7 @@ func TestCrossPath_ShareLinkVsJSON(t *testing.T) {
 			link:    "vmess://" + vmessLink(map[string]string{"v": "2", "ps": "n", "add": "cdn.example.com", "port": "443", "id": u, "aid": "0", "scy": "auto", "net": "ws", "type": "none", "host": "cdn.example.com", "path": "/p", "tls": "tls", "sni": "cdn.example.com", "fp": "firefox", "insecure": "1"}),
 			jsonCfg: `{"protocol":"vmess","tag":"n","settings":{"vnext":[{"address":"cdn.example.com","port":443,"users":[{"id":"` + u + `","alterId":0,"security":"auto"}]}]},"streamSettings":{"network":"ws","security":"tls","tlsSettings":{"serverName":"cdn.example.com","fingerprint":"firefox","allowInsecure":true},"wsSettings":{"path":"/p","headers":{"Host":"cdn.example.com"}}}}`,
 			singbox: `{"type":"vmess","tag":"n","server":"cdn.example.com","server_port":443,"uuid":"` + u + `","alter_id":0,"security":"auto","tls":{"enabled":true,"server_name":"cdn.example.com","insecure":true,"utls":{"enabled":true,"fingerprint":"firefox"}},"transport":{"type":"ws","path":"/p","headers":{"Host":"cdn.example.com"}}}`,
-			clash: "proxies:\n  - name: n\n    type: vmess\n    server: cdn.example.com\n    port: 443\n    uuid: " + u + "\n    alterId: 0\n    cipher: auto\n    tls: true\n    servername: cdn.example.com\n    client-fingerprint: firefox\n    skip-cert-verify: true\n    network: ws\n    ws-opts:\n      path: /p\n      headers:\n        Host: cdn.example.com\n",
+			clash:   "proxies:\n  - name: n\n    type: vmess\n    server: cdn.example.com\n    port: 443\n    uuid: " + u + "\n    alterId: 0\n    cipher: auto\n    tls: true\n    servername: cdn.example.com\n    client-fingerprint: firefox\n    skip-cert-verify: true\n    network: ws\n    ws-opts:\n      path: /p\n      headers:\n        Host: cdn.example.com\n",
 		},
 	}
 	for _, c := range cases {
