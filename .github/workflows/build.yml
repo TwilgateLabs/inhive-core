@@ -69,7 +69,19 @@ jobs:
           #   cmd/bydll        — требует предсобранную DLL
           #   platform/desktop — требует CGO-заголовки
           #   profile/test     — тестовые фикстуры
-          EXCL='(inhive-core/cmd/bydll|inhive-core/platform/desktop|inhive-core/v2/profile/test)'
+          #   cmd/main, xray2sing/cmd — main-пакеты, которые ЛИНКУЮТСЯ, а
+          #     with_naive_outbound требует при линковке статическую
+          #     libcronet.a. `extract-lib --target linux/amd64` отдаёт только
+          #     libcronet.so (проверено: шаг отработал, в /tmp/cronet-lib лежит
+          #     11MB .so и ни одного .a) — статики для linux в пакете нет.
+          #     На Windows этой проблемы нет: там тег with_purego, cronet
+          #     грузится динамически в рантайме, .a не нужна.
+          #     ⚠️ ВАЖНО: КОМПИЛЯЦИЯ naive-пути при этом проверяется — падает
+          #     только линковка бинарей. Все библиотечные пакеты, включая
+          #     protocol/naive, собираются и вет-ятся с полным набором тегов.
+          #     Если понадобится проверять и линковку — нужен статический
+          #     срез cronet для linux, это отдельная задача.
+          EXCL='(inhive-core/cmd/bydll|inhive-core/cmd/main|inhive-core/platform/desktop|inhive-core/v2/profile/test|xray2sing/cmd)'
 
           # Апстримные пакеты sing-box, которых нет в НАШЕМ графе модулей (их
           # зависимостей нет в go.sum, потому что мы их не собираем и не
@@ -132,27 +144,6 @@ jobs:
           awk '$2=="OK" && $4=="HASTEST" {print $1}' /tmp/kept.txt > /tmp/pkgs-test.txt
 
           echo "build: $(wc -l < /tmp/pkgs-build.txt), vet: $(wc -l < /tmp/pkgs-vet.txt), test: $(wc -l < /tmp/pkgs-test.txt)"
-
-      # libcronet.a обязателен ДО сборки: BASE_TAGS содержат with_naive_outbound,
-      # а cronet-go на linux линкуется статически (`-l:libcronet.a`). Пока CI
-      # собирался вообще без тегов, шага не требовалось — и его отсутствие было
-      # невидимо. Как только теги стали браться из Makefile (то есть CI начал
-      # проверять то, что реально едет в релиз), линковка легла с
-      # "cannot find -l:libcronet.a".
-      #
-      # Версия берётся из того же файла, что и в Makefile:16 — один источник
-      # истины, иначе CI и локальная сборка разъедутся по версии Chromium.
-      # Путь кладём в CGO_LDFLAGS, а не в системный libdir: так шаг ничего не
-      # ставит в образ и остаётся воспроизводимым.
-      - name: Extract libcronet (required by with_naive_outbound)
-        run: |
-          set -euo pipefail
-          CRONET_VER=$(cat sing-box/.github/CRONET_GO_VERSION)
-          mkdir -p /tmp/cronet-lib
-          go run -v "github.com/sagernet/cronet-go/cmd/build-naive@${CRONET_VER}" \
-            extract-lib --target linux/amd64 -o /tmp/cronet-lib/
-          ls -la /tmp/cronet-lib/
-          echo "CGO_LDFLAGS=-L/tmp/cronet-lib" >> "$GITHUB_ENV"
 
       - name: Verify build
         run: go build -tags "${{ steps.ctx.outputs.tags }}" $(cat /tmp/pkgs-build.txt)
