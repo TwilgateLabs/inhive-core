@@ -21,16 +21,127 @@ jobs:
       - name: Setup Go
         uses: actions/setup-go@40f1582b2485089dde7abd97c1529aa768e1baff  # v5.6.0
         with:
-          go-version: '1.26.4'  # Pinned for consistency with go.mod (per _actions_pin_summary). Bumped 1.26.3→1.26.4 to clear stdlib CVEs GO-2026-5037/5038/5039.
+          # Pinned for consistency with go.mod (per _actions_pin_summary).
+          # 1.26.3→1.26.4: clear stdlib CVEs GO-2026-5037/5038/5039.
+          # 1.26.4→1.26.5 (2026-07-19): clear GO-2026-5856 (ECH privacy leak in
+          # crypto/tls — reachable from our code) + GO-2026-4970 (symlink root
+          # escape in os). Держать в одной версии с go.mod: разъезд означает,
+          # что CI проверяет не тот тулчейн, которым собирают артефакт.
+          go-version: '1.26.5'
 
       - name: Download dependencies
         run: go mod download
 
-      - name: Verify build
+      # Один шаг считает и теги, и списки пакетов; дальше шаги их переиспользуют.
+      #
+      # ТЕГИ читаются ИЗ Makefile (BASE_TAGS), а не дублируются здесь строкой:
+      # список, вписанный в workflow руками, разъедется с Makefile на первом же
+      # изменении, и CI снова начнёт проверять не то, что собирается.
+      # Без -tags `go build` вообще не компилирует код за build-тегами — а это
+      # ровно наши протокольные пакеты: protocol/olcrtc (with_olcrtc),
+      # protocol/naive (with_naive_outbound), wireguard/awg (with_awg),
+      # quic (with_quic). Поломка в любом проходила CI зелёной и всплывала
+      # только на сборочной машине или у пользователя.
+      #
+      # ПАКЕТЫ собираются из ТРЁХ модулей. `./...` покрывает только сам core
+      # (17 пакетов). sing-box и xray2sing — ОТДЕЛЬНЫЕ модули, подключённые
+      # через replace в go.mod, и в `./...` не попадают вообще. А все наши
+      # патчи живут именно в sing-box (~139 пакетов): транспорты, xhttp, dns,
+      # libbox, protocol. То есть до этого места они не проверялись ничем.
+      # Перечислять их надо по import-path и ИЗ каталога core/ — если зайти в
+      # sing-box/, replace-директивы главного модуля не действуют и вылезет
+      # ложная ошибка про dnscrypt.
+      - name: Resolve tags and packages
+        id: ctx
         run: |
-          # Exclude cmd/bydll (requires pre-built DLL) and platform/desktop (requires CGO headers)
-          go build $(go list ./... | grep -v -E '(cmd/bydll|platform/desktop|profile/test)')
+          set -euo pipefail
+          TAGS=$(sed -n 's/^BASE_TAGS=//p' Makefile | head -1)
+          if [ -z "$TAGS" ]; then
+            echo "::error::не удалось прочитать BASE_TAGS из Makefile"
+            exit 1
+          fi
+          echo "tags=$TAGS" >> "$GITHUB_OUTPUT"
+          echo "Build tags: $TAGS"
+
+          MODULES='./... github.com/sagernet/sing-box/... github.com/twilgate/xray2sing/...'
+
+          # Наши пакеты, не собираемые в linux-CI по инфраструктурным причинам:
+          #   cmd/bydll        — требует предсобранную DLL
+          #   platform/desktop — требует CGO-заголовки
+          #   profile/test     — тестовые фикстуры
+          EXCL='(inhive-core/cmd/bydll|inhive-core/platform/desktop|inhive-core/v2/profile/test)'
+
+          # Апстримные пакеты sing-box, которых нет в НАШЕМ графе модулей (их
+          # зависимостей нет в go.sum, потому что мы их не собираем и не
+          # поставляем). Не «сломаны» — просто не наши:
+          #   cmd/sing-box                       — самостоятельный CLI апстрима
+          #                                        (мы поставляем DLL + свой cmd/)
+          #   cmd/internal/app_store_connect     — релизная обвязка Apple
+          #   cmd/internal/update_apple_version  — то же
+          #   common/geoip                       — maxminddb, geoip-БД не используем
+          #   protocol/psiphon                   — psiphon-tunnel-core, не в тегах
+          EXCL="$EXCL|(sing-box/cmd/sing-box|sing-box/cmd/internal/app_store_connect|sing-box/cmd/internal/update_apple_version|sing-box/common/geoip|sing-box/protocol/psiphon)"
+
+          # ⚠️ ИЗВЕСТНАЯ ПОЛОМКА, НЕ инфраструктурная — sing-box/protocol/tailscale
+          # и его единственный импортёр sing-box/service/derp (DERP-релей, мы его
+          # не поставляем). Исключать надо ОБА: пакет тянется транзитивно, и
+          # выкидывание только tailscale из списка не спасает — derp утащит его
+          # в сборку снова.
+          #
+          # Суть: protocol/tailscale/endpoint.go:349,351,487 зовёт
+          # netns.SetControlFunc, которого нет в нашем вендоренном форке
+          # (sing-box/replace/tailscale/net/netns — там есть SetAndroidProtectFunc,
+          # SetControlFunc отсутствует). Это version skew вендоренного
+          # github.com/sagernet/tailscale относительно кода sing-box 1.13.x.
+          # Файл гейтится //go:build with_gvisor, а with_gvisor у нас включён,
+          # поэтому пакет попадает в сборку. На АРТЕФАКТЫ не влияет: проверено,
+          # что ни tailscale, ни derp не входят в дерево зависимостей
+          # ./platform/desktop (with_tailscale в BASE_TAGS нет, никто их не
+          # импортирует). Исключены ЯВНО и по именам, чтобы не прятать проблему
+          # за автофильтром: чинится бампом вендоренного форка, владелец —
+          # реестр core/upstream.toml. Убрать эту строку сразу после починки.
+          EXCL="$EXCL|(sing-box/protocol/tailscale|sing-box/service/derp)"
+
+          # -e обязателен: без него `go list` САМ падает на исключённых выше
+          # пакетах (нерезолвящийся импорт — фатальная ошибка) ещё до того, как
+          # grep успеет их отфильтровать. С -e ошибка становится полем записи.
+          #
+          # Но -e один в один прячет и НАСТОЯЩУЮ поломку, поэтому ниже стоит
+          # assert: любой пакет с ошибкой, не внесённый в EXCL явно, роняет шаг.
+          # Так исключения остаются явным списком из шести имён с объяснениями,
+          # а не безымянным «пропускаем всё, что не собралось».
+          #
+          # HASGO/{{if .GoFiles}} отсеивает пакеты, где лежат ТОЛЬКО _test.go
+          # (например hygiene/ с fitness-тестами): для них `go build` — ошибка
+          # "no non-test Go files" и шаг падает целиком. Фильтр вычисляемый, а
+          # не очередное имя в grep: иначе каждый новый тест-онли пакет будет
+          # ронять CI и его снова придётся чинить руками. go vet такие пакеты
+          # обрабатывает штатно, поэтому в vet-список они входят.
+          go list -e -tags "$TAGS" -f '{{.ImportPath}} {{if or .Error .DepsErrors}}BROKEN{{else}}OK{{end}} {{if .GoFiles}}HASGO{{else}}NOGO{{end}} {{if or .TestGoFiles .XTestGoFiles}}HASTEST{{else}}NOTEST{{end}}' \
+            $MODULES 2>/dev/null > /tmp/all.txt
+          grep -v -E "$EXCL" /tmp/all.txt > /tmp/kept.txt
+
+          if grep -q ' BROKEN ' /tmp/kept.txt; then
+            echo "::error::пакеты не резолвятся и не внесены в список исключений:"
+            grep ' BROKEN ' /tmp/kept.txt
+            exit 1
+          fi
+
+          awk '$2=="OK" && $3=="HASGO"   {print $1}' /tmp/kept.txt > /tmp/pkgs-build.txt
+          awk '$2=="OK"                  {print $1}' /tmp/kept.txt > /tmp/pkgs-vet.txt
+          awk '$2=="OK" && $4=="HASTEST" {print $1}' /tmp/kept.txt > /tmp/pkgs-test.txt
+
+          echo "build: $(wc -l < /tmp/pkgs-build.txt), vet: $(wc -l < /tmp/pkgs-vet.txt), test: $(wc -l < /tmp/pkgs-test.txt)"
+
+      - name: Verify build
+        run: go build -tags "${{ steps.ctx.outputs.tags }}" $(cat /tmp/pkgs-build.txt)
 
       - name: Run vet
-        run: |
-          go vet $(go list ./... | grep -v -E '(cmd/bydll|platform/desktop|profile/test)')
+        run: go vet -tags "${{ steps.ctx.outputs.tags }}" $(cat /tmp/pkgs-vet.txt)
+
+      # Тесты в модулях sing-box/xray2sing до этого не запускались НИ РАЗУ —
+      # они лежали вне `./...`. Запускаются с теми же тегами: без них часть
+      # падает не по существу, а на заглушках (например transport/v2rayxhttp
+      # без with_utls: "uTLS ... is not included in this build").
+      - name: Run tests
+        run: go test -tags "${{ steps.ctx.outputs.tags }}" -count=1 -timeout 10m $(cat /tmp/pkgs-test.txt)

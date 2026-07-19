@@ -1,0 +1,116 @@
+# upstream-drift — еженедельная сверка вендоренного кода с апстримами.
+#
+# ЗАЧЕМ ЭТА ДЖОБА СУЩЕСТВУЕТ
+#   2026-07-19 полдня диагностики xhttp ушло на сравнение с копией Xray,
+#   отставшей на 6 релизов (26.1.13 vs 26.7.11). Это дало не «неточный», а
+#   ПРОТИВОПОЛОЖНЫЙ ответ: 26.1.13 дефолтит xmux maxConcurrency 1..1,
+#   26.7.11 — maxConnections 6..6 (соединение-на-поток vs тёплый пул).
+#   Корневая проблема была не в конкретном пропуске, а в том, что мы не знали,
+#   от какой версии апстрима отпочкован наш код. Реестр — core/upstream.toml.
+#
+# НЕ БЛОКИРУЕТ СБОРКУ
+#   Отдельный workflow, не связан с build.yml ни зависимостью, ни статусом.
+#   Отставание по релизам — это гигиена, а не аварийная остановка, поэтому
+#   градация умышленно неравномерная:
+#
+#     exit 0  — в пределах порогов                 -> зелёный
+#     exit 1  — отстали сверх max_lag              -> ЗЕЛЁНЫЙ + ::warning + сводка
+#     exit 2  — ЭТАЛОН НЕ СОШЁЛСЯ                  -> КРАСНЫЙ
+#     exit 3  — нет сети                           -> зелёный + ::notice (neutral)
+#     exit 4  — реестр битый                       -> КРАСНЫЙ
+#
+#   Красный оставлен ровно за двумя случаями, где реестр перестал описывать
+#   реальность: съехавший эталон (тег перетегирован / записана не та версия) и
+#   нечитаемый реестр. Именно это, а не отставание само по себе, стоило нам
+#   полдня и породило ложный фикс.
+#
+# Расписание: Mon 04:51 UTC. Разведено с osv-scanner (04:23) и govulncheck
+# (04:37) — отдельные алерты, без наложения логов.
+#
+# Action pin discipline (per _actions_pin_summary_2026_05_19.md):
+#   - actions/checkout@v4.3.1 — тот же SHA, что в build.yml / govulncheck.yml
+#
+# Сабмодули НЕ нужны: скрипт читает только upstream.toml и go.mod, а все версии
+# апстримов тянет из сети (git ls-remote). Чекаут остаётся дешёвым.
+
+name: upstream-drift
+
+on:
+  schedule:
+    - cron: '51 4 * * 1'
+  workflow_dispatch:
+  push:
+    branches: [main]
+    paths:
+      - 'upstream.toml'
+      - 'scripts/check-upstream-drift.py'
+      - '.github/workflows/upstream-drift.yml'
+  pull_request:
+    branches: [main]
+    paths:
+      - 'upstream.toml'
+      - 'scripts/check-upstream-drift.py'
+      - 'go.mod'
+
+permissions:
+  contents: read
+
+jobs:
+  drift:
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@34e114876b0b11c390a56381ad16ebd13914f8d5  # v4.3.1
+        with:
+          submodules: false
+
+      - name: Assert python has tomllib (stdlib, 3.11+)
+        run: |
+          python3 -c 'import sys, tomllib; assert sys.version_info >= (3, 11); print(sys.version)'
+
+      - name: Check upstream drift
+        id: drift
+        env:
+          NO_COLOR: '1'
+        run: |
+          set +e
+          python3 scripts/check-upstream-drift.py --verbose | tee drift.txt
+          echo "code=${PIPESTATUS[0]}" >> "$GITHUB_OUTPUT"
+          exit 0
+
+      - name: Report
+        run: |
+          code='${{ steps.drift.outputs.code }}'
+          {
+            echo "## Отставание от апстримов"
+            echo
+            echo '```'
+            cat drift.txt
+            echo '```'
+          } >> "$GITHUB_STEP_SUMMARY"
+
+          case "$code" in
+            0)
+              echo "::notice title=upstream-drift::Все вендоренные позиции в пределах порогов."
+              ;;
+            1)
+              echo "::warning title=upstream-drift::Отстали от апстрима сверх порога. Забирать апстрим ЦЕЛИКОМ — InHive универсальный клиент, чужие подписки используют протоколы, которыми мы сами не торгуем. Подробности в Summary."
+              ;;
+            2)
+              echo "::error title=upstream-drift::ЭТАЛОН НЕ СОШЁЛСЯ — записанный в upstream.toml тег не резолвится или указывает на другой коммит. НЕ ПРОВОДИТЬ diff-аудит против апстрима, пока это не закрыто: сравнение с неверной версией даёт противоположный ответ (xmux 26.1.13 vs 26.7.11, 2026-07-19)."
+              exit 1
+              ;;
+            3)
+              echo "::notice title=upstream-drift::Сеть недоступна — проверка не выполнена. Это не 'всё хорошо', это 'мы не знаем'."
+              ;;
+            4)
+              echo "::error title=upstream-drift::core/upstream.toml битый или пустой."
+              exit 1
+              ;;
+            *)
+              echo "::error title=upstream-drift::Скрипт вернул неожиданный код $code."
+              exit 1
+              ;;
+          esac

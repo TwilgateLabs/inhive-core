@@ -43,7 +43,11 @@ jobs:
       - name: Setup Go
         uses: actions/setup-go@40f1582b2485089dde7abd97c1529aa768e1baff  # v5.6.0
         with:
-          go-version: '1.26.4'
+          # Держать в одной версии с go.mod и build.yml. 1.26.4→1.26.5
+          # (2026-07-19) закрывает GO-2026-5856 (ECH privacy leak в crypto/tls,
+          # была ДОСТИЖИМА — 8 трасс) и GO-2026-4970 (symlink root escape в os).
+          # Именно на них джоба краснела на каждый push.
+          go-version: '1.26.5'
 
       - name: Install govulncheck
         run: go install golang.org/x/vuln/cmd/govulncheck@v1.1.4
@@ -51,7 +55,34 @@ jobs:
       - name: Download dependencies
         run: go mod download
 
+      # Тот же охват, что в build.yml, и по той же причине: `go list ./...`
+      # видит только 17 пакетов самого core. Модули sing-box и xray2sing
+      # подключены через replace и в `./...` НЕ попадают — а весь сетевой код
+      # (транспорты, TLS, DNS, протоколы) живёт именно в sing-box. Сканировать
+      # уязвимости, пропуская его, — это проверять периметр, не заглядывая
+      # внутрь.
+      #
+      # -tags обязателен: без тегов код за build-тегами не компилируется, а
+      # значит не попадает и в call-граф govulncheck — достижимые уязвимости в
+      # naive/olcrtc/awg/quic просто не были бы найдены.
+      #
+      # Исключения — те же, что в build.yml (см. подробные обоснования там):
+      # инфраструктурно несобираемые в linux-CI + апстримные пакеты не из
+      # нашего графа + известная поломка tailscale/derp.
       - name: Run govulncheck
-        # Same package exclusion as build.yml — cmd/bydll needs DLL, platform/desktop needs CGO headers.
         run: |
-          govulncheck $(go list ./... | grep -v -E '(cmd/bydll|platform/desktop|profile/test)')
+          set -euo pipefail
+          TAGS=$(sed -n 's/^BASE_TAGS=//p' Makefile | head -1)
+          if [ -z "$TAGS" ]; then
+            echo "::error::не удалось прочитать BASE_TAGS из Makefile"
+            exit 1
+          fi
+          MODULES='./... github.com/sagernet/sing-box/... github.com/twilgate/xray2sing/...'
+          EXCL='(inhive-core/cmd/bydll|inhive-core/platform/desktop|inhive-core/v2/profile/test)'
+          EXCL="$EXCL|(sing-box/cmd/sing-box|sing-box/cmd/internal/app_store_connect|sing-box/cmd/internal/update_apple_version|sing-box/common/geoip|sing-box/protocol/psiphon)"
+          EXCL="$EXCL|(sing-box/protocol/tailscale|sing-box/service/derp)"
+
+          PKGS=$(go list -e -tags "$TAGS" -f '{{if and .GoFiles (not (or .Error .DepsErrors))}}{{.ImportPath}}{{end}}' \
+            $MODULES 2>/dev/null | grep -v -E "$EXCL")
+          echo "scanning $(echo "$PKGS" | wc -l) packages with tags: $TAGS"
+          govulncheck -tags "$TAGS" $PKGS

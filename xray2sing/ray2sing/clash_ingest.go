@@ -14,7 +14,9 @@ package ray2sing
 import (
 	"encoding/base64"
 	"encoding/json"
+	"fmt"
 	"net/url"
+	"sort"
 	"strconv"
 	"strings"
 
@@ -46,6 +48,26 @@ type clashProxy struct {
 	WSOpts      *clashWSOpts      `yaml:"ws-opts"`
 	GRPCOpts    *clashGRPCOpts    `yaml:"grpc-opts"`
 	RealityOpts *clashRealityOpts `yaml:"reality-opts"`
+	// h2-opts / http-opts were not modelled at all, so `network: h2` and
+	// `network: http` nodes lost their Host list and path: the transport was
+	// still built, but as http with path "/" against the origin's default vhost.
+	// On a CDN-fronted node that is a 404 on every request with no client-side
+	// error. (2026-07-19.)
+	H2Opts   *clashH2Opts   `yaml:"h2-opts"`
+	HTTPOpts *clashHTTPOpts `yaml:"http-opts"`
+	// xhttp is NOT an upstream mihomo key — mihomo has no xhttp transport. It is
+	// accepted here because panel-side YAML generators (x-ui / marzban dialects)
+	// do emit it, and the universal-client invariant says a foreign subscription
+	// must not silently lose a node. Absent in a normal Clash file => no effect.
+	XHTTPOpts map[string]any `yaml:"xhttp-opts"`
+
+	// Shadowsocks SIP003 plugin (obfs / v2ray-plugin / shadow-tls / restls).
+	// Was dropped entirely: an obfs-wrapped SS node came out as bare SS, which
+	// the server rejects — the classic "works in Clash, dead in ours" report.
+	Plugin     string         `yaml:"plugin"`
+	PluginOpts map[string]any `yaml:"plugin-opts"`
+
+	ECHOpts *clashECHOpts `yaml:"ech-opts"`
 
 	Obfs         string `yaml:"obfs"`          // hysteria2
 	ObfsPassword string `yaml:"obfs-password"` // hysteria2
@@ -66,6 +88,25 @@ type clashGRPCOpts struct {
 type clashRealityOpts struct {
 	PublicKey string `yaml:"public-key"`
 	ShortID   string `yaml:"short-id"`
+}
+
+// clashH2Opts / clashHTTPOpts — mihomo's HTTP/2 and HTTP-obfs transport blocks.
+// Both spell host as a LIST (rotation); http-opts additionally carries method
+// and a multi-value header map.
+type clashH2Opts struct {
+	Host []string `yaml:"host"`
+	Path string   `yaml:"path"`
+}
+
+type clashHTTPOpts struct {
+	Method  string              `yaml:"method"`
+	Path    []string            `yaml:"path"`
+	Headers map[string][]string `yaml:"headers"`
+}
+
+type clashECHOpts struct {
+	Enable bool   `yaml:"enable"`
+	Config string `yaml:"config"`
 }
 
 // ingestClashYAML detects+transcodes a Clash YAML subscription. (joined links,
@@ -152,7 +193,78 @@ func applyClashTransport(q url.Values, p *clashProxy) {
 		if p.GRPCOpts != nil && p.GRPCOpts.ServiceName != "" {
 			q.Set("serviceName", p.GRPCOpts.ServiceName)
 		}
+	case "h2":
+		// getTransportOptions folds h2 -> the http transport and splits a
+		// comma-separated host into the Host LIST, so join mihomo's list here.
+		if p.H2Opts != nil {
+			if p.H2Opts.Path != "" {
+				q.Set("path", p.H2Opts.Path)
+			}
+			if len(p.H2Opts.Host) > 0 {
+				q.Set("host", strings.Join(p.H2Opts.Host, ","))
+			}
+		}
+	case "http":
+		// mihomo's `network: http` is TCP + HTTP/1.1 header obfuscation, the same
+		// thing Xray spells tcpSettings.header.type=http — hence headerType=http,
+		// which common.go promotes to the http transport.
+		q.Set("type", "tcp")
+		q.Set("headerType", "http")
+		if p.HTTPOpts != nil {
+			if len(p.HTTPOpts.Path) > 0 && p.HTTPOpts.Path[0] != "" {
+				q.Set("path", p.HTTPOpts.Path[0])
+			}
+			if p.HTTPOpts.Method != "" {
+				q.Set("method", p.HTTPOpts.Method)
+			}
+			if h := p.HTTPOpts.Headers["Host"]; len(h) > 0 && h[0] != "" {
+				q.Set("host", h[0])
+			}
+			if hdrs := clashSingleValueHeaders(p.HTTPOpts.Headers); len(hdrs) > 0 {
+				if b, err := json.Marshal(hdrs); err == nil {
+					q.Set("headers", string(b))
+				}
+			}
+		}
+	case "xhttp", "splithttp":
+		// Not an upstream mihomo transport (see clashProxy.XHTTPOpts). Forward
+		// the block verbatim through `extra`, the same channel the Xray/sing-box
+		// JSON paths use, and lift host/path/mode to top level where they win.
+		if len(p.XHTTPOpts) == 0 {
+			return
+		}
+		if v, ok := p.XHTTPOpts["path"].(string); ok && v != "" {
+			q.Set("path", v)
+		}
+		if v, ok := p.XHTTPOpts["host"].(string); ok && v != "" {
+			q.Set("host", v)
+		}
+		if v, ok := p.XHTTPOpts["mode"].(string); ok && v != "" {
+			q.Set("mode", v)
+		}
+		if b, err := json.Marshal(p.XHTTPOpts); err == nil {
+			q.Set("extra", string(b))
+		}
 	}
+}
+
+// clashSingleValueHeaders flattens mihomo's multi-value header map to the
+// single-value form the `headers` query key carries (Host travels as host=).
+func clashSingleValueHeaders(h map[string][]string) map[string]string {
+	if len(h) == 0 {
+		return nil
+	}
+	out := make(map[string]string, len(h))
+	for k, v := range h {
+		if strings.EqualFold(k, "Host") || len(v) == 0 || v[0] == "" {
+			continue
+		}
+		out[k] = v[0]
+	}
+	if len(out) == 0 {
+		return nil
+	}
+	return out
 }
 
 func applyClashTLS(q url.Values, p *clashProxy, tlsImplied bool) {
@@ -184,6 +296,13 @@ func applyClashTLS(q url.Values, p *clashProxy, tlsImplied bool) {
 	if p.SkipCertVerify {
 		q.Set("insecure", "1")
 		q.Set("allowInsecure", "1")
+	}
+	// ech-opts was not read, so a Clash node with Encrypted Client Hello lost it
+	// and sent its SNI in plaintext — no error, just the privacy property gone.
+	// An enabled block with no inline config degrades to sing-box's DNS HTTPS-RR
+	// fetch (ECH stays on), matching the rest of the ingest paths. (2026-07-19.)
+	if p.ECHOpts != nil && p.ECHOpts.Enable {
+		q.Set("ech", p.ECHOpts.Config)
 	}
 }
 
@@ -241,9 +360,48 @@ func clashShadowsocks(p *clashProxy) (string, bool) {
 		skip("shadowsocks", "clash: no cipher")
 		return "", false
 	}
-	userinfo := base64.RawURLEncoding.EncodeToString([]byte(p.Cipher + ":" + p.Password))
-	u := url.URL{Scheme: "ss", User: url.User(userinfo), Host: hostPort(p.Server, p.Port), Fragment: p.Name}
-	return u.String(), true
+	// The SIP003 plugin was dropped here: an obfs / v2ray-plugin wrapped node was
+	// rebuilt as BARE shadowsocks. It parses, it builds, and then every packet is
+	// rejected by a server that expects the obfuscation layer — silent-fail with
+	// no diagnostic. buildSSURI emits the SIP002 `plugin=name;opts` form that
+	// ShadowsocksSingbox already understands. (2026-07-19.)
+	return buildSSURI(p.Cipher, p.Password, p.Server, p.Port, p.Name, clashPluginParam(p)), true
+}
+
+// clashPluginParam renders mihomo's plugin + plugin-opts map as the SIP002
+// "name;k=v;k=v" plugin parameter. mode/host/path/tls are the keys the obfs and
+// v2ray-plugin implementations actually read; `mux` and unknown keys pass through
+// so a plugin we do not model still receives its options verbatim.
+func clashPluginParam(p *clashProxy) string {
+	if p.Plugin == "" {
+		return ""
+	}
+	name := p.Plugin
+	if name == "obfs" {
+		name = "obfs-local" // SIP002 spells the simple-obfs client this way
+	}
+	if len(p.PluginOpts) == 0 {
+		return name
+	}
+	parts := make([]string, 0, len(p.PluginOpts)+1)
+	parts = append(parts, name)
+	// Deterministic order — this string ends up inside a URI that tests compare.
+	keys := make([]string, 0, len(p.PluginOpts))
+	for k := range p.PluginOpts {
+		keys = append(keys, k)
+	}
+	sort.Strings(keys)
+	for _, k := range keys {
+		v := p.PluginOpts[k]
+		if b, ok := v.(bool); ok {
+			if b {
+				parts = append(parts, k)
+			}
+			continue
+		}
+		parts = append(parts, k+"="+fmt.Sprintf("%v", v))
+	}
+	return strings.Join(parts, ";")
 }
 
 func clashTUIC(p *clashProxy) (string, bool) {
@@ -281,25 +439,21 @@ func clashVMess(p *clashProxy) (string, bool) {
 		"id": p.UUID, "aid": strconv.Itoa(p.AlterID), "scy": orDefault(p.Cipher, "auto"),
 		"net": orDefault(p.Network, "tcp"), "type": "none",
 	}
-	if p.Network == "ws" && p.WSOpts != nil {
-		if p.WSOpts.Path != "" {
-			m["path"] = p.WSOpts.Path
-		}
-		if h := p.WSOpts.Headers["Host"]; h != "" {
-			m["host"] = h
-		}
-	}
+	// Same divergence the sing-box branch had: vmess hand-rolled a smaller
+	// mapping than vless/trojan and therefore lost skip-cert-verify,
+	// client-fingerprint and reality-opts (plus every transport beyond ws/grpc).
+	// Effects, in order of damage: reality dropped => plain-TLS handshake against
+	// a REALITY server fails; client-fingerprint dropped => vmess.go substitutes
+	// chrome, replacing the ClientHello signature the operator chose;
+	// skip-cert-verify dropped => verification is stricter than configured, so a
+	// self-signed node fails closed (dead node, not a weakened one).
+	// Now routed through the SAME appliers as vless/trojan. (2026-07-19.)
+	q := url.Values{}
+	applyClashTransport(q, p)
+	applyClashTLS(q, p, false)
+	mergeQueryIntoVmessMap(m, q)
 	if p.Network == "grpc" && p.GRPCOpts != nil && p.GRPCOpts.ServiceName != "" {
-		m["path"] = p.GRPCOpts.ServiceName
-	}
-	if p.TLS {
-		m["tls"] = "tls"
-		if sni := clashSNI(p); sni != "" {
-			m["sni"] = sni
-		}
-		if len(p.ALPN) > 0 {
-			m["alpn"] = strings.Join(p.ALPN, ",")
-		}
+		m["path"] = p.GRPCOpts.ServiceName // legacy vmess carries serviceName in path
 	}
 	b, err := json.Marshal(m)
 	if err != nil {

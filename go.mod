@@ -1,12 +1,20 @@
 module github.com/twilgate/inhive-core
 
-go 1.26.4
+// 1.26.4 -> 1.26.5 (2026-07-19): закрывает две stdlib-уязвимости, на которых
+// CI краснел на КАЖДЫЙ push и слал письма:
+//   GO-2026-5856 — privacy leak при Encrypted Client Hello в crypto/tls
+//                  (govulncheck: ДОСТИЖИМА из нашего кода, 8 трасс);
+//   GO-2026-4970 — root escape через symlink с завершающим слэшем в os.
+// Обе исправлены ровно в 1.26.5. Патч-версия указана намеренно: OSV-Scanner
+// читает эту строку как заявленную версию stdlib, поэтому без бампа ИМЕННО
+// здесь он продолжит репортить их, даже если тулчейн в CI новее.
+go 1.26.5
 
 require (
 	github.com/bepass-org/warp-plus v1.2.4
 	github.com/miekg/dns v1.1.72
 	github.com/sagernet/gomobile v0.1.12
-	github.com/sagernet/sing v0.8.9
+	github.com/sagernet/sing v0.8.11
 	github.com/sagernet/sing-dns v0.3.0
 	github.com/spf13/cobra v1.10.2
 	golang.org/x/sys v0.45.0
@@ -227,7 +235,7 @@ require (
 	github.com/sagernet/sing-shadowsocks v0.2.8 // indirect
 	github.com/sagernet/sing-shadowsocks2 v0.2.1 // indirect
 	github.com/sagernet/sing-shadowtls v0.2.1-0.20250503051639-fcd445d33c11 // indirect
-	github.com/sagernet/sing-tun v0.8.9 // indirect
+	github.com/sagernet/sing-tun v0.8.11 // indirect
 	github.com/sagernet/sing-vmess v0.2.8-0.20250909125414-3aed155119a1 // indirect
 	github.com/sagernet/smux v1.5.50-sing-box-mod.1 // indirect
 	github.com/sagernet/wireguard-go v0.0.2-beta.1.0.20260224074747-506b7631853c

@@ -18,6 +18,7 @@ package ray2sing_test
 
 import (
 	"context"
+	"encoding/base64"
 	"encoding/json"
 	"net/url"
 	"strings"
@@ -298,38 +299,128 @@ func TestCorpus_MieruSSH_Core(t *testing.T) {
 // JSON→URI transcoder feeding the same per-protocol parsers, so any divergence here
 // is a transcoder drop — this single test catches the WHOLE class automatically, not
 // just the tcp-header / xhttp-extra instances we found by hand.
+//
+// 2026-07-19 — widened from two paths to FOUR. There are four ways a foreign
+// subscription reaches us (share-link, Xray JSON, native sing-box JSON, Clash YAML)
+// and three of them are URI transcoders, so a field with no query spelling is lost
+// BY CONSTRUCTION on whichever transcoder forgot it. Pinning every container
+// dialect against the same share-link is what makes that structural, not a
+// per-bug whack-a-mole: an unfilled `singbox`/`clash` column is an untested cell.
 func TestCrossPath_ShareLinkVsJSON(t *testing.T) {
 	u := corpusUUID
-	cases := []struct{ name, link, jsonCfg string }{
+	cases := []struct{ name, link, jsonCfg, singbox, clash string }{
 		{
-			"vless_ws_tls",
-			"vless://" + u + "@cdn.example.com:443?type=ws&security=tls&sni=cdn.example.com&fp=chrome&path=%2Fp&host=cdn.example.com&encryption=none#n",
-			`{"protocol":"vless","settings":{"vnext":[{"address":"cdn.example.com","port":443,"users":[{"id":"` + u + `","encryption":"none"}]}]},"streamSettings":{"network":"ws","security":"tls","tlsSettings":{"serverName":"cdn.example.com","fingerprint":"chrome"},"wsSettings":{"path":"/p","headers":{"Host":"cdn.example.com"}}}}`,
+			name:    "vless_ws_tls",
+			link:    "vless://" + u + "@cdn.example.com:443?type=ws&security=tls&sni=cdn.example.com&fp=chrome&path=%2Fp&host=cdn.example.com&encryption=none#n",
+			jsonCfg: `{"protocol":"vless","settings":{"vnext":[{"address":"cdn.example.com","port":443,"users":[{"id":"` + u + `","encryption":"none"}]}]},"streamSettings":{"network":"ws","security":"tls","tlsSettings":{"serverName":"cdn.example.com","fingerprint":"chrome"},"wsSettings":{"path":"/p","headers":{"Host":"cdn.example.com"}}}}`,
+			singbox: `{"type":"vless","tag":"n","server":"cdn.example.com","server_port":443,"uuid":"` + u + `","tls":{"enabled":true,"server_name":"cdn.example.com","utls":{"enabled":true,"fingerprint":"chrome"}},"transport":{"type":"ws","path":"/p","headers":{"Host":"cdn.example.com"}}}`,
+			clash: "proxies:\n  - name: n\n    type: vless\n    server: cdn.example.com\n    port: 443\n    uuid: " + u + "\n    tls: true\n    servername: cdn.example.com\n    client-fingerprint: chrome\n    network: ws\n    ws-opts:\n      path: /p\n      headers:\n        Host: cdn.example.com\n",
 		},
 		{
-			"trojan_ws_tls",
-			"trojan://pass123@cdn.example.com:443?type=ws&security=tls&sni=cdn.example.com&path=%2Ft&host=cdn.example.com#n",
-			`{"protocol":"trojan","settings":{"servers":[{"address":"cdn.example.com","port":443,"password":"pass123"}]},"streamSettings":{"network":"ws","security":"tls","tlsSettings":{"serverName":"cdn.example.com"},"wsSettings":{"path":"/t","headers":{"Host":"cdn.example.com"}}}}`,
+			name:    "trojan_ws_tls",
+			link:    "trojan://pass123@cdn.example.com:443?type=ws&security=tls&sni=cdn.example.com&path=%2Ft&host=cdn.example.com#n",
+			jsonCfg: `{"protocol":"trojan","settings":{"servers":[{"address":"cdn.example.com","port":443,"password":"pass123"}]},"streamSettings":{"network":"ws","security":"tls","tlsSettings":{"serverName":"cdn.example.com"},"wsSettings":{"path":"/t","headers":{"Host":"cdn.example.com"}}}}`,
+			singbox: `{"type":"trojan","tag":"n","server":"cdn.example.com","server_port":443,"password":"pass123","tls":{"enabled":true,"server_name":"cdn.example.com"},"transport":{"type":"ws","path":"/t","headers":{"Host":"cdn.example.com"}}}`,
+			clash:   "proxies:\n  - name: n\n    type: trojan\n    server: cdn.example.com\n    port: 443\n    password: pass123\n    sni: cdn.example.com\n    network: ws\n    ws-opts:\n      path: /t\n      headers:\n        Host: cdn.example.com\n",
 		},
 		{
-			"vless_grpc_tls",
-			"vless://" + u + "@cdn.example.com:443?type=grpc&security=tls&sni=cdn.example.com&fp=chrome&serviceName=gsvc&encryption=none#n",
-			`{"protocol":"vless","settings":{"vnext":[{"address":"cdn.example.com","port":443,"users":[{"id":"` + u + `","encryption":"none"}]}]},"streamSettings":{"network":"grpc","security":"tls","tlsSettings":{"serverName":"cdn.example.com","fingerprint":"chrome"},"grpcSettings":{"serviceName":"gsvc"}}}`,
+			name:    "vless_grpc_tls",
+			link:    "vless://" + u + "@cdn.example.com:443?type=grpc&security=tls&sni=cdn.example.com&fp=chrome&serviceName=gsvc&encryption=none#n",
+			jsonCfg: `{"protocol":"vless","settings":{"vnext":[{"address":"cdn.example.com","port":443,"users":[{"id":"` + u + `","encryption":"none"}]}]},"streamSettings":{"network":"grpc","security":"tls","tlsSettings":{"serverName":"cdn.example.com","fingerprint":"chrome"},"grpcSettings":{"serviceName":"gsvc"}}}`,
+			singbox: `{"type":"vless","tag":"n","server":"cdn.example.com","server_port":443,"uuid":"` + u + `","tls":{"enabled":true,"server_name":"cdn.example.com","utls":{"enabled":true,"fingerprint":"chrome"}},"transport":{"type":"grpc","service_name":"gsvc"}}`,
+			clash: "proxies:\n  - name: n\n    type: vless\n    server: cdn.example.com\n    port: 443\n    uuid: " + u + "\n    tls: true\n    servername: cdn.example.com\n    client-fingerprint: chrome\n    network: grpc\n    grpc-opts:\n      grpc-service-name: gsvc\n",
+		},
+		{
+			// REALITY + the uTLS fingerprint across every dialect. The Clash and
+			// sing-box columns are the ones that used to drop pbk/sid on vmess;
+			// vless kept them, which is exactly how the divergence hid.
+			name:    "vless_tcp_reality",
+			link:    "vless://" + u + "@1.2.3.4:443?type=tcp&security=reality&sni=www.example.org&fp=chrome&pbk=PUBKEY123&sid=ab12&encryption=none#n",
+			jsonCfg: `{"protocol":"vless","settings":{"vnext":[{"address":"1.2.3.4","port":443,"users":[{"id":"` + u + `","encryption":"none"}]}]},"streamSettings":{"network":"tcp","security":"reality","realitySettings":{"serverName":"www.example.org","publicKey":"PUBKEY123","shortId":"ab12","fingerprint":"chrome"}}}`,
+			singbox: `{"type":"vless","tag":"n","server":"1.2.3.4","server_port":443,"uuid":"` + u + `","tls":{"enabled":true,"server_name":"www.example.org","utls":{"enabled":true,"fingerprint":"chrome"},"reality":{"enabled":true,"public_key":"PUBKEY123","short_id":"ab12"}}}`,
+			clash: "proxies:\n  - name: n\n    type: vless\n    server: 1.2.3.4\n    port: 443\n    uuid: " + u + "\n    tls: true\n    servername: www.example.org\n    client-fingerprint: chrome\n    reality-opts:\n      public-key: PUBKEY123\n      short-id: ab12\n",
+		},
+		{
+			// vmess is the protocol where all three transcoders hand-rolled their
+			// own smaller mapping. insecure + fp are the fields that went missing.
+			name:    "vmess_ws_tls_insecure",
+			link:    "vmess://" + vmessLink(map[string]string{"v": "2", "ps": "n", "add": "cdn.example.com", "port": "443", "id": u, "aid": "0", "scy": "auto", "net": "ws", "type": "none", "host": "cdn.example.com", "path": "/p", "tls": "tls", "sni": "cdn.example.com", "fp": "firefox", "insecure": "1"}),
+			jsonCfg: `{"protocol":"vmess","tag":"n","settings":{"vnext":[{"address":"cdn.example.com","port":443,"users":[{"id":"` + u + `","alterId":0,"security":"auto"}]}]},"streamSettings":{"network":"ws","security":"tls","tlsSettings":{"serverName":"cdn.example.com","fingerprint":"firefox","allowInsecure":true},"wsSettings":{"path":"/p","headers":{"Host":"cdn.example.com"}}}}`,
+			singbox: `{"type":"vmess","tag":"n","server":"cdn.example.com","server_port":443,"uuid":"` + u + `","alter_id":0,"security":"auto","tls":{"enabled":true,"server_name":"cdn.example.com","insecure":true,"utls":{"enabled":true,"fingerprint":"firefox"}},"transport":{"type":"ws","path":"/p","headers":{"Host":"cdn.example.com"}}}`,
+			clash: "proxies:\n  - name: n\n    type: vmess\n    server: cdn.example.com\n    port: 443\n    uuid: " + u + "\n    alterId: 0\n    cipher: auto\n    tls: true\n    servername: cdn.example.com\n    client-fingerprint: firefox\n    skip-cert-verify: true\n    network: ws\n    ws-opts:\n      path: /p\n      headers:\n        Host: cdn.example.com\n",
 		},
 	}
 	for _, c := range cases {
 		t.Run(c.name, func(t *testing.T) {
-			a := mustOutbound(t, c.link)
-			b := mustOutbound(t, c.jsonCfg)
-			delete(a, "tag")
-			delete(b, "tag")
-			aj, _ := json.MarshalIndent(a, "", " ")
-			bj, _ := json.MarshalIndent(b, "", " ")
-			if string(aj) != string(bj) {
-				t.Errorf("share-link vs JSON diverge (transcoder drop):\n--- share-link ---\n%s\n--- json ---\n%s", aj, bj)
+			want := canonicalOutbound(t, c.link)
+			for _, alt := range []struct{ path, cfg string }{
+				{"xray-json", c.jsonCfg},
+				{"singbox-json", c.singbox},
+				{"clash-yaml", c.clash},
+			} {
+				if alt.cfg == "" {
+					continue
+				}
+				got := canonicalOutbound(t, alt.cfg)
+				if got != want {
+					t.Errorf("share-link vs %s diverge (transcoder drop):\n--- share-link ---\n%s\n--- %s ---\n%s", alt.path, want, alt.path, got)
+				}
 			}
 		})
 	}
+}
+
+// canonicalOutbound renders the first outbound as stable JSON with the tag
+// stripped (the tag carries a positional " § N" suffix and the container's own
+// node name, neither of which is part of the semantic outbound).
+func canonicalOutbound(t *testing.T, config string) string {
+	t.Helper()
+	ob := mustOutbound(t, config)
+	delete(ob, "tag")
+	b, _ := json.MarshalIndent(ob, "", " ")
+	return string(b)
+}
+
+// vmessLink builds the base64(JSON) body of a vmess:// share-link.
+func vmessLink(m map[string]string) string {
+	b, _ := json.Marshal(m)
+	return base64.StdEncoding.EncodeToString(b)
+}
+
+// reparse feeds an already-produced sing-box outbound back through the pipeline.
+//
+// This is not a synthetic scenario: the app STORES a parsed node as its sing-box
+// outbound JSON and re-parses it on every ping and every connect. So any field
+// singbox_ingest cannot round-trip does not merely fail to import — it evaporates
+// on the second parse and the node degrades in place, for good, with err == nil
+// every time. Idempotency here is the guard for that whole class.
+func reparse(t *testing.T, ob map[string]any) map[string]any {
+	t.Helper()
+	clone := make(map[string]any, len(ob))
+	for k, v := range ob {
+		clone[k] = v
+	}
+	b, err := json.Marshal(map[string]any{"outbounds": []any{clone}})
+	if err != nil {
+		t.Fatalf("re-marshal outbound: %v", err)
+	}
+	return mustOutbound(t, string(b))
+}
+
+// assertReparseStable parses a config, re-parses the result, and requires the two
+// outbounds to be identical.
+func assertReparseStable(t *testing.T, config string) map[string]any {
+	t.Helper()
+	first := mustOutbound(t, config)
+	second := reparse(t, first)
+	delete(first, "tag")
+	delete(second, "tag")
+	a, _ := json.MarshalIndent(first, "", " ")
+	b, _ := json.MarshalIndent(second, "", " ")
+	if string(a) != string(b) {
+		t.Errorf("outbound is not stable under re-parse (the node degrades on every ping/connect):\n--- first parse ---\n%s\n--- second parse ---\n%s", a, b)
+	}
+	return first
 }
 
 // #9 — JSON-ingest must NOT drop tcp HTTP-header obfuscation.
@@ -425,6 +516,250 @@ func TestCorpus_XHTTP_TopLevelHostBeatsExtra(t *testing.T) {
 	if tr3["host"] != "kept.example.com" {
 		t.Errorf("host = %v, want kept.example.com (empty top level must not wipe extra)", tr3["host"])
 	}
+}
+
+// 2026-07-19 — a NATIVE sing-box outbound must not lose its xhttp transport.
+//
+// singbox_ingest's transport applier handled ws/grpc/http only, so `type: xhttp`
+// emitted nothing but type=xhttp: host and path collapsed to empty, mode fell back
+// to "auto", and xmux / downloadSettings / noGRPCHeader / the whole obfs set were
+// gone. Worst of the JSON drops because the app re-parses the STORED outbound on
+// every ping and connect, so an xhttp node degraded on each cycle rather than only
+// at import — always with err == nil.
+func TestCorpus_SingboxJSON_XHTTP_Transport(t *testing.T) {
+	cfg := `{"outbounds":[{"type":"vless","tag":"n","server":"1.2.3.4","server_port":443,"uuid":"` + corpusUUID + `",` +
+		`"tls":{"enabled":true,"server_name":"cdn.example.com","alpn":["h2"]},` +
+		`"transport":{"type":"xhttp","mode":"packet-up","host":"front.example.com","path":"/x","noGRPCHeader":true,` +
+		`"xmux":{"maxConcurrency":"16-32"},` +
+		`"downloadSettings":{"server":"dl.example.com","server_port":8443,"path":"/d","tls":{"enabled":true,"server_name":"dl.example.com"}}}}]}`
+
+	tr := sub(assertReparseStable(t, cfg), "transport")
+	if tr == nil || tr["type"] != "xhttp" {
+		t.Fatalf("transport = %v, want xhttp", tr)
+	}
+	if tr["mode"] != "packet-up" {
+		t.Errorf("mode = %v, want packet-up (was silently reset to auto)", tr["mode"])
+	}
+	if tr["host"] != "front.example.com" {
+		t.Errorf("host = %v, want front.example.com", tr["host"])
+	}
+	if tr["path"] != "/x" {
+		t.Errorf("path = %v, want /x", tr["path"])
+	}
+	if tr["noGRPCHeader"] != true {
+		t.Errorf("noGRPCHeader = %v, want true", tr["noGRPCHeader"])
+	}
+	xmux, _ := tr["xmux"].(map[string]any)
+	if xmux == nil || xmux["maxConcurrency"] != "16-32" {
+		t.Errorf("xmux = %v, want maxConcurrency 16-32 (unbounded streams on one connection when lost)", tr["xmux"])
+	}
+	// The download leg travels in sing-box's own dialect (server/server_port/tls)
+	// inside downloadSettings — it must be folded onto the Xray spelling, not
+	// dropped, or the downlink dials an empty address.
+	dl := sub(tr, "downloadSettings")
+	if dl == nil || dl["server"] != "dl.example.com" || dl["server_port"] != float64(8443) {
+		t.Errorf("downloadSettings = %v, want server dl.example.com:8443", tr["downloadSettings"])
+	}
+	if dtls := sub(dl, "tls"); dtls == nil || dtls["server_name"] != "dl.example.com" {
+		t.Errorf("downloadSettings.tls = %v, want server_name dl.example.com", dl["tls"])
+	}
+}
+
+// 2026-07-19 — httpupgrade `host` is a TOP-LEVEL sing-box field, not a header.
+// Reading only Headers["Host"] silently stripped the Host from every CDN-fronted
+// httpupgrade node, which then hit the origin's default vhost.
+func TestCorpus_SingboxJSON_HTTPUpgradeHost(t *testing.T) {
+	cfg := `{"outbounds":[{"type":"vless","tag":"n","server":"1.2.3.4","server_port":443,"uuid":"` + corpusUUID + `",` +
+		`"tls":{"enabled":true,"server_name":"a.example.com"},` +
+		`"transport":{"type":"httpupgrade","host":"front.example.com","path":"/hu"}}]}`
+	tr := sub(assertReparseStable(t, cfg), "transport")
+	if tr == nil || tr["type"] != "httpupgrade" {
+		t.Fatalf("transport = %v, want httpupgrade", tr)
+	}
+	hdrs := sub(tr, "headers")
+	if hdrs == nil || !eqStrings(asStrings(hdrs["Host"]), []string{"front.example.com"}) {
+		t.Errorf("httpupgrade Host = %v, want front.example.com (top-level host was ignored)", tr["headers"])
+	}
+	// A multi-value header map must not blow up the unmarshal: sing-box marshals
+	// HTTPHeader values as arrays, and a map[string]string model made the WHOLE
+	// outbound fail to decode, i.e. the node vanished from the list.
+	arrayHdrs := `{"outbounds":[{"type":"vless","tag":"n","server":"1.2.3.4","server_port":443,"uuid":"` + corpusUUID + `",` +
+		`"tls":{"enabled":true,"server_name":"a.example.com"},` +
+		`"transport":{"type":"ws","path":"/p","headers":{"Host":["front.example.com"],"X-Tag":["a","b"]}}}]}`
+	if n := outboundCount(t, arrayHdrs); n != 1 {
+		t.Errorf("array-valued headers: built %d outbound(s), want 1 (whole node was dropped on unmarshal)", n)
+	}
+}
+
+// 2026-07-19 — ECH must survive every JSON/YAML ingest path.
+//
+// PRIVACY class, not convenience: none of the three container paths read ECH, so a
+// node configured for Encrypted Client Hello came out without it and sent its SNI
+// in PLAINTEXT. Nothing errors, the node still connects — the user just silently
+// loses the one property they enabled ECH for.
+func TestCorpus_ECH_AllContainerPaths(t *testing.T) {
+	const blob = "AEX+DQBBhwAgACCbLNiZ" // opaque ECHConfigList payload
+	cases := []struct{ name, cfg string }{
+		{
+			"xray_json",
+			`{"protocol":"vless","settings":{"vnext":[{"address":"a.example.com","port":443,"users":[{"id":"` + corpusUUID + `","encryption":"none"}]}]},"streamSettings":{"network":"tcp","security":"tls","tlsSettings":{"serverName":"a.example.com","echConfigList":"` + blob + `"}}}`,
+		},
+		{
+			"singbox_json",
+			`{"outbounds":[{"type":"vless","tag":"n","server":"a.example.com","server_port":443,"uuid":"` + corpusUUID + `","tls":{"enabled":true,"server_name":"a.example.com","ech":{"enabled":true,"config":["-----BEGIN ECH CONFIGS-----\n` + blob + `\n-----END ECH CONFIGS-----"]}}}]}`,
+		},
+		{
+			"clash_yaml",
+			"proxies:\n  - name: n\n    type: vless\n    server: a.example.com\n    port: 443\n    uuid: " + corpusUUID + "\n    tls: true\n    servername: a.example.com\n    ech-opts:\n      enable: true\n      config: " + blob + "\n",
+		},
+		{
+			"xray_json_vmess",
+			`{"protocol":"vmess","settings":{"vnext":[{"address":"a.example.com","port":443,"users":[{"id":"` + corpusUUID + `","alterId":0}]}]},"streamSettings":{"network":"tcp","security":"tls","tlsSettings":{"serverName":"a.example.com","echConfigList":"` + blob + `"}}}`,
+		},
+	}
+	for _, c := range cases {
+		t.Run(c.name, func(t *testing.T) {
+			ech := sub(sub(mustOutbound(t, c.cfg), "tls"), "ech")
+			if ech == nil {
+				t.Fatal("tls.ech missing — the SNI goes out in plaintext")
+			}
+			if v, _ := ech["enabled"].(bool); !v {
+				t.Errorf("tls.ech.enabled = %v, want true", ech["enabled"])
+			}
+			cfgList := strings.Join(asStrings(ech["config"]), "\n")
+			if !strings.Contains(cfgList, blob) {
+				t.Errorf("tls.ech.config = %q, want it to carry the ECHConfigList blob", cfgList)
+			}
+		})
+	}
+	// sibling: no ECH anywhere => the key stays absent (byte-identical).
+	plain := `{"protocol":"vless","settings":{"vnext":[{"address":"a.example.com","port":443,"users":[{"id":"` + corpusUUID + `","encryption":"none"}]}]},"streamSettings":{"network":"tcp","security":"tls","tlsSettings":{"serverName":"a.example.com"}}}`
+	if e := sub(mustOutbound(t, plain), "tls")["ech"]; e != nil {
+		t.Errorf("no-ECH node grew an ech block: %v", e)
+	}
+}
+
+// 2026-07-19 — Clash `network: h2` / `network: http` must keep host+path.
+//
+// h2-opts / http-opts were not modelled at all, so the transport was built with
+// path "/" and no Host: on a CDN-fronted node that is a 404 on every request,
+// with nothing logged client-side.
+func TestCorpus_Clash_H2_And_HTTPOpts(t *testing.T) {
+	h2 := "proxies:\n  - name: n\n    type: vless\n    server: 1.2.3.4\n    port: 443\n    uuid: " + corpusUUID +
+		"\n    tls: true\n    servername: a.example.com\n    network: h2\n    h2-opts:\n      host:\n        - one.example.com\n        - two.example.com\n      path: /h2\n"
+	tr := sub(mustOutbound(t, h2), "transport")
+	if tr == nil || tr["type"] != "http" {
+		t.Fatalf("h2 transport = %v, want http (h2 folds onto the http transport)", tr)
+	}
+	if !eqStrings(asStrings(tr["host"]), []string{"one.example.com", "two.example.com"}) {
+		t.Errorf("h2 host = %v, want the full rotation list", tr["host"])
+	}
+	if tr["path"] != "/h2" {
+		t.Errorf("h2 path = %v, want /h2 (was falling back to \"/\")", tr["path"])
+	}
+
+	// network: http is mihomo's TCP + HTTP/1.1 header obfuscation.
+	obfs := "proxies:\n  - name: n\n    type: vmess\n    server: 1.2.3.4\n    port: 443\n    uuid: " + corpusUUID +
+		"\n    alterId: 0\n    cipher: auto\n    network: http\n    http-opts:\n      method: GET\n      path:\n        - /live\n      headers:\n        Host:\n          - front.example.com\n"
+	tr2 := sub(mustOutbound(t, obfs), "transport")
+	if tr2 == nil || tr2["type"] != "http" {
+		t.Fatalf("http-obfs transport = %v, want http (promoted from tcp+headerType)", tr2)
+	}
+	if !eqStrings(asStrings(tr2["host"]), []string{"front.example.com"}) {
+		t.Errorf("http-obfs host = %v, want front.example.com", tr2["host"])
+	}
+	if tr2["path"] != "/live" {
+		t.Errorf("http-obfs path = %v, want /live", tr2["path"])
+	}
+}
+
+// 2026-07-19 — Clash Shadowsocks must keep its SIP003 plugin.
+//
+// plugin / plugin-opts were dropped, so an obfs-wrapped node was rebuilt as BARE
+// shadowsocks: it parses, it builds, and then the server rejects every packet.
+func TestCorpus_Clash_SS_Plugin(t *testing.T) {
+	y := "proxies:\n  - name: n\n    type: ss\n    server: 1.2.3.4\n    port: 8388\n    cipher: aes-256-gcm\n    password: pw\n" +
+		"    plugin: obfs\n    plugin-opts:\n      mode: http\n      host: bing.com\n"
+	ob := mustOutbound(t, y)
+	if ob["plugin"] != "obfs-local" {
+		t.Errorf("plugin = %v, want obfs-local (SIP002 spelling of simple-obfs)", ob["plugin"])
+	}
+	opts, _ := ob["plugin_opts"].(string)
+	if !strings.Contains(opts, "mode=http") || !strings.Contains(opts, "host=bing.com") {
+		t.Errorf("plugin_opts = %q, want mode=http and host=bing.com", opts)
+	}
+	// sibling: a plain SS node must stay plugin-free (byte-identical).
+	plain := "proxies:\n  - name: n\n    type: ss\n    server: 1.2.3.4\n    port: 8388\n    cipher: aes-256-gcm\n    password: pw\n"
+	if p := mustOutbound(t, plain)["plugin"]; p != nil && p != "" {
+		t.Errorf("plain SS grew a plugin: %v", p)
+	}
+}
+
+// 2026-07-19 — vmess TLS fields must survive EVERY container branch.
+//
+// All three transcoders hand-rolled a smaller mapping for vmess than for
+// vless/trojan, so insecure / fingerprint / reality were lost on vmess only —
+// which is precisely why it stayed hidden. Damage per field:
+//   - reality dropped  => plain-TLS handshake against a REALITY server, node dead;
+//   - fp dropped       => vmess.go substitutes chrome, silently replacing the
+//     ClientHello signature the operator picked for DPI evasion;
+//   - insecure dropped => verification ends up STRICTER than configured, so a
+//     self-signed node fails closed (a dead node, not a weakened one) — worth
+//     stating explicitly, because the reverse direction would be a real hole.
+func TestCorpus_VMess_TLSFields_AllContainers(t *testing.T) {
+	u := corpusUUID
+	t.Run("insecure_and_fp", func(t *testing.T) {
+		cases := map[string]string{
+			"xray_json":    `{"protocol":"vmess","settings":{"vnext":[{"address":"a.example.com","port":443,"users":[{"id":"` + u + `","alterId":0}]}]},"streamSettings":{"network":"tcp","security":"tls","tlsSettings":{"serverName":"a.example.com","fingerprint":"firefox","allowInsecure":true}}}`,
+			"singbox_json": `{"outbounds":[{"type":"vmess","tag":"n","server":"a.example.com","server_port":443,"uuid":"` + u + `","alter_id":0,"tls":{"enabled":true,"server_name":"a.example.com","insecure":true,"utls":{"enabled":true,"fingerprint":"firefox"}}}]}`,
+			"clash_yaml":   "proxies:\n  - name: n\n    type: vmess\n    server: a.example.com\n    port: 443\n    uuid: " + u + "\n    alterId: 0\n    cipher: auto\n    tls: true\n    servername: a.example.com\n    skip-cert-verify: true\n    client-fingerprint: firefox\n",
+		}
+		for name, cfg := range cases {
+			t.Run(name, func(t *testing.T) {
+				tls := sub(mustOutbound(t, cfg), "tls")
+				if v, _ := tls["insecure"].(bool); !v {
+					t.Error("tls.insecure = false; allowInsecure/skip-cert-verify was dropped (node fails cert verification it was told to skip)")
+				}
+				if fp := sub(tls, "utls"); fp == nil || fp["fingerprint"] != "firefox" {
+					t.Errorf("utls = %v, want firefox (dropped fp silently degrades to the chrome default)", tls["utls"])
+				}
+			})
+		}
+	})
+	t.Run("reality", func(t *testing.T) {
+		cases := map[string]string{
+			"singbox_json": `{"outbounds":[{"type":"vmess","tag":"n","server":"1.2.3.4","server_port":443,"uuid":"` + u + `","alter_id":0,"tls":{"enabled":true,"server_name":"www.example.org","utls":{"enabled":true,"fingerprint":"chrome"},"reality":{"enabled":true,"public_key":"PUBKEY123","short_id":"ab12"}}}]}`,
+			"clash_yaml":   "proxies:\n  - name: n\n    type: vmess\n    server: 1.2.3.4\n    port: 443\n    uuid: " + u + "\n    alterId: 0\n    cipher: auto\n    tls: true\n    servername: www.example.org\n    client-fingerprint: chrome\n    reality-opts:\n      public-key: PUBKEY123\n      short-id: ab12\n",
+		}
+		for name, cfg := range cases {
+			t.Run(name, func(t *testing.T) {
+				r := sub(sub(mustOutbound(t, cfg), "tls"), "reality")
+				if r == nil {
+					t.Fatal("tls.reality missing — a REALITY node was rebuilt as plain TLS (handshake fails)")
+				}
+				if r["public_key"] != "PUBKEY123" || r["short_id"] != "ab12" {
+					t.Errorf("reality = %v, want PUBKEY123/ab12", r)
+				}
+			})
+		}
+	})
+	t.Run("xray_json_vmess_xhttp_extra", func(t *testing.T) {
+		// The vmess branch of the Xray path never forwarded mode or the top-level
+		// xhttpSettings object, so vmess+xhttp lost xmux and friends long after the
+		// vless branch was fixed.
+		cfg := `{"protocol":"vmess","settings":{"vnext":[{"address":"cdn.example.com","port":443,"users":[{"id":"` + u + `","alterId":0}]}]},"streamSettings":{"network":"xhttp","security":"tls","tlsSettings":{"serverName":"cdn.example.com"},"xhttpSettings":{"path":"/x","host":"cdn.example.com","mode":"stream-up","noGRPCHeader":true,"xmux":{"maxConcurrency":"16-32"}}}}`
+		tr := sub(mustOutbound(t, cfg), "transport")
+		if tr == nil || tr["type"] != "xhttp" {
+			t.Fatalf("transport = %v, want xhttp", tr)
+		}
+		if tr["mode"] != "stream-up" {
+			t.Errorf("mode = %v, want stream-up", tr["mode"])
+		}
+		xmux, _ := tr["xmux"].(map[string]any)
+		if xmux == nil || xmux["maxConcurrency"] != "16-32" {
+			t.Errorf("xmux = %v, want maxConcurrency 16-32", tr["xmux"])
+		}
+	})
 }
 
 // #1 (JSON path) — the per-transport ALPN clamp must fire on the JSON-ingest path

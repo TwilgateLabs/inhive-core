@@ -21,6 +21,7 @@ import (
 	"net/url"
 	"strconv"
 	"strings"
+	"time"
 )
 
 type singboxOutbound struct {
@@ -94,14 +95,118 @@ type singboxTLS struct {
 		PublicKey string `json:"public_key"`
 		ShortID   string `json:"short_id"`
 	} `json:"reality"`
+	// ECH was NOT read here at all: a sing-box-JSON node with Encrypted Client
+	// Hello re-parsed into an outbound WITHOUT tls.ech, i.e. the ClientHello went
+	// out with the SNI in PLAINTEXT. No error, node still connects — the user just
+	// silently loses the exact property they enabled ECH for. Because the app
+	// re-parses the stored outbound on every ping/connect, this degraded the node
+	// permanently, not only at import. (Privacy-class silent-fail, 2026-07-19.)
+	ECH *struct {
+		Enabled         bool         `json:"enabled"`
+		Config          stringOrList `json:"config"`
+		ConfigPath      string       `json:"config_path"`
+		QueryServerName string       `json:"query_server_name"`
+	} `json:"ech"`
 }
 
+// singboxTransport mirrors a sing-box `transport` block across ALL transport
+// types. Headers is map[string]stringOrList (not map[string]string) because
+// sing-box's badoption.HTTPHeader marshals a multi-value header as an ARRAY —
+// a plain map[string]string made the WHOLE outbound fail to unmarshal, so the
+// node was dropped from the list entirely.
+//
+// raw keeps the untouched object so the xhttp case can forward every field
+// sing-box knows (xmux / downloadSettings / sc* / the obfs set) through the
+// `extra` channel instead of re-declaring ~40 fields here and drifting from
+// upstream on the next merge.
 type singboxTransport struct {
-	Type        string            `json:"type"` // ws / grpc / http / httpupgrade
-	Path        string            `json:"path"`
-	Headers     map[string]string `json:"headers"`      // Host etc.
-	ServiceName string            `json:"service_name"` // grpc
-	Host        json.RawMessage   `json:"host"`         // http: string OR []string
+	Type        string                  `json:"type"` // ws / grpc / http / httpupgrade / xhttp / quic
+	Path        string                  `json:"path"`
+	Headers     map[string]stringOrList `json:"headers"`      // Host etc.
+	ServiceName string                  `json:"service_name"` // grpc
+	Host        json.RawMessage         `json:"host"`         // http: string OR []string; httpupgrade/xhttp: string
+
+	// httpupgrade / ws early data.
+	MaxEarlyData        uint32 `json:"max_early_data"`
+	EarlyDataHeaderName string `json:"early_data_header_name"`
+
+	// http (HTTP/2) request shaping.
+	Method string `json:"method"`
+
+	// keepalive knobs shared by http + grpc (sing-box duration strings, "15s").
+	IdleTimeout         json.RawMessage `json:"idle_timeout"`
+	PingTimeout         json.RawMessage `json:"ping_timeout"`
+	HeartbeatPeriod     json.RawMessage `json:"heartbeat_period"` // ws
+	PermitWithoutStream bool            `json:"permit_without_stream"`
+	Authority           string          `json:"authority"`
+	UserAgent           string          `json:"user_agent"`
+
+	// xhttp.
+	Mode string `json:"mode"`
+
+	raw json.RawMessage
+}
+
+func (t *singboxTransport) UnmarshalJSON(data []byte) error {
+	type plain singboxTransport
+	var p plain
+	if err := json.Unmarshal(data, &p); err != nil {
+		return err
+	}
+	*t = singboxTransport(p)
+	t.raw = append(json.RawMessage(nil), data...)
+	return nil
+}
+
+// header returns a single header value (first element of a multi-value header).
+func (t *singboxTransport) header(key string) string {
+	if t.Headers == nil {
+		return ""
+	}
+	for _, k := range []string{key, strings.ToLower(key)} {
+		if v, ok := t.Headers[k]; ok && len(v) > 0 {
+			return v[0]
+		}
+	}
+	return ""
+}
+
+// hostString reads the `host` field, which is a bare string for
+// httpupgrade/xhttp and a string-or-list for http (HTTP/2 host rotation).
+// Returns the comma-joined form the share-link vocabulary uses.
+func (t *singboxTransport) hostString() string {
+	if len(t.Host) == 0 {
+		return ""
+	}
+	var hs []string
+	if err := json.Unmarshal(t.Host, &hs); err == nil {
+		return strings.Join(hs, ",")
+	}
+	var h string
+	if json.Unmarshal(t.Host, &h) == nil {
+		return h
+	}
+	return ""
+}
+
+// singboxDuration converts a sing-box duration field ("15s", or raw nanoseconds)
+// into the whole seconds the share-link vocabulary uses. 0 => key omitted.
+func singboxDuration(raw json.RawMessage) int {
+	if len(raw) == 0 {
+		return 0
+	}
+	var s string
+	if json.Unmarshal(raw, &s) == nil {
+		if d, err := time.ParseDuration(s); err == nil {
+			return int(d / time.Second)
+		}
+		return 0
+	}
+	var n int64
+	if json.Unmarshal(raw, &n) == nil {
+		return int(time.Duration(n) / time.Second)
+	}
+	return 0
 }
 
 // uriFromSingboxOutbound rebuilds a share-link URI from a native sing-box
@@ -168,44 +273,164 @@ func applySingboxTLS(q url.Values, tls *singboxTLS) {
 	if tls.UTLS != nil && tls.UTLS.Fingerprint != "" {
 		q.Set("fp", tls.UTLS.Fingerprint)
 	}
+	applySingboxECH(q, tls)
 }
 
-// applySingboxTransport writes net/path/host/serviceName from a sing-box
-// transport block (default tcp when absent).
+// applySingboxECH re-encodes a sing-box tls.ech block into the `ech` share-link
+// key that getTLSOptions understands. Was missing entirely => SNI in plaintext
+// after every re-parse (see the comment on singboxTLS.ECH).
+//
+// Presence of the key alone enables ECH; a non-empty value is the inline
+// ECHConfigList. config_path cannot survive a URI round-trip (it names a local
+// file), so it degrades to "enabled with no inline config" — which is exactly
+// sing-box's own DNS HTTPS-RR fetch path (common/tls/ech.go), i.e. ECH stays ON.
+func applySingboxECH(q url.Values, tls *singboxTLS) {
+	if tls == nil || tls.ECH == nil || !tls.ECH.Enabled {
+		return
+	}
+	q.Set("ech", strings.Join(tls.ECH.Config, "\n"))
+	if tls.ECH.QueryServerName != "" {
+		q.Set("query_server_name", tls.ECH.QueryServerName)
+	}
+}
+
+// applySingboxTransport writes net/path/host/serviceName/mode/extra from a
+// sing-box transport block (default tcp when absent).
+//
+// 2026-07-19 — this function used to handle ws / grpc / http ONLY, and even
+// there read just path+Host. Everything else was lost on re-parse:
+//
+//   - xhttp: NOTHING was carried over. The block emitted only type=xhttp, so
+//     host/path collapsed to empty and mode fell back to "auto" — plus xmux,
+//     downloadSettings, sc*, noGRPCHeader and the whole obfs set vanished. The
+//     app re-parses the STORED outbound on every ping and every connect, so an
+//     xhttp node degraded on each cycle, not just at import: it still built,
+//     err == nil, and the traffic went out with the wrong URL and unbounded
+//     stream reuse.
+//   - httpupgrade: `host` is a TOP-LEVEL field in sing-box (not a Header), so a
+//     CDN-fronted httpupgrade node silently lost its Host and hit the origin's
+//     default vhost.
+//   - grpc/http/ws keepalive + fronting knobs (authority, user_agent, timeouts,
+//     method, heartbeat_period, early data) round-tripped to their defaults.
 func applySingboxTransport(q url.Values, tr *singboxTransport) {
 	if tr == nil || tr.Type == "" {
 		q.Set("type", "tcp")
 		return
 	}
 	q.Set("type", tr.Type)
-	switch tr.Type {
-	case "ws", "httpupgrade":
+	setPath := func() {
 		if tr.Path != "" {
 			q.Set("path", tr.Path)
 		}
-		if h := tr.Headers["Host"]; h != "" {
+	}
+	setSeconds := func(key string, raw json.RawMessage) {
+		if n := singboxDuration(raw); n > 0 {
+			q.Set(key, strconv.Itoa(n))
+		}
+	}
+	switch tr.Type {
+	case "ws":
+		setPath()
+		if h := tr.header("Host"); h != "" {
 			q.Set("host", h)
+		}
+		// getTransportOptions reads WS early data out of the path's ?ed= query,
+		// which is where Xray share-links carry it — put it back.
+		if tr.MaxEarlyData > 0 && tr.Path != "" {
+			q.Set("path", appendEarlyDataQuery(tr.Path, tr.MaxEarlyData))
+		}
+		setSeconds("heartbeat_period", tr.HeartbeatPeriod)
+	case "httpupgrade":
+		setPath()
+		// host is a top-level field here; Headers["Host"] is only the legacy spelling.
+		if h := tr.hostString(); h != "" {
+			q.Set("host", h)
+		} else if h := tr.header("Host"); h != "" {
+			q.Set("host", h)
+		}
+		if tr.MaxEarlyData > 0 && tr.Path != "" {
+			q.Set("path", appendEarlyDataQuery(tr.Path, tr.MaxEarlyData))
 		}
 	case "grpc":
 		if tr.ServiceName != "" {
 			q.Set("serviceName", tr.ServiceName)
 		}
-	case "http":
-		if tr.Path != "" {
-			q.Set("path", tr.Path)
+		setSeconds("idle_timeout", tr.IdleTimeout)
+		setSeconds("health_check_timeout", tr.PingTimeout)
+		if tr.PermitWithoutStream {
+			q.Set("permit_without_stream", "1")
 		}
-		if len(tr.Host) > 0 {
-			var hs []string
-			if err := json.Unmarshal(tr.Host, &hs); err == nil && len(hs) > 0 {
-				q.Set("host", strings.Join(hs, ","))
-			} else {
-				var h string
-				if json.Unmarshal(tr.Host, &h) == nil && h != "" {
-					q.Set("host", h)
-				}
+		if tr.Authority != "" {
+			q.Set("authority", tr.Authority)
+		}
+		if tr.UserAgent != "" {
+			q.Set("user_agent", tr.UserAgent)
+		}
+	case "http":
+		setPath()
+		if h := tr.hostString(); h != "" {
+			q.Set("host", h)
+		}
+		if tr.Method != "" {
+			q.Set("method", tr.Method)
+		}
+		if hdrs := singleValueHeaders(tr.Headers); len(hdrs) > 0 {
+			if b, err := json.Marshal(hdrs); err == nil {
+				q.Set("headers", string(b))
 			}
 		}
+		setSeconds("idle_timeout", tr.IdleTimeout)
+		setSeconds("health_check_timeout", tr.PingTimeout)
+	case "xhttp":
+		setPath()
+		if h := tr.hostString(); h != "" {
+			q.Set("host", h)
+		}
+		if tr.Mode != "" {
+			q.Set("mode", tr.Mode)
+		}
+		// Forward the WHOLE transport object through `extra` — the channel
+		// getTransportOptions already uses for everything that has no query-param
+		// spelling (xmux, downloadSettings, sc*, noGRPCHeader, uplinkHTTPMethod,
+		// the obfs set). host/path/mode are also set above and win over `extra`
+		// on the parser side, matching Xray's SplitHTTPConfig.Build.
+		//
+		// The sing-box spellings inside downloadSettings (server / server_port /
+		// tls{}) are folded onto the Xray ones by DownloadSettings.UnmarshalJSON
+		// (xhttp_extra.go), so both dialects land in the same struct.
+		if len(tr.raw) > 0 {
+			q.Set("extra", string(tr.raw))
+		}
 	}
+}
+
+// appendEarlyDataQuery re-attaches ?ed=N to a transport path so the share-link
+// parser can lift it back into MaxEarlyData.
+func appendEarlyDataQuery(path string, maxEarlyData uint32) string {
+	sep := "?"
+	if strings.Contains(path, "?") {
+		sep = "&"
+	}
+	return path + sep + "ed=" + strconv.FormatUint(uint64(maxEarlyData), 10)
+}
+
+// singleValueHeaders flattens a sing-box HTTPHeader to the single-value map the
+// `headers` query key carries. Host is excluded — it travels as host=.
+func singleValueHeaders(h map[string]stringOrList) map[string]string {
+	if len(h) == 0 {
+		return nil
+	}
+	out := make(map[string]string, len(h))
+	for k, v := range h {
+		if strings.EqualFold(k, "Host") || len(v) == 0 {
+			continue
+		}
+		out[k] = v[0]
+	}
+	if len(out) == 0 {
+		return nil
+	}
+	return out
 }
 
 func singboxHysteria2(ob *singboxOutbound) (string, bool) {
@@ -350,26 +575,31 @@ func singboxVMess(ob *singboxOutbound) (string, bool) {
 		"net":  "tcp",
 		"type": "none",
 	}
-	if tr := ob.Transport; tr != nil && tr.Type != "" {
-		m["net"] = tr.Type
-		if tr.Path != "" {
-			m["path"] = tr.Path
-		}
-		if h := tr.Headers["Host"]; h != "" {
-			m["host"] = h
-		}
-		if tr.ServiceName != "" {
-			m["path"] = tr.ServiceName // grpc carries serviceName in path
-		}
+	if ob.PacketEncoding != "" {
+		m["packetEncoding"] = ob.PacketEncoding
 	}
-	if ob.TLS != nil && ob.TLS.Enabled {
-		m["tls"] = "tls"
-		if ob.TLS.ServerName != "" {
-			m["sni"] = ob.TLS.ServerName
-		}
-		if len(ob.TLS.ALPN) > 0 {
-			m["alpn"] = strings.Join(ob.TLS.ALPN, ",")
-		}
+	// vmess used to hand-roll its own (much smaller) subset of the transport/TLS
+	// mapping: it copied net/path/host/sni/alpn and DROPPED insecure, the uTLS
+	// fingerprint, reality (pbk/sid), ECH and every non-ws/grpc transport.
+	//
+	// Why each drop hurt, concretely:
+	//   - insecure: getTLSOptions defaults Insecure=false, so a node pinned to a
+	//     self-signed cert stopped verifying-as-configured and started FAILING the
+	//     handshake (fails closed, not open — but the node is dead with a cert
+	//     error that looks like a server problem).
+	//   - fp: vmess.go substitutes fp=chrome when TLS is on and fp is empty, so a
+	//     node fingerprinted as firefox/safari silently became chrome — the exact
+	//     ClientHello signature the operator picked to evade DPI was replaced.
+	//   - pbk/sid: reality was dropped to plain TLS => handshake against a REALITY
+	//     server fails.
+	// Now built through the SAME applySingboxTransport/applySingboxTLS used by
+	// vless/trojan, so the three container branches can no longer drift apart.
+	q := url.Values{}
+	applySingboxTransport(q, ob.Transport)
+	applySingboxTLS(q, ob.TLS)
+	mergeQueryIntoVmessMap(m, q)
+	if tr := ob.Transport; tr != nil && tr.Type == "grpc" && tr.ServiceName != "" {
+		m["path"] = tr.ServiceName // legacy vmess carries the gRPC serviceName in path
 	}
 	b, err := json.Marshal(m)
 	if err != nil {

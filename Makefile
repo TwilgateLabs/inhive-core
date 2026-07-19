@@ -6,7 +6,10 @@ LIBNAME=$(PRODUCT_NAME)
 CLINAME=InhiveCli
 
 BRANCH=$(shell git branch --show-current)
-VERSION=$(shell git describe --tags || echo "unknown version")
+# 2>/dev/null + single-word fallback: старое "unknown version" содержало ПРОБЕЛ и,
+# попав в -ldflags, разорвало бы флаг на два аргумента. Версия идёт в -X, поэтому
+# она обязана быть одним словом при любом исходе git describe.
+VERSION=$(shell git describe --tags 2>/dev/null || echo "unknown")
 ifeq ($(OS),Windows_NT)
 Not available for Windows! use bash in WSL
 endif
@@ -31,7 +34,37 @@ MACOS_ADD_TAGS=with_dhcp
 # он ~241MB из 362MB xcframework и удваивает время сборки).
 IOS_TARGET ?= ios,iossimulator
 WINDOWS_ADD_TAGS=with_purego
-LDFLAGS=-w -s -checklinkname=0 -buildid= $${CODE_VERSION}
+# VERSION_LDFLAGS — почему обе -X обязательны в КАЖДОМ артефакте:
+#
+#   constant.Version — в исходнике объявлен как `var Version = "unknown"`
+#   (sing-box/constant/version.go). Без -X он таким и остаётся в бинаре, и это
+#   не косметика: clashapi отдаёт "sing-box unknown" (experimental/clashapi/
+#   server.go:434), libbox.Version() тоже (experimental/libbox/setup.go:70), а
+#   experimental/deprecated/constants.go:27 делает semver.IsValid("v"+Version)
+#   → на "unknown" всегда false → Impending() всегда false → предупреждения о
+#   deprecated-опциях конфига НИКОГДА не показываются пользователю. То есть по
+#   баг-репорту нельзя определить сборку, и о ломающих изменениях конфига мы
+#   молчим.
+#
+#   internal/godebug.defaultGODEBUG=multipathtcp=0 — Go 1.24+ включает MPTCP для
+#   Dial по умолчанию. Для прокси это лишний вектор фингерпринтинга и источник
+#   расхождений на сетях, где MPTCP-опции режут middlebox'ы. Апстрим гасит его
+#   во всех своих сборках (sing-box/Makefile:9, cmd/internal/build_libbox/
+#   main.go:63-64, .github/workflows/*.yml) — мы обязаны совпадать, иначе наш
+#   форк ведёт себя иначе, чем протестированный апстримом код.
+#
+# Раньше здесь стоял $${CODE_VERSION} — раскрывался в shell-переменную
+# ${CODE_VERSION}, которую НИКТО никогда не выставлял (grep по репозиторию даёт
+# ровно одно вхождение — это самое). Мёртвая подстановка в пустую строку.
+#
+#   Версий ДВЕ, и обе объявлены как "unknown":
+#     sing-box/constant.Version                    — апстримная (clashapi, libbox)
+#     v2/hcommon/constants.Version                 — наша, инхайвовская
+#   Вторая сегодня читается только в cmd/cmd_version.go ("inhive-core version
+#   <...> sing-box version <...>"), но проставлять надо обе: иначе `InhiveCli
+#   version` рапортует "unknown" ровно там, куда смотрят при разборе инцидента.
+VERSION_LDFLAGS=-X github.com/sagernet/sing-box/constant.Version=$(VERSION) -X github.com/twilgate/inhive-core/v2/hcommon/constants.Version=$(VERSION) -X internal/godebug.defaultGODEBUG=multipathtcp=0
+LDFLAGS=-w -s -checklinkname=0 -buildid= $(VERSION_LDFLAGS)
 GOBUILDLIB=CGO_ENABLED=1 go build -trimpath -ldflags="$(LDFLAGS)" -buildmode=c-shared
 GOBUILDSRV=CGO_ENABLED=1 go build -ldflags="$(LDFLAGS)" -trimpath -tags $(TAGS)
 
@@ -78,14 +111,21 @@ android: lib_install
 # Defends against the recurring incident where a local single-ABI dev build
 # overwrites the canonical 3-ABI release in the deploy path, silently
 # producing APKs that crash on arm devices with UnsatisfiedLinkError.
+#
+# Windows-эквивалент — scripts/verify-aar-abi.ps1: этот Makefile не запускается
+# под Windows_NT (см. верх файла), а рецепты ниже требуют unzip/sha256sum.
+# Правя гейт здесь — правь и там, проверки должны совпадать.
+#
+# 2026-07-19: убрано мёртвое первое присваивание ABI_COUNT (unzip -p | strings |
+# grep -c), которое тут же затиралось следующей строкой и вводило в заблуждение
+# при чтении — считалось, что проверок две, а работала всегда только вторая.
 .PHONY: android-deploy
 android-deploy:
 	@if [ ! -f $(BINDIR)/$(LIBNAME).aar ]; then \
 		echo "ERROR: $(BINDIR)/$(LIBNAME).aar not found — run 'make android' first"; \
 		exit 1; \
 	fi
-	@ABI_COUNT=$$(unzip -p $(BINDIR)/$(LIBNAME).aar | strings | grep -c '^libinhive-core\.so$$' || true); \
-	ABI_COUNT=$$(unzip -l $(BINDIR)/$(LIBNAME).aar | grep -E 'jni/.*libinhive-core\.so' | wc -l); \
+	@ABI_COUNT=$$(unzip -l $(BINDIR)/$(LIBNAME).aar | grep -E 'jni/.*libinhive-core\.so' | wc -l); \
 	if [ "$$ABI_COUNT" -ne 3 ]; then \
 		echo "ERROR: Source AAR has $$ABI_COUNT ABI(s), expected 3 (arm64-v8a + armeabi-v7a + x86_64). Refusing to deploy."; \
 		unzip -l $(BINDIR)/$(LIBNAME).aar | grep 'libinhive-core\.so' || true; \
@@ -140,11 +180,71 @@ ios-deploy:
 # webui target dropped — у InHive нативный Flutter UI поверх gRPC, Clash web-panel
 # не используется. Если когда-нибудь понадобится — взять upstream MetaCubeX/Yacd-meta.
 
+# Канонический путь, откуда CMake забирает нативные DLL в Release-бандл:
+# app/windows/CMakeLists.txt:87-93 ставит inhive-core.dll, libcronet.dll и
+# wintun.dll именно из ../app/inhive-core/bin. Класть DLL в core/bin/ и считать
+# дело сделанным — нельзя, CMake туда не смотрит.
+APP_CORE_BIN=../app/inhive-core/bin
+CRONET_WIN_SLICE=github.com/sagernet/cronet-go/lib/windows_amd64
+
+# windows-naive-lib — синхронизация libcronet.dll с пином из go.mod.
+#
+# ПОЧЕМУ ЭТО ОТДЕЛЬНЫЙ ОБЯЗАТЕЛЬНЫЙ ШАГ, А НЕ ЧАСТЬ go build:
+# на Windows (и только там — WINDOWS_ADD_TAGS=with_purego) cronet НЕ линкуется в
+# inhive-core.dll статически. cronet-go под with_purego грузит библиотеку в
+# РАНТАЙМЕ: internal/cronet/loader_windows.go:findLibrary() ищет "libcronet.dll"
+# рядом с exe и по PATH, дальше syscall.LoadLibrary + GetProcAddress по каждому
+# Cronet_*-символу. Отсюда два следствия:
+#   1) go build НИКОГДА не падает из-за libcronet.dll — компилятор про него
+#      не знает. Ошибка вылезает только у пользователя.
+#   2) Ошибка вылезает не «при первом использовании naive» вообще, а в
+#      NewNaiveClient → checkLibrary (cronet-go/naive_client.go:97-100), то есть
+#      при СОЗДАНИИ naive-outbound'а: "cronet: library not found".
+# Хуже полного отсутствия — version skew: файл на месте, но собран под другую
+# ревизию Chromium, чем Go-код. Символы резолвятся по имени, ABI разъезжается
+# молча. Ровно это случилось 2026-07-05 (релиз 4.7.0): Go-код был на Chromium
+# 148, а libcronet.dll в инсталляторе — 143. Test-Path такое не ловит,
+# поэтому ниже сверяются именно версии, а не факт существования файла.
+#
+# Источник истины — go.mod (пин lib-слайса), а не захардкоженная псевдоверсия:
+# `go list -m -f {{.Dir}}` разрешает её через модульный кэш, offline, и сам
+# едет за любым бампом cronet-go.
+.PHONY: windows-naive-lib
+windows-naive-lib:
+	@set -e; \
+	SLICE_DIR=$$(go list -m -f '{{.Dir}}' $(CRONET_WIN_SLICE) 2>/dev/null); \
+	if [ -z "$$SLICE_DIR" ] || [ ! -f "$$SLICE_DIR/libcronet.dll" ]; then \
+		echo "ERROR: не найден libcronet.dll в слайсе $(CRONET_WIN_SLICE)."; \
+		echo "       Прогрейте модульный кэш: go mod download $(CRONET_WIN_SLICE)"; \
+		exit 1; \
+	fi; \
+	mkdir -p $(APP_CORE_BIN); \
+	SRC_VER=$$(grep -a -o -E '1[0-9]{2}\.0\.[0-9]{4}\.[0-9]+' "$$SLICE_DIR/libcronet.dll" | sort -u | head -1); \
+	if [ -z "$$SRC_VER" ]; then \
+		echo "ERROR: не удалось прочитать версию Chromium из слайса — формат libcronet.dll изменился?"; \
+		exit 1; \
+	fi; \
+	cp -f "$$SLICE_DIR/libcronet.dll" $(APP_CORE_BIN)/libcronet.dll; \
+	chmod u+w $(APP_CORE_BIN)/libcronet.dll; \
+	DST_VER=$$(grep -a -o -E '1[0-9]{2}\.0\.[0-9]{4}\.[0-9]+' $(APP_CORE_BIN)/libcronet.dll | sort -u | head -1); \
+	if [ "$$SRC_VER" != "$$DST_VER" ]; then \
+		echo "ERROR: version skew после копирования: слайс=$$SRC_VER деплой=$$DST_VER"; \
+		exit 1; \
+	fi; \
+	echo "OK libcronet.dll синхронизирован: Chromium $$SRC_VER (пин $$(go list -m -f '{{.Version}}' $(CRONET_WIN_SLICE)))"
+
 .PHONY: build
-windows-amd64: prepare
+windows-amd64: prepare windows-naive-lib
 	rm -rf $(BINDIR)/*
 	go run -v "github.com/sagernet/cronet-go/cmd/build-naive@$(CRONET_GO_VERSION)" extract-lib --target windows/amd64 -o $(BINDIR)/
 	env GOOS=windows GOARCH=amd64 CC=x86_64-w64-mingw32-gcc  $(GOBUILDLIB) -tags $(TAGS),$(WINDOWS_ADD_TAGS)   -o $(BINDIR)/$(LIBNAME).dll ./platform/desktop
+	# Деплой в путь, который реально читает CMake (см. APP_CORE_BIN выше).
+	# extract-lib выше кладёт libcronet в $(BINDIR) — этого мало: CMake берёт
+	# файл из $(APP_CORE_BIN). Туда его ставит отдельная цель
+	# windows-naive-lib (в prerequisites), она же сверяет версию Chromium с
+	# пином go.mod и работает без кросс-тулчейна.
+	mkdir -p $(APP_CORE_BIN)
+	cp -f $(BINDIR)/$(LIBNAME).dll $(APP_CORE_BIN)/$(LIBNAME).dll
 	echo "core built, now building cli" 
 	ls -R $(BINDIR)/
 	go install -mod=readonly github.com/akavel/rsrc@latest ||echo "rsrc error in installation"

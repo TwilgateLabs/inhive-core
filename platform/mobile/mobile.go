@@ -97,11 +97,24 @@ func Stop() (err error) {
 	return err
 }
 
+// logPanic publishes a recovered panic into the core log bus.
+//
+// Почему: раньше эти recover-блоки делали `_ = fmt.Errorf(...)` — строили
+// строку со стектрейсом и выбрасывали её. Комментарий утверждал «logging is
+// the caller's responsibility», но caller — это gomobile-биндинг из Kotlin,
+// а функции ниже НИЧЕГО не возвращают. Логировать было физически некому.
+// Со стороны наблюдателя паника в Wake()/Pause()/Close() выглядела как
+// «ничего не произошло»: VPN остаётся в паузе, трафик не идёт, в логах ядра
+// и во вкладке «Логи» — чисто. Ровно тот класс, что уводит расследование.
+func logPanic(fn string, r any) {
+	hcore.Log(hcore.LogLevel_FATAL, hcore.LogType_CORE,
+		fmt.Sprintf("mobile.%s panic: %v\n%s", fn, r, string(debug.Stack())))
+}
+
 func GetServerPublicKey() []byte {
 	defer func() {
 		if r := recover(); r != nil {
-			// best-effort: logging is the caller's responsibility, return nil on panic
-			_ = fmt.Errorf("mobile.GetServerPublicKey panic: %v\n%s", r, string(debug.Stack()))
+			logPanic("GetServerPublicKey", r)
 		}
 	}()
 	return hcore.GetGrpcServerPublicKey()
@@ -119,7 +132,7 @@ func AddGrpcClientPublicKey(clientPublicKey []byte) (err error) {
 func Close(mode int) {
 	defer func() {
 		if r := recover(); r != nil {
-			_ = fmt.Errorf("mobile.Close panic: %v\n%s", r, string(debug.Stack()))
+			logPanic("Close", r)
 		}
 	}()
 	hcore.Close(hcore.SetupMode(mode))
@@ -128,7 +141,7 @@ func Close(mode int) {
 func Pause() {
 	defer func() {
 		if r := recover(); r != nil {
-			_ = fmt.Errorf("mobile.Pause panic: %v\n%s", r, string(debug.Stack()))
+			logPanic("Pause", r)
 		}
 	}()
 	hcore.Pause()
@@ -137,7 +150,7 @@ func Pause() {
 func Wake() {
 	defer func() {
 		if r := recover(); r != nil {
-			_ = fmt.Errorf("mobile.Wake panic: %v\n%s", r, string(debug.Stack()))
+			logPanic("Wake", r)
 		}
 	}()
 	hcore.Wake()

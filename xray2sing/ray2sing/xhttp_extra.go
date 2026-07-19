@@ -27,6 +27,7 @@ func (x *XHTTPExtra) UnmarshalJSON(data []byte) error {
 	x.V2RayXHTTPBaseOptions.NormalizeXHTTPObfsAliases()
 	if x.DownloadSettings != nil {
 		x.DownloadSettings.V2RayXHTTPBaseOptions.NormalizeXHTTPObfsAliases()
+		x.DownloadSettings.normalizeSingboxDialect()
 	}
 	return nil
 }
@@ -38,6 +39,74 @@ type DownloadSettings struct {
 	Security        string         `json:"security,omitempty"`
 	TLSSettings     *TLSConfig     `json:"tlsSettings"`
 	REALITYSettings *REALITYConfig `json:"realitySettings"`
+
+	// --- sing-box dialect of the same block. -------------------------------
+	// The fields above are Xray's spelling (address/port/security/tlsSettings).
+	// A NATIVE sing-box outbound spells the identical concept
+	// server/server_port/tls{} — and the app stores parsed nodes as sing-box
+	// outbounds and re-parses them on every ping/connect, so this dialect is on
+	// the hot path, not an exotic import case. Without these the download leg of
+	// an xhttp split node came back with an EMPTY server after one round-trip:
+	// the outbound still built (err == nil) but downlink dialing was broken.
+	SBServer     string        `json:"server,omitempty"`
+	SBServerPort int           `json:"server_port,omitempty"`
+	SBTLS        *singboxDLTLS `json:"tls,omitempty"`
+}
+
+// singboxDLTLS is the sing-box `tls` block as it appears inside downloadSettings.
+type singboxDLTLS struct {
+	Enabled    bool         `json:"enabled"`
+	ServerName string       `json:"server_name"`
+	Insecure   bool         `json:"insecure"`
+	ALPN       stringOrList `json:"alpn"`
+	UTLS       *struct {
+		Fingerprint string `json:"fingerprint"`
+	} `json:"utls"`
+	Reality *struct {
+		Enabled   bool   `json:"enabled"`
+		PublicKey string `json:"public_key"`
+		ShortID   string `json:"short_id"`
+	} `json:"reality"`
+}
+
+// normalizeSingboxDialect folds the sing-box spellings onto the Xray fields so
+// everything downstream (common.go's Download builder) reads one shape. Xray
+// fields win when both are present — an explicit Xray block is never overwritten.
+func (d *DownloadSettings) normalizeSingboxDialect() {
+	if d.Address == "" && d.SBServer != "" {
+		d.Address = d.SBServer
+	}
+	if d.Port == 0 && d.SBServerPort != 0 {
+		d.Port = d.SBServerPort
+	}
+	if d.SBTLS == nil || !d.SBTLS.Enabled || d.Security != "" {
+		return
+	}
+	if r := d.SBTLS.Reality; r != nil && r.Enabled {
+		d.Security = "reality"
+		if d.REALITYSettings == nil {
+			d.REALITYSettings = &REALITYConfig{
+				ServerName: d.SBTLS.ServerName,
+				PublicKey:  r.PublicKey,
+				ShortId:    r.ShortID,
+			}
+			if d.SBTLS.UTLS != nil {
+				d.REALITYSettings.Fingerprint = d.SBTLS.UTLS.Fingerprint
+			}
+		}
+		return
+	}
+	d.Security = "tls"
+	if d.TLSSettings == nil {
+		d.TLSSettings = &TLSConfig{
+			ServerName: d.SBTLS.ServerName,
+			Insecure:   d.SBTLS.Insecure,
+			ALPN:       d.SBTLS.ALPN,
+		}
+		if d.SBTLS.UTLS != nil {
+			d.TLSSettings.Fingerprint = d.SBTLS.UTLS.Fingerprint
+		}
+	}
 }
 
 type TLSConfig struct {

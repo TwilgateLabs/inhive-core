@@ -9,6 +9,57 @@ shipped standalone).
 
 ## [Unreleased]
 
+### Fixed — TCP NAT collision on the system stack (sing-tun 0.8.9 → 0.8.11)
+
+- **Two connections from the same source address could share one NAT port, mixing their
+  traffic.** `TCPNat.Lookup` keyed its map on the *source* `addr:port` alone, so when the OS
+  reused an ephemeral port before the old NAT entry expired, the new connection inherited the
+  previous destination's mapping. Upstream re-keyed the map on `{source, destination}`. This
+  reaches us through the `mixed` stack, which embeds `System` and inherits its TCP path —
+  i.e. **Windows and iOS were both exposed**. Taken by bumping the dependency rather than
+  merging the sing-box tree: `sing-tun` is a plain module for us, so the fix cost one line in
+  each `go.mod` plus the API port below. `sing` stays at 0.8.9 — no transitive drift.
+- API port for the bump, verbatim from upstream sing-box 1.13.14: `InterfaceMonitor.MyInterface()
+  string` became `MyInterfaces() []string`, and registration now accumulates interfaces instead
+  of overwriting the last one. Three call sites (`libbox/monitor.go`, `libbox/config.go`,
+  `dns/transport/local/resolv_windows.go`).
+- **`ICMPTimeout` is now set explicitly.** From 0.8.11 `NewDirectRouteMapping` reads a new
+  `StackOptions.ICMPTimeout` instead of `UDPTimeout`; leaving it unset would have passed zero,
+  which disables time-based expiry of direct-route entries (they would only be evicted under LRU
+  pressure) and leaks the zero into the destination constructor. Nothing would have errored —
+  exactly the silent-fail class this round is about.
+
+Not affected, contrary to first assessment: the IPv6-UDP-leak fix in the same release
+(`processIPv6` was missing the `writeBack = false` that `processIPv4` already had) applies only
+to the pure `system` stack. `Mixed` overrides `processIPv6` and already resets `writeBack`, and
+`stack_mixed.go` is byte-identical between 0.8.9 and 0.8.11. We ship `gvisor` (Android) and
+`mixed` (Windows/iOS), and `stack: "system"` is not reachable from an imported subscription.
+
+### Fixed — config decoder could silently truncate an object (sing 0.8.9 → 0.8.11)
+
+- `Decoder.More()` restored a stale offset after `refill()` had moved the buffer, so a comma
+  landing on a 512-byte read boundary either crashed the parse or silently dropped the
+  remaining keys. `badjson/object.go` and `array.go` both iterate with `for decoder.More()`,
+  and every `badoption.*` type plus the `option.Options` merge sits on badjson — so whether a
+  config parsed correctly depended on its byte layout. For a client whose job is to swallow
+  arbitrary third-party subscriptions, that is a lottery on file size. Also picked up: HTTP
+  proxy inbound auth, which previously answered 407 and closed the connection while browsers
+  retry with credentials on the same keep-alive, so authentication never succeeded.
+- Zero source changes required; the only transitive move is `x/sys` to 0.41.0, which the
+  sing-tun bump already forced. Verified building darwin and windows(+`with_purego`) with the
+  canonical tag set.
+
+### Fixed — xhttp padding never reached the wire under `xPaddingPlacement: "query"`
+
+- `GetRequestHeader` wrote the padding into a `*url.URL` it had parsed locally and returned only
+  the `http.Header`; the caller had already built the request from the original string, so the
+  padding was discarded every time. A server requiring padding refused 100% of such requests,
+  with no error and no log line on our side — `err == nil`, "padding applied", to an object that
+  was thrown away. The function now returns the effective URL alongside the header and both
+  callers build the request from it. Placements that carry padding in a header are byte-identical
+  to before, and a sibling test pins that down so the fake `Referer` query cannot leak into the
+  real request line.
+
 ### Fixed — xhttp parity with upstream Xray (device-verified on Windows/CDN)
 
 Root causes behind "CDN configs lose ~95% of the line, and the number swings between

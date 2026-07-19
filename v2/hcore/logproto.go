@@ -37,8 +37,15 @@ func (s *CoreService) LogListener(req *LogRequest, stream grpc.ServerStreamingSe
 			if info.Level < req.Level {
 				continue
 			}
-			stream.Send(info)
-			// case <-time.After(500 * time.Millisecond):
+			// Раньше ошибка Send игнорировалась. Это silent-fail в САМОЙ
+			// системе наблюдения: на порванном стриме (клиент упал, канал
+			// умер) цикл продолжал крутиться и «отправлять» строки в никуда —
+			// вкладка «Логи» у юзера просто переставала обновляться, и это
+			// выглядело как «ядро молчит, значит всё тихо». Возврат ошибки
+			// закрывает стрим, клиент видит разрыв и переподключается.
+			if sendErr := stream.Send(info); sendErr != nil {
+				return sendErr
+			}
 		}
 	}
 }

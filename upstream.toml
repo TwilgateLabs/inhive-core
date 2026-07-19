@@ -1,0 +1,415 @@
+# ============================================================================
+#  InHive core — реестр вендоренного кода и его апстрим-эталонов
+# ============================================================================
+#
+#  ЗАЧЕМ ЭТОТ ФАЙЛ СУЩЕСТВУЕТ
+#  --------------------------
+#  2026-07-19 полдня диагностики xhttp/CDN ушло на сравнение с копией Xray,
+#  отставшей на 6 релизов (26.1.13 против актуального 26.7.11). Это породило
+#  не просто потерю времени, а ЛОЖНЫЙ ФИКС: 26.1.13 дефолтит xmux
+#  `maxConcurrency 1..1`, 26.7.11 — `maxConnections 6..6`. Это ПРОТИВОПОЛОЖНЫЕ
+#  стратегии (соединение-на-поток = шторм хендшейков vs тёплый пул), и «фикс»
+#  по протухшему эталону двигал в сторону нестабильности.
+#
+#  Корневая проблема была НЕ в конкретном пропуске, а в том, что мы не могли
+#  ответить на вопрос «от какой версии апстрима отпочкован вот этот кусок кода».
+#  Этот файл отвечает на него для каждого вендоренного куска.
+#
+#  ПОЧЕМУ TOML, А НЕ MARKDOWN-ТАБЛИЦА И НЕ YAML
+#  --------------------------------------------
+#  * Не Markdown: таблица, которую надо парсить регулярками, — это второй
+#    источник правды рядом с данными. Ровно тот класс дрейфа, который мы тут
+#    и лечим. Человекочитаемую таблицу РЕНДЕРИТ скрипт из этого файла.
+#  * Не YAML: PyYAML не входит в stdlib и на машине не установлен (проверено).
+#    Реестр читает CI-джоба, которая обязана быть неблокирующей и
+#    беззависимостной; `pip install pyyaml` в такой джобе — лишняя точка отказа.
+#  * TOML: `tomllib` — stdlib с Python 3.11, ноль зависимостей, и при этом
+#    поддерживает комментарии — а «почему мы разошлись с апстримом» обязано
+#    лежать рядом с данными, а не в отдельном документе.
+#
+#  КАК ПОЛЬЗОВАТЬСЯ
+#  ----------------
+#    python3 core/scripts/check-upstream-drift.py            # сводка + коды возврата
+#    python3 core/scripts/check-upstream-drift.py --verbose  # + расхождения по каждой позиции
+#
+#  ЖЕЛЕЗНОЕ ПРАВИЛО ПЕРЕД ЛЮБЫМ DIFF-АУДИТОМ ПРОТИВ АПСТРИМА:
+#  сначала прогнать скрипт, и только потом сравнивать код. Не доверять копиям
+#  апстрима, лежащим в scratchpad / ~/Downloads / соседнем клоне — у них нет
+#  версии, и именно на этом мы обожглись.
+#
+#  ПРОДУКТОВЫЙ ИНВАРИАНТ (см. feedback_domain_universal_client.md):
+#  InHive — УНИВЕРСАЛЬНЫЙ клиент, обязан переваривать любую чужую подписку.
+#  Поэтому реестр покрывает ВЕСЬ вендоренный код, включая протоколы, которыми
+#  мы сами не пользуемся. Сузить объём по критерию «нам это не нужно» = ошибка:
+#  нужно НАШИМ ЮЗЕРАМ на чужих подписках.
+#
+#  ПОЛЯ ЗАПИСИ
+#  -----------
+#   id           — короткий идентификатор
+#   kind         — "tree"   : дерево исходников в нашем репо, эталон = тег апстрима
+#                  "commit" : дерево исходников, эталон = коммит (у апстрима нет тегов)
+#                  "module" : обычная go.mod-зависимость; текущая версия читается
+#                             ЖИВЬЁМ из go.mod, поэтому по этой оси реестр
+#                             протухнуть не может
+#   path         — путь относительно core/ (для tree/commit)
+#   upstream     — канонический апстрим-репозиторий
+#   ref          — ТОЧНАЯ версия/тег эталона
+#   ref_commit   — коммит, на который этот тег обязан резолвиться. Скрипт
+#                  сверяет его с сетью: расхождение = перетегированный апстрим
+#                  ИЛИ неверно записанный эталон. Это и есть защита от протухания.
+#   verified     — дата последней сверки С СЕТЬЮ
+#   verified_how — чем именно доказано, что эталон именно этот (не «помню»)
+#   owner        — кто ведёт позицию
+#   max_lag      — сколько релизов отставания терпим, дальше — ненулевой выход
+#   divergences  — НАШИ намеренные расхождения: по строке «что и зачем»
+#
+# ============================================================================
+
+schema_version = 1
+
+[meta]
+default_max_lag = 3
+# Дата последней ПОЛНОЙ сверки реестра с сетью.
+last_full_audit = "2026-07-19"
+
+
+# ---------------------------------------------------------------------------
+#  1. sing-box — главный форк
+# ---------------------------------------------------------------------------
+[[entry]]
+id = "sing-box"
+kind = "tree"
+path = "sing-box"
+upstream = "https://github.com/SagerNet/sing-box"
+ref = "v1.13.8"
+ref_commit = "d5adb54bc6c6b2c21ab6f748276c4ec62d9bb650"
+tag_filter = '^v\d+\.\d+\.\d+$'
+verified = "2026-07-19"
+verified_how = """\
+`git ls-remote https://github.com/SagerNet/sing-box refs/tags/v1.13.8` = \
+d5adb54bc6c6b2c21ab6f748276c4ec62d9bb650, и это РОВНО второй родитель нашего \
+merge-коммита 5c0f50a3 («merge: v1.13.8 into sing-v0.8.4-compat»). То есть база \
+доказана коммитом, а не записью в CHANGELOG."""
+owner = "core"
+max_lag = 2
+divergences = [
+  "Ветка sing-v0.8.4-compat: держим sing v0.8.x, апстрим уехал вперёд по sing.",
+  "transport/v2rayxhttp/ — собственный порт Xray splithttp (отдельная запись ниже).",
+  "common/xray/ — порт buf/pipe/signal/stat из Xray (отдельная запись ниже).",
+  "option/v2ray_transport.go — XHTTP/gRPC/HTTPUpgrade поля сверх апстрима (Xray parity).",
+  "iOS-гейты по памяти NE (50MB jetsam-бюджет): closedConnections history 1000->50 и др.",
+  "Полный перечень — core/CHANGELOG.md; форк-wide, построчно тут не разворачиваем.",
+]
+
+# ---------------------------------------------------------------------------
+#  2. golang.org/x/net — форк ради одной правки в http2
+# ---------------------------------------------------------------------------
+[[entry]]
+id = "x-net"
+kind = "tree"
+path = "sing-box/replace/x-net"
+upstream = "https://github.com/golang/net"
+ref = "v0.55.0"
+ref_commit = "7770ec48d03fec35e378665337b4faca93c38423"
+tag_filter = '^v\d+\.\d+\.\d+$'
+verified = "2026-07-19"
+verified_how = """\
+Полный рекурсивный diff нашего дерева против чистого клона тега v0.55.0: \
+РОВНО ОДИН расходящийся файл (http2/transport.go), остальные байт-в-байт. \
+База доказана диффом, а не require-строкой в go.mod (которая при локальном \
+replace ничего не гарантирует)."""
+owner = "core"
+max_lag = 2
+divergences = [
+  "http2/transport.go: frameScratchBufferLen — кап scratch-буфера 512KB -> 64KB, НО ТОЛЬКО на iOS (runtime.GOOS == \"ios\").",
+  "Причина: буфер держится всю жизнь стрима; ~60 соединений x 512KB ~= 30MB = 68% от 50MB бюджета iOS NE -> jetsam (device-профиль 2026-07-18).",
+  "Гейт по платформе добавлен 2026-07-19: на Windows замер дал avg 339KB / max 976KB на тело, кап 64KB там дробил запись на ~8 проходов под cc.wmu.Lock() — накладные расходы без выгоды.",
+  "ВНИМАНИЕ: в задачах/памяти эта правка иногда описана как безусловная «512KB->64KB» — это УСТАРЕВШЕЕ описание, правка платформенная.",
+]
+
+# ---------------------------------------------------------------------------
+#  3. sagernet/wireguard-go
+# ---------------------------------------------------------------------------
+[[entry]]
+id = "wireguard-go"
+kind = "commit"
+path = "sing-box/replace/wireguard-go"
+upstream = "https://github.com/SagerNet/wireguard-go"
+ref = "v0.0.2-beta.1.0.20260224074747-506b7631853c"
+ref_commit = "506b7631853c"
+verified = "2026-07-19"
+verified_how = "go list -m даёт псевдоверсию с коммитом 506b7631853c; `git ls-remote HEAD` апстрима = тот же 506b7631853c."
+owner = "core"
+max_lag = 0
+divergences = [
+  "На момент сверки расхождений с пином не зафиксировано; дерево вендорится ради warpobf (Noise/WARP), который импортит option/wireguard.go.",
+  "НЕ ПРОВЕРЕНО построчным диффом против апстрим-коммита — только по пину. TODO.",
+]
+
+# ---------------------------------------------------------------------------
+#  4. sagernet/tailscale
+# ---------------------------------------------------------------------------
+[[entry]]
+id = "tailscale"
+kind = "tree"
+path = "sing-box/replace/tailscale"
+upstream = "https://github.com/SagerNet/tailscale"
+ref = "v1.92.4-sing-box-1.13-mod.7"
+tag_filter = '^v\d+\.\d+\.\d+-sing-box-1\.13-mod\.\d+$'
+verified = "2026-07-19"
+verified_how = "go list -m => v1.92.4-sing-box-1.13-mod.7; это же значение — старший тег апстрима на дату сверки."
+owner = "core"
+max_lag = 1
+divergences = [
+  "Расхождений не заявлено — дерево лежит локально только чтобы зафиксировать версию форка SagerNet.",
+  "НЕ ПРОВЕРЕНО построчным диффом. TODO.",
+]
+
+# ---------------------------------------------------------------------------
+#  5. Psiphon-Labs/quic-go
+# ---------------------------------------------------------------------------
+[[entry]]
+id = "psiphon-quic-go"
+kind = "commit"
+path = "sing-box/replace/psiphon-quic-go"
+upstream = "https://github.com/Psiphon-Labs/quic-go"
+ref = "v0.0.0-20240424181006-45545f5e1536"
+ref_commit = "45545f5e1536"
+verified = "2026-07-19"
+verified_how = """\
+В go.mod НЕТ require — только replace; версия вытащена из графа модулей \
+(`go list -m`), куда попадает транзитивно через Psiphon-Labs/psiphon-tunnel-core \
+v2.0.28+incompatible. У апстрима НЕТ ТЕГОВ вообще, поэтому отставание меряется \
+только «наш пин == HEAD?»."""
+owner = "core"
+max_lag = 0
+divergences = [
+  "Расхождений не заявлено.",
+  "СЛАБОЕ МЕСТО: пин от 2024-04-24 (45545f5e1536), апстрим ушёл на 79fe45fb83b1. Тегов нет — «на сколько релизов отстали» неизмеримо в принципе, нужен ручной обзор коммитов.",
+]
+
+# ---------------------------------------------------------------------------
+#  6. Psiphon-Labs/psiphon-tls
+# ---------------------------------------------------------------------------
+[[entry]]
+id = "psiphon-tls"
+kind = "commit"
+path = "sing-box/replace/psiphon-tls"
+upstream = "https://github.com/Psiphon-Labs/psiphon-tls"
+ref = "v0.0.0-20240424193802-52b2602ec60c"
+ref_commit = "52b2602ec60c"
+verified = "2026-07-19"
+verified_how = """\
+Версия из графа модулей (`go list -m`), т.к. в go.mod есть только replace без \
+require. Апстрим жив: `git ls-remote HEAD` = 2a2fae2db378 (трижды подряд, \
+2026-07-19). У репозитория НЕТ ТЕГОВ — отставание меряется только \
+«наш пин == HEAD?»."""
+owner = "core"
+max_lag = 0
+divergences = [
+  "Расхождений не заявлено.",
+  "СЛАБОЕ МЕСТО: пин от 2024-04-24 (52b2602ec60c), апстрим ушёл на 2a2fae2db378. Тегов нет — «на сколько релизов отстали» неизмеримо в принципе, нужен ручной обзор коммитов.",
+]
+
+# ---------------------------------------------------------------------------
+#  7. XHTTP (splithttp) — ручной порт из Xray
+# ---------------------------------------------------------------------------
+[[entry]]
+id = "xhttp"
+kind = "tree"
+path = "sing-box/transport/v2rayxhttp"
+extra_paths = ["sing-box/option/v2ray_transport.go"]
+upstream = "https://github.com/XTLS/Xray-core"
+ref = "v26.7.11"
+tag_filter = '^v\d+\.\d+\.\d+$'
+verified = "2026-07-19"
+verified_how = """\
+Сверено вручную против клона тега v26.7.11 в ходе разбора 2026-07-19 (коммит \
+sing-box 84fe2bc9 «parity with upstream Xray 26.7.11»). Маркеры версии \
+проставлены в комментариях client.go:208-213. ЭТО РУЧНОЙ ПОРТ, НЕ КОПИЯ — \
+дословного diff-совпадения не будет и не должно быть."""
+owner = "core"
+max_lag = 1
+divergences = [
+  "Порт живёт в sing-box, а не в Xray: транспорт переписан под sing-box adapter/dialer, поэтому побайтового соответствия нет by design.",
+  "xmux-дефолты приведены к 26.7.11 (maxConnections 6..6). ДО 2026-07-19 стояло 26.1.13-поведение (maxConcurrency 1..1) — ПРОТИВОПОЛОЖНАЯ стратегия; это и есть цена протухшего эталона.",
+  "tokenish-padding: длина считается по ХАФФМАН-оценке, а не по числу сырых символов (сервер валидирует сжатую длину в [98,1002]).",
+  "randStringFromCharset: добавлен rejection sampling — «%62» перекашивал первые 8 символов алфавита, т.е. давал статистический признак в поле, существующем РАДИ маскировки.",
+  "Логирование отказов upload восстановлено («failed to send upload») — при первом портировании потеряли, из-за чего upload-половина была слепа.",
+  "Заголовки: полный Chrome-набор + Cache-Control/Pragma: no-cache (одинокий User-Agent без прочих Chrome-заголовков = отпечаток).",
+  "Scope запроса = lifetime СОЕДИНЕНИЯ (WithoutCancel(dial-ctx) + cancel в onClose), не dial-ctx: upload_queue собирает строго по seq.",
+  "hClient передаётся параметром, а не читается из поля — гонка при ротации xmux.",
+  "ОСОЗНАННОЕ УПРОЩЕНИЕ: мажорная версия Chrome в UA не ротируется так, как у Xray (см. комментарий в option/v2ray_transport.go).",
+]
+
+# ---------------------------------------------------------------------------
+#  8. common/xray — порт buf/pipe/signal/stat из Xray
+# ---------------------------------------------------------------------------
+[[entry]]
+id = "xray-common"
+kind = "tree"
+path = "sing-box/common/xray"
+upstream = "https://github.com/XTLS/Xray-core"
+ref = "v26.7.11"
+tag_filter = '^v\d+\.\d+\.\d+$'
+verified = "2026-07-19"
+verified_how = """\
+Нормализованный diff (переписаны import-пути xtls/xray-core -> sing-box/common/xray) \
+против клона тега v26.7.11: pipe/{impl,pipe,reader,writer}.go расходятся на \
+54/23/2/2 строки, buf/* — на 2..77 строк. То есть база ПОХОЖА на 26.7.11, но это \
+ЧАСТИЧНЫЙ порт (выброшены readv/stats/xray-специфика), а не срез тега. \
+Полная построчная классификация расхождений НЕ сделана."""
+owner = "core"
+max_lag = 1
+divergences = [
+  "Подмножество Xray: вырезаны readv_*, часть stats/proto-зависимостей — тянуть их в sing-box незачем.",
+  "pipe/impl.go: убраны errSlowDown + runtime.Gosched() (апстрим тоже убрал) — writer пинал reader на каждые 8KB, POST вёз обрывки вместо накопленного чанка.",
+  "pipe/impl.go: починена утечка buf.ReleaseMulti на done-ветке (апстрим освобождает буферы на этом пути).",
+  "НЕ ЗАФИКСИРОВАНО: остальные ~150 строк расхождений не классифицированы на «намеренные» vs «дрейф». Главный незакрытый долг реестра.",
+]
+
+# ---------------------------------------------------------------------------
+#  9. xray2sing — наш парсер подписок
+# ---------------------------------------------------------------------------
+[[entry]]
+id = "xray2sing"
+kind = "tree"
+path = "xray2sing"
+upstream = "https://github.com/XTLS/Xray-core"
+ref = "v26.7.11"
+tag_filter = '^v\d+\.\d+\.\d+$'
+verified = "2026-07-19"
+verified_how = """\
+Собственный код (module github.com/twilgate/xray2sing), апстрим-копии не имеет. \
+Xray указан как СЕМАНТИЧЕСКИЙ эталон: набор полей URI/JSON, которые парсер обязан \
+понимать, задаётся Xray. Референсы по README: SingBoxer (исходный URI-парсер), \
+v2box (v2ray-схема)."""
+owner = "core"
+max_lag = 1
+divergences = [
+  "Не форк — оригинальный код. Эталон нужен для СЕМАНТИЧЕСКОЙ сверки: любое молча выброшенное при разборе поле = чей-то сломанный конфиг (universal-client-invariant).",
+  "Известный архитектурный долг: трансляция URI->outbound живёт в ТРЁХ местах (ray2sing / json_ingest.go / Dart) и дрейфует.",
+  "json_ingest лоссёвый: теряет top-level поля xhttpSettings, включая xmux/downloadSettings (подтверждено 2026-07-19).",
+  "Гард: compat_corpus_test.go — каждое восстановленное поле обязано получить корпус-кейс.",
+]
+
+# ---------------------------------------------------------------------------
+#  10..N. go.mod-пины. Текущая версия читается ЖИВЬЁМ из go.mod —
+#         по этой оси реестр протухнуть не может by design.
+# ---------------------------------------------------------------------------
+
+[[entry]]
+id = "sing"
+kind = "module"
+gomod = "go.mod"
+module = "github.com/sagernet/sing"
+upstream = "https://github.com/SagerNet/sing"
+tag_filter = '^v\d+\.\d+\.\d+$'
+owner = "core"
+max_lag = 2
+divergences = ["Держим 0.8.x осознанно: форк sing-box сидит на ветке sing-v0.8.4-compat."]
+
+[[entry]]
+id = "sing-tun"
+kind = "module"
+gomod = "go.mod"
+module = "github.com/sagernet/sing-tun"
+upstream = "https://github.com/SagerNet/sing-tun"
+tag_filter = '^v\d+\.\d+\.\d+$'
+owner = "core"
+max_lag = 2
+divergences = ["TUN-стек. Платформенный выбор gvisor/mixed делается у нас, не в модуле (Windows+iOS = mixed)."]
+
+[[entry]]
+id = "sing-mux"
+kind = "module"
+gomod = "go.mod"
+module = "github.com/sagernet/sing-mux"
+upstream = "https://github.com/SagerNet/sing-mux"
+tag_filter = '^v\d+\.\d+\.\d+$'
+owner = "core"
+max_lag = 2
+divergences = []
+
+[[entry]]
+id = "sing-quic"
+kind = "module"
+gomod = "go.mod"
+module = "github.com/sagernet/sing-quic"
+upstream = "https://github.com/SagerNet/sing-quic"
+tag_filter = '^v\d+\.\d+\.\d+$'
+owner = "core"
+max_lag = 2
+divergences = ["Несёт hysteria/tuic — мы ими не торгуем, но чужие подписки их содержат (universal-client-invariant)."]
+
+[[entry]]
+id = "sing-vmess"
+kind = "module"
+gomod = "go.mod"
+module = "github.com/sagernet/sing-vmess"
+upstream = "https://github.com/SagerNet/sing-vmess"
+tag_filter = '^v\d+\.\d+\.\d+$'
+owner = "core"
+max_lag = 2
+divergences = ["Пин — ПСЕВДОВЕРСИЯ впереди старшего тега (v0.2.8-0.2025... > v0.2.7). Скрипт обязан не считать это отставанием."]
+
+[[entry]]
+id = "sing-shadowsocks"
+kind = "module"
+gomod = "go.mod"
+module = "github.com/sagernet/sing-shadowsocks"
+upstream = "https://github.com/SagerNet/sing-shadowsocks"
+tag_filter = '^v\d+\.\d+\.\d+$'
+owner = "core"
+max_lag = 2
+divergences = []
+
+[[entry]]
+id = "sing-dns"
+kind = "module"
+gomod = "go.mod"
+module = "github.com/sagernet/sing-dns"
+upstream = "https://github.com/shtorm-7/sing-dns"
+tag_filter = '^v\d+\.\d+\.\d+-extended-\d+\.\d+\.\d+$'
+owner = "core"
+max_lag = 1
+divergences = [
+  "replace на ФОРК shtorm-7/sing-dns (…-extended-…) ради расширенного DNS. Апстримом для нас считается форк, а не SagerNet/sing-dns.",
+  "Второй уровень риска: сам форк может отстать от SagerNet — эта ось реестром НЕ покрыта.",
+]
+
+[[entry]]
+id = "olcrtc"
+kind = "module"
+gomod = "go.mod"
+module = "github.com/openlibrecommunity/olcrtc"
+upstream = "https://github.com/TwilgateLabs/inhive-olcrtc"
+tag_filter = '^v\d+\.\d+\.\d+-inhive$'
+owner = "core"
+max_lag = 1
+divergences = [
+  "replace на НАШ форк TwilgateLabs/inhive-olcrtc. Собирается по build-тегу with_olcrtc.",
+  "Апстрим openlibrecommunity/olcrtc тегов не отдаёт — сверяемся со своим форком.",
+]
+
+[[entry]]
+id = "amneziawg-go"
+kind = "module"
+gomod = "go.mod"
+module = "github.com/amnezia-vpn/amneziawg-go"
+upstream = "https://github.com/amnezia-vpn/amneziawg-go"
+tag_filter = '^v\d+\.\d+\.\d+$'
+owner = "core"
+max_lag = 2
+divergences = ["AWG (build-тег with_awg). Свой протокол — нужен ЮЗЕРАМ на чужих подписках, даже если мы его сами не раздаём."]
+
+[[entry]]
+id = "dnscrypt"
+kind = "module"
+gomod = "go.mod"
+module = "github.com/ameshkov/dnscrypt/v2"
+upstream = "https://github.com/shtorm-7/dnscrypt"
+tag_filter = '^v\d+\.\d+\.\d+-extended-\d+\.\d+\.\d+$'
+owner = "core"
+max_lag = 1
+divergences = ["replace на форк shtorm-7/dnscrypt — парный к sing-dns extended."]

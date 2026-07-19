@@ -274,6 +274,34 @@ type xrayTLSSettings struct {
 	ALPN          []string `json:"alpn"`
 	Fingerprint   string   `json:"fingerprint"`
 	AllowInsecure bool     `json:"allowInsecure"`
+
+	// ECH was not read on this path at all, so an Xray-JSON node that enabled
+	// Encrypted Client Hello came out of the transcoder WITHOUT it and shipped
+	// its SNI in the clear. Silent by construction: the node still connects, the
+	// user just loses the privacy property they configured. Xray spells the
+	// inline list echConfigList (older exports: echConfig). (2026-07-19.)
+	ECHConfigList string `json:"echConfigList"`
+	ECHConfig     string `json:"echConfig"`
+	ECHForceQuery string `json:"echForceQuery"`
+}
+
+// applyECHKeys writes the `ech` share-link key from an Xray tlsSettings block.
+//
+// Xray accepts either an inline ECHConfigList (base64 / PEM) or an https:// URL
+// to query. Our runtime has no DoH-URL fetcher, but sing-box's own ECH path
+// resolves the config from a DNS HTTPS record when no inline blob is given
+// (common/tls/ech.go) — so a URL degrades to "ECH on, resolve via DNS" instead
+// of "ECH silently off", which is the behavior that matches the user's intent.
+func applyECHKeys(set func(k, v string), t *xrayTLSSettings) {
+	blob := orDefault(t.ECHConfigList, t.ECHConfig)
+	forceQuery := toBool(t.ECHForceQuery, false)
+	if blob == "" && !forceQuery {
+		return
+	}
+	if strings.HasPrefix(strings.ToLower(blob), "http") {
+		blob = ""
+	}
+	set("ech", blob)
 }
 
 type xrayRealitySettings struct {
@@ -616,6 +644,7 @@ func applyStreamToQuery(q url.Values, st *xrayStream) {
 		if t.AllowInsecure {
 			q.Set("allowInsecure", "1")
 		}
+		applyECHKeys(q.Set, t)
 	}
 
 	if st.RealitySettings != nil {
@@ -756,6 +785,20 @@ func applyStreamToVmessMap(m map[string]interface{}, st *xrayStream) {
 		if t.Fingerprint != "" {
 			m["fp"] = t.Fingerprint
 		}
+		// allowInsecure was read for vless/trojan (applyStreamToQuery) but NOT
+		// here, so the vmess branch alone lost it. Direction of the failure:
+		// getTLSOptions defaults Insecure=false, so the loss makes verification
+		// STRICTER than configured — a node whose cert is self-signed or issued
+		// for a different name stops connecting at all (handshake error that
+		// reads like a server fault), rather than quietly downgrading security.
+		// The dangerous direction would be the reverse, so this is fail-closed —
+		// but it is still a node the user's other client connects to and ours
+		// does not. Key must be lowercase: decodeVmess does not normalize keys
+		// and getOneOf looks up "insecure"/"allowinsecure" verbatim.
+		if t.AllowInsecure {
+			m["insecure"] = "1"
+		}
+		applyECHKeys(func(k, v string) { m[k] = v }, t)
 	}
 	if st.RealitySettings != nil {
 		r := st.RealitySettings
@@ -811,6 +854,20 @@ func applyStreamToVmessMap(m map[string]interface{}, st *xrayStream) {
 			}
 			if x.Host != "" {
 				m["host"] = x.Host
+			}
+			// mode and the `extra` forward were fixed for vless/trojan
+			// (applyNetworkParamsToQuery) but never here, so vmess+xhttp still
+			// lost mode (fell back to "auto") and every top-level xhttpSettings
+			// field (xmux, downloadSettings, sc*, obfs set). Same silent-fail,
+			// just one protocol later. Semantics mirror the vless branch.
+			if x.Mode != "" {
+				m["mode"] = x.Mode
+			}
+			switch {
+			case len(x.Extra) > 0:
+				m["extra"] = string(x.Extra)
+			case len(x.raw) > 0:
+				m["extra"] = string(x.raw)
 			}
 		}
 	case "tcp":
@@ -948,6 +1005,45 @@ func wsHost(ws *xrayWSSettings) string {
 		}
 	}
 	return ""
+}
+
+// mergeQueryIntoVmessMap copies share-link query params (as built by the
+// sing-box / Clash appliers) into a v2rayN vmess base64-JSON map.
+//
+// It exists so the container branches stop hand-rolling a second, smaller
+// mapping for vmess — that divergence is exactly how allowInsecure / fp /
+// reality got dropped on the vmess path while vless carried them fine.
+//
+// Key handling, all of it load-bearing:
+//   - vmess spells the TRANSPORT "net"; its own "type" key is the legacy TCP
+//     header type (none/http), so "type" must be re-homed, not copied.
+//   - decodeVmess does NOT normalize keys the way ParseUrl normalizes a query
+//     string, so keys have to be stored in the exact spelling the readers use:
+//     lowercase for getOneOf/getOneOfN ("allowinsecure", "servicename"), but
+//     verbatim camelCase for the two fields vmess.go indexes directly.
+//   - getTLSOptions accepts security= OR tls=, but vmess.go's "default the
+//     fingerprint to chrome" branch only looks at tls=, so mirror it.
+func mergeQueryIntoVmessMap(m map[string]string, q url.Values) {
+	for k := range q {
+		v := q.Get(k)
+		lk := strings.ToLower(k)
+		switch lk {
+		case "type":
+			m["net"] = v
+			if _, ok := m["type"]; !ok {
+				m["type"] = "none"
+			}
+		case "security":
+			m["security"] = v
+			if v == "tls" || v == "reality" {
+				m["tls"] = v
+			}
+		case "packetencoding":
+			m["packetEncoding"] = v // vmess.go reads this key verbatim
+		default:
+			m[lk] = v
+		}
+	}
 }
 
 func orDefault(v, def string) string {
