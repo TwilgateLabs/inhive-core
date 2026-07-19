@@ -19,11 +19,15 @@ package ray2sing_test
 import (
 	"context"
 	"encoding/json"
+	"net/url"
 	"strings"
 	"testing"
 
 	"github.com/twilgate/xray2sing/ray2sing"
 )
+
+// urlQueryEscape percent-encodes a value for use inside a share-link query string.
+func urlQueryEscape(s string) string { return url.QueryEscape(s) }
 
 // firstOutbound parses one config (share-link URI or JSON) through the full
 // ray2sing pipeline and returns the first outbound as a generic map.
@@ -347,6 +351,79 @@ func TestCorpus_JSON_TCPHeaderObfs(t *testing.T) {
 	ob2 := mustOutbound(t, plain)
 	if tr := sub(ob2, "transport"); tr != nil {
 		t.Errorf("plain TCP should have no transport, got %v", tr)
+	}
+}
+
+// 2026-07-19 — JSON-ingest must NOT drop xhttpSettings top-level fields.
+//
+// The JSON path decoded xhttpSettings into exactly four fields (path/host/mode/
+// extra) and silently discarded everything else Xray supports (SplitHTTPConfig has
+// ~30: xmux, downloadSettings, sc*, headers, noGRPCHeader, uplinkHTTPMethod, the
+// whole obfs set). Textbook silent-fail: outbound builds, err == nil, traffic runs
+// with the wrong parameters. Fix forwards the whole settings object as `extra`.
+//
+// xmux is the assertion target because it is the field whose absence measurably
+// broke a live CDN backend (unlimited streams onto one never-rotated connection).
+func TestCorpus_JSON_XHTTP_TopLevelFields(t *testing.T) {
+	u := corpusUUID
+	cfg := `{"protocol":"vless","settings":{"vnext":[{"address":"cdn.example.com","port":443,"users":[{"id":"` + u + `","encryption":"none"}]}]},"streamSettings":{"network":"xhttp","security":"tls","tlsSettings":{"serverName":"cdn.example.com","alpn":["h2"]},"xhttpSettings":{"path":"/x","host":"cdn.example.com","mode":"packet-up","noGRPCHeader":true,"xmux":{"maxConcurrency":"16-32","hMaxRequestTimes":"600-900"}}}}`
+	tr := sub(mustOutbound(t, cfg), "transport")
+	if tr == nil || tr["type"] != "xhttp" {
+		t.Fatalf("transport = %v, want xhttp", tr)
+	}
+	xmux, _ := tr["xmux"].(map[string]any)
+	if xmux == nil {
+		t.Fatal("xmux dropped by the JSON transcoder (top-level xhttpSettings fields lost)")
+	}
+	if got := xmux["maxConcurrency"]; got != "16-32" {
+		t.Errorf("xmux.maxConcurrency = %v, want 16-32", got)
+	}
+	if tr["noGRPCHeader"] != true {
+		t.Errorf("noGRPCHeader = %v, want true (top-level field must survive)", tr["noGRPCHeader"])
+	}
+	// sibling: an explicit `extra` still wins wholesale (Xray SplitHTTPConfig.Build
+	// does `c = &extra`), so a top-level xmux next to it must NOT leak through.
+	withExtra := `{"protocol":"vless","settings":{"vnext":[{"address":"cdn.example.com","port":443,"users":[{"id":"` + u + `","encryption":"none"}]}]},"streamSettings":{"network":"xhttp","security":"tls","tlsSettings":{"serverName":"cdn.example.com","alpn":["h2"]},"xhttpSettings":{"path":"/x","host":"cdn.example.com","mode":"packet-up","xmux":{"maxConcurrency":"16-32"},"extra":{"noGRPCHeader":true}}}}`
+	tr2 := sub(mustOutbound(t, withExtra), "transport")
+	if _, leaked := tr2["xmux"]; leaked {
+		t.Errorf("explicit `extra` must replace the whole config; top-level xmux leaked: %v", tr2["xmux"])
+	}
+}
+
+// 2026-07-19 — top-level host/path must beat the `extra` blob.
+//
+// Xray (infra/conf/transport_method.go SplitHTTPConfig.Build) unpacks `extra` into
+// the full config and then force-assigns host/path/mode from the top level. Ours
+// only filled them when `extra` left them empty, so `extra` silently overrode an
+// explicitly requested Host — on a CDN-fronted node that quietly retargets the
+// request to a different backend with no error anywhere.
+func TestCorpus_XHTTP_TopLevelHostBeatsExtra(t *testing.T) {
+	u := corpusUUID
+	link := "vless://" + u + "@1.2.3.4:443?type=xhttp&security=tls&sni=cdn.example.com&encryption=none" +
+		"&host=front.example.com&path=%2Fwanted" +
+		"&extra=" + urlQueryEscape(`{"host":"stale.example.com","path":"/stale","noGRPCHeader":true}`) + "#n"
+	tr := sub(mustOutbound(t, link), "transport")
+	if tr == nil || tr["type"] != "xhttp" {
+		t.Fatalf("transport = %v, want xhttp", tr)
+	}
+	if tr["host"] != "front.example.com" {
+		t.Errorf("host = %v, want front.example.com (top-level must win over extra)", tr["host"])
+	}
+	if tr["path"] != "/wanted" {
+		t.Errorf("path = %v, want /wanted (top-level must win over extra)", tr["path"])
+	}
+	// sibling: fields that only `extra` carries still come through.
+	if tr["noGRPCHeader"] != true {
+		t.Errorf("noGRPCHeader = %v, want true (extra must still supply non-host/path fields)", tr["noGRPCHeader"])
+	}
+	// sibling: when the link omits host/path, extra's values must NOT be wiped.
+	// (Deliberate deviation from Xray, which force-assigns even an empty top level —
+	// see the rationale comment in ray2sing/common.go.)
+	linkNoHost := "vless://" + u + "@1.2.3.4:443?type=xhttp&security=tls&sni=cdn.example.com&encryption=none" +
+		"&extra=" + urlQueryEscape(`{"host":"kept.example.com","path":"/kept"}`) + "#n"
+	tr3 := sub(mustOutbound(t, linkNoHost), "transport")
+	if tr3["host"] != "kept.example.com" {
+		t.Errorf("host = %v, want kept.example.com (empty top level must not wipe extra)", tr3["host"])
 	}
 }
 

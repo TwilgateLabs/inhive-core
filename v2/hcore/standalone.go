@@ -17,6 +17,7 @@ import (
 
 	"github.com/twilgate/inhive-core/v2/config"
 
+	C "github.com/sagernet/sing-box/constant"
 	"github.com/sagernet/sing-box/option"
 )
 
@@ -33,6 +34,13 @@ func RunStandalone(ctx context.Context, inhiveSettingPath string, configPath str
 		EnableOldCommandServer: false,
 		DelayStart:             false,
 		EnableRawConfig:        true,
+		// InHive 2026-07-19: явно снимаем memory-limit вне iOS. Поле — proto3 bool,
+		// его отсутствие = false = «лимит ВКЛЮЧЁН» (start.go: SetMemoryLimit(
+		// C.IsIos || !in.DisableMemoryLimit)), то есть умолчание тут работало
+		// ПРОТИВ намерения. Почему именно !iOS: весь смысл лимита — удержаться в
+		// 50MB-бюджете packet-tunnel extension и не поймать jetsam; такого бюджета
+		// нет ни на одной другой платформе, а standalone (CLI) на iOS и не живёт.
+		DisableMemoryLimit: !C.IsIos,
 	})
 	if err != nil {
 		fmt.Printf("Error in start service %v", err)
@@ -215,8 +223,10 @@ func updateConfigInterval(ctx context.Context, current ConfigResult, inhiveSetti
 				ConfigContent:          new.Config,
 				DelayStart:             false,
 				EnableOldCommandServer: false,
-				DisableMemoryLimit:     false,
-				EnableRawConfig:        true,
+				// Совпадает с первичным стартом в RunStandalone (см. обоснование там):
+				// рестарт по обновлению конфига не должен молча менять режим памяти.
+				DisableMemoryLimit: !C.IsIos,
+				EnableRawConfig:    true,
 			})
 		}
 		current = new

@@ -9,6 +9,69 @@ shipped standalone).
 
 ## [Unreleased]
 
+### Fixed — xhttp parity with upstream Xray (device-verified on Windows/CDN)
+
+Root causes behind "CDN configs lose ~95% of the line, and the number swings between
+measurements". All found by diffing our port against Xray 26.7.11 (the version real
+Happ ships; our previous reference copy, 26.1.13, was six releases stale).
+
+- **`tokenish` padding was rejected by the server ~2.5% of the time.** The server validates
+  padding by its *Huffman-encoded* length (must land in [98, 1002]); we emitted N raw base62
+  characters, which compress to ≈0.8·N — so every request with N < 126 was refused. N was
+  drawn from [100, 1000] per request, making failure a dice roll on each one. Origin logs
+  confirmed the predicted rate (2.83% before → 0.12% after). Ported upstream's
+  Huffman-aware generator; `randStringFromCharset` now uses rejection sampling (naive `% 62`
+  skewed the first 8 alphabet symbols — a statistical tell in a field that exists to hide).
+- **Upload failures were invisible.** `PostPacket` returned the error, but the caller only
+  called `uploadPipeReader.Interrupt()` and never logged it (upstream logs
+  `failed to send upload`). The upload half was blind: a rejected request silently killed the
+  session, and "no errors in the log" was read as "no errors". Added error logging + counters.
+- **Request fingerprint.** We sent a lone `User-Agent: Chrome/...` while upstream sends the full,
+  self-consistent Chrome set (`Sec-CH-UA*`, `Sec-Fetch-*`, `Accept-Language`, `Priority`,
+  `Cache-Control`/`Pragma: no-cache`). A "Chrome" with no Chrome headers is a trivial tell; the
+  missing `no-cache` also let the edge treat a long streaming GET as a cacheable object.
+- **`xmux` defaults were absent**, so a config without an `xmux` block ran with
+  concurrency=0/connections=0 — unlimited streams onto one never-rotated connection, against an
+  edge advertising `MAX_CONCURRENT_STREAMS=128`. Now applies upstream 26.7.11 defaults
+  (`maxConnections 6..6`, `hMaxRequestTimes 600..900`, `hMaxReusableSecs 1800..3000`) to both
+  the upload and download halves. Note: 26.1.13 defaulted to `maxConcurrency 1..1`, which is the
+  opposite trade-off — one connection per stream causes a handshake storm.
+- **Data race on `httpClient`** during xmux rotation: the loop reassigned the variable while
+  in-flight POST goroutines read it. Fixed per upstream (pass the client as a parameter).
+- **`pipe` write path** still carried an `errSlowDown` + `runtime.Gosched()` branch upstream had
+  removed: the writer nudged the reader on every 8KB write, so POSTs shipped fragments instead of
+  the accumulated chunk. Also restored the missing `buf.ReleaseMulti` on the done-path (leak).
+- **POST ordering.** Our `select { <-ctx.Done(); <-wroteRequest.Wait() }` stopped serialising
+  uploads once the context was cancelled — but the receiver reassembles strictly by `seq`, so
+  out-of-order arrival stalls the queue head. Restored upstream's unconditional wait; the hang it
+  was guarding against is now handled properly by scoping requests to the *connection* lifetime
+  (`WithoutCancel(dial-ctx)` + cancel on `onClose`) instead of the dial context.
+- `WaitReadCloser` no longer tears the download stream down on the dial context (asymmetric
+  session death: download died with `context canceled` while the upload goroutine lived on).
+- `decideHTTPVersion`: REALITY and multi-ALPN now resolve to h2 as upstream does (we fell back
+  to HTTP/1.1, where packet-up loses request pipelining entirely).
+- Trailing slash was appended under obfs placements, not just path placement.
+
+### Fixed — platform gates (iOS-only tuning had been leaking onto desktop)
+
+- `SetGCPercent(30)` sat one line *above* its `if C.IsIos` guard — while the comment beside it
+  read "Android/Windows untouched: RAM is plentiful there and throughput matters more". Desktop
+  and Android were collecting garbage 3.3× more often than needed. Now gated.
+- `frameScratchBufferLen` (512KB→64KB, an iOS jetsam fix in our `x/net` fork) applied to every
+  platform, splitting each 1MB body into ~8 lock/flush passes. Now `runtime.GOOS == "ios"` only.
+  Device data: iOS chunks peak ~63KB (cap is a no-op there), Windows averages 339KB, max 976KB —
+  the old comment claimed "~8KB", which was simply wrong.
+- `DisableMemoryLimit` was never sent from the client (proto3 default `false`), so the desktop
+  silently opted into the mobile memory regime; `standalone.go` hardcoded it too.
+
+### Fixed — parser (universal-client invariant)
+
+- JSON ingest dropped ten top-level `xhttpSettings` fields, including `xmux` and
+  `downloadSettings` — third-party subscriptions that ship JSON lost their transport tuning.
+- Top-level `host`/`path` now win over `extra`, matching upstream precedence (with a documented
+  deviation: an *empty* top-level no longer wipes `extra`, which would break working links).
+- Corpus tests added for both; verified to fail without the fixes.
+
 ## [4.7.35] - 2026-07-19
 
 ### Added

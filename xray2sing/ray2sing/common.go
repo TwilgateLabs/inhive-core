@@ -418,11 +418,34 @@ func getTransportOptions(decoded map[string]string) (*option.V2RayTransportOptio
 			if err != nil {
 				return nil, err
 			}
+			// Приоритет top-level над `extra` — parity с Xray.
+			//
+			// Xray (infra/conf/transport_method.go, SplitHTTPConfig.Build): блок
+			// `extra` разворачивается в ПОЛНЫЙ конфиг (`c = &extra`), после чего
+			// host/path/mode ПРИНУДИТЕЛЬНО берутся из top-level:
+			//	extra.Host = c.Host; extra.Path = c.Path; extra.Mode = c.Mode
+			// То есть для этих трёх полей top-level всегда главнее, а остальное
+			// целиком приходит из extra.
+			//
+			// InHive 2026-07-19: у нас было наоборот — top-level подставлялся ТОЛЬКО
+			// когда значение в extra пустое, то есть `extra` молча перебивал явно
+			// указанные в ссылке host/path. Для CDN-фронтинга это тихая подмена
+			// Host-заголовка (запрос уходит не на тот бэкенд) без единой ошибки.
+			//
+			// ⚠️ ОСОЗНАННОЕ ОТКЛОНЕНИЕ от апстрима в одном краю: Xray присваивает
+			// БЕЗУСЛОВНО, поэтому при пустом top-level он ЗАТИРАЕТ непустой
+			// extra.Host в "". Мы в этом случае оставляем значение из extra. Причина:
+			// у Xray host/path в top-level всегда заполнены его собственным
+			// URI→config конвертером, а к нам ссылка может прийти вообще без этих
+			// query-параметров — безусловное присваивание сломало бы конфиг, который
+			// сейчас рабочий (пустой Host → getBaseRequestURL уедет на SNI/IP вместо
+			// CDN-хоста). Поэтому: непустой top-level побеждает всегда, пустой —
+			// не затирает.
 			transportOptions.XHTTPOptions.V2RayXHTTPBaseOptions = x.V2RayXHTTPBaseOptions
-			if transportOptions.XHTTPOptions.Host == "" {
+			if host != "" || transportOptions.XHTTPOptions.Host == "" {
 				transportOptions.XHTTPOptions.Host = host
 			}
-			if transportOptions.XHTTPOptions.Path == "" {
+			if path != "" || transportOptions.XHTTPOptions.Path == "" {
 				transportOptions.XHTTPOptions.Path = path
 			}
 			if dl := x.DownloadSettings; dl != nil {

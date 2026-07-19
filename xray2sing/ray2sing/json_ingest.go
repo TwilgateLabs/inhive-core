@@ -306,6 +306,33 @@ type xrayXHTTPSettings struct {
 	Host  string          `json:"host"`
 	Mode  string          `json:"mode"`
 	Extra json.RawMessage `json:"extra"`
+
+	// raw — весь объект xhttpSettings как он пришёл. Заполняется в
+	// UnmarshalJSON ниже и нужен, чтобы НЕ терять top-level поля, которых нет в
+	// этой структуре (xmux, downloadSettings, sc*, headers, noGRPCHeader,
+	// uplinkHTTPMethod и весь obfs-набор). См. applyStreamToQuery.
+	raw json.RawMessage
+}
+
+// UnmarshalJSON сохраняет исходный объект целиком.
+//
+// InHive 2026-07-19: JSON-путь разбирал xhttpSettings ровно в 4 поля
+// (path/host/mode/extra) и МОЛЧА выбрасывал всё остальное, что умеет Xray
+// (infra/conf/transport_method.go SplitHTTPConfig — там 30 полей). Чужая
+// подписка в JSON-формате с `xmux` или `downloadSettings` приезжала к нам
+// урезанной: конфиг строился, err == nil, трафик шёл по неверным параметрам —
+// ровно тот silent-fail, из-за которого JSON-ingest уже ловили в аудите
+// 2026-06-26. Держать здесь копию всех 30 полей — гарантированный источник
+// дрейфа при каждом апстрим-релизе, поэтому пробрасываем объект целиком.
+func (x *xrayXHTTPSettings) UnmarshalJSON(data []byte) error {
+	type plain xrayXHTTPSettings
+	var p plain
+	if err := json.Unmarshal(data, &p); err != nil {
+		return err
+	}
+	*x = xrayXHTTPSettings(p)
+	x.raw = append(json.RawMessage(nil), data...)
+	return nil
 }
 
 // uriFromXrayOutbound builds the matching share-link URI for the supported
@@ -658,12 +685,26 @@ func applyNetworkParamsToQuery(q url.Values, net string, st *xrayStream) {
 			if x.Mode != "" {
 				q.Set("mode", x.Mode)
 			}
-			if len(x.Extra) > 0 {
-				// Forward the xhttp `extra` blob (split-download endpoint, custom
-				// headers, noGRPCHeader). getTransportOptions unmarshals decoded["extra"]
-				// into XHTTPExtra; without this the JSON path silently dropped the whole
-				// split-download config. (Audit 2026-06-26.)
+			// Пробрасываем полный объект настроек как `extra`.
+			//
+			// getTransportOptions разбирает decoded["extra"] в XHTTPExtra (а тот —
+			// в V2RayXHTTPBaseOptions + downloadSettings), то есть `extra` у нас и
+			// есть канал для ВСЕГО, что не влезает в query-параметры ссылки.
+			//
+			// Семантика повторяет Xray (SplitHTTPConfig.Build): если `extra` задан
+			// явно — он и есть полный конфиг, top-level поля-соседи отбрасываются
+			// (у Xray `c = &extra`); если не задан — полным конфигом является сам
+			// объект настроек. host/path/mode в обоих случаях приезжают отдельными
+			// query-параметрами и перекрывают extra на стороне парсера (common.go).
+			//
+			// InHive 2026-07-19: раньше при отсутствии `extra` терялись ВСЕ
+			// остальные top-level поля (xmux, downloadSettings, sc*, headers,
+			// noGRPCHeader, uplinkHTTPMethod, obfs-набор) — см. UnmarshalJSON выше.
+			switch {
+			case len(x.Extra) > 0:
 				q.Set("extra", string(x.Extra))
+			case len(x.raw) > 0:
+				q.Set("extra", string(x.raw))
 			}
 		}
 	case "tcp":

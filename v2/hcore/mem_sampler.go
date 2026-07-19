@@ -22,6 +22,7 @@ import (
 	runtimeDebug "runtime/debug"
 	"runtime/pprof"
 	"strconv"
+	"strings"
 	"time"
 
 	"github.com/twilgate/inhive-core/v2/config"
@@ -179,6 +180,44 @@ func runMemSampler(ctx context.Context) {
 					" gc=" + strconv.FormatUint(gc, 10)
 			}
 			Log(LogLevel_INFO, LogType_CORE, line)
+
+			// InHive instrumentation (TEMPORARY, see v2rayxhttp/chunkhist.go): packet-up
+			// POST payload sizes as an INTERVAL snapshot, into the log stream readable on
+			// Windows/Android (memDiagAppend below is iOS-only — memDiagDir returns ""
+			// elsewhere — and Windows is exactly where we need it).
+			//
+			// Level is WARN, not INFO, on purpose: the client configures the core log
+			// level as 'warn' by default (singbox_config_builder.dart `_baseLog`), so an
+			// INFO line never reaches the user-visible Logs tab. goroutines are carried
+			// on the same line because a goroutine count climbing in step with the decay
+			// would point at leaked in-flight POSTs (PostPacket runs under
+			// context.WithoutCancel with no timeout) rather than at chunk starvation.
+			if postHist := xhttp.PostChunkHistogram(int64(memSamplerInterval / time.Second)); !strings.Contains(postHist, "[n=0 ") {
+				lines := []string{
+					postHist + " goroutines=" + strconv.Itoa(goroutines),
+					xhttp.XmuxState(),
+					// Счётчики отказов upload-POST'ов. Именно их отсутствие делало
+					// upload-половину слепой: ошибка PostPacket нигде не логировалась
+					// (см. chunkhist.go recordUploadError).
+					xhttp.UploadErrorState(),
+				}
+				for _, l := range lines {
+					Log(LogLevel_WARNING, LogType_CORE, l)
+				}
+				// InHive 2026-07-19: дублируем в sing-box-логгер, т.е. в data/box.log.
+				//
+				// Зачем: Log() выше публикует ТОЛЬКО в gRPC-поток (logproto.go —
+				// static.logObserver.Publish), который виден во вкладке «Логи» в UI и
+				// никогда не попадает в файл. Из-за этого снять динамику можно было
+				// лишь скриншотами с устройства. box.log забирается с машины файлом,
+				// поэтому диагностику нужно иметь в обоих местах.
+				if f := static.CoreLogFactory; f != nil {
+					xl := f.NewLogger("xhttp-diag")
+					for _, l := range lines {
+						xl.Warn(l)
+					}
+				}
+			}
 
 			if tick%6 == 0 {
 				// inhive build-129: enrich the persistent diag line with the xhttp
