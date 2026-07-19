@@ -18,6 +18,7 @@ shipped standalone).
 - iOS: the URL-test carousel no longer probes every server every 5 minutes on a connected tunnel. A watcher was keeping it perpetually awake (it re-touched the monitor on each event); that constant TLS handshaking was pure idle waste in the Network Extension and preceded out-of-memory kills. The carousel now sleeps when the server list isn't open; on-device it dropped idle GC from a steady churn to ~0-1/min and kept the background footprint a flat line. Server-list pings still work on demand.
 - iOS: dropped the closed-connection history ring from 1000 to 50 entries (~1.35MB reclaimed in the tight NE budget). Active connection tracking is unchanged.
 - iOS: removed a redundant heartbeat loop (duplicated the memory sampler and did a stop-the-world `ReadMemStats` every minute) and three dead broadcaster goroutines that were never published to.
+- The URL-test carousel's 10 worker goroutines now start on first use instead of unconditionally at tunnel start — a tunnel whose server list is never opened no longer keeps them parked for its whole lifetime.
 
 ## [4.7.32] - 2026-07-18
 
