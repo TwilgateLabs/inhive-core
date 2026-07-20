@@ -9,6 +9,25 @@ shipped standalone).
 
 ## [Unreleased]
 
+### Fixed — log completeness: debug mode reaches the engine, stream survives on disk
+
+- **`ChangeInhiveSettings` now pushes `log-level` into the logger factory of the
+  *running* engine.** The factory level was frozen at whatever the config said at
+  connect time (`warn`), and nothing ever called `SetLevel` on the live box — so the
+  Logs-tab TRACE/DEBUG mode raised only the hcore stream filter while `box.log` (the
+  file the diagnostic export ships to support) never contained a single debug line.
+  Scope-tight per the 4.7.30 lesson: the push changes the level and nothing else, a
+  fresh engine still takes its level from its own config (no persisted trace
+  resurrection), and an unknown level string is a no-op instead of ParseLevel's
+  trace fallback. Covered by `TestChangeInhiveSettings_RaisesLiveEngineLogLevel`
+  (real sing-box factory, real writer) plus two invariant tests in `sing-box/log`
+  pinning the platform-writer bypass the Logs tab depends on.
+- **`hcore.Log` now duplicates the stream to `<workingDir>/data/core.log`.** The
+  stream previously existed only in a 200-line in-memory history: everything before
+  the UI subscribed or after the process died was unrecoverable. Same level gate as
+  the stream, lines before Setup are buffered and flushed, rotation mirrors box.log
+  (5 MB cap, one `.1` backup — at most two caps on disk).
+
 ### Fixed — xhttp transport ignored the reset signal (sleep/wake, config restart)
 
 - **The xhttp (CDN) transport did not implement `Close()` — it was a bare `return nil`.**

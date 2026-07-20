@@ -182,6 +182,11 @@ func ChangeInhiveSettings(in *ChangeInhiveSettingsRequest, insert bool) (*CoreIn
 		static.logLevel = LogLevel_INFO
 	}
 	static.debug = static.debug || static.logLevel <= LogLevel_DEBUG
+	// Донести уровень и до фабрики РАБОТАЮЩЕГО движка (box.log + все его
+	// логгеры): раньше уровень фабрики оставался вмороженным в конфиг момента
+	// connect'а, и «TRACE/DEBUG» на вкладке «Логи» не давал debug-строк движка
+	// в box.log. No-op когда туннеля нет. См. log_level.go.
+	applyLogLevelToLiveBox(opts.LogLevel)
 
 	if insert && in.InhiveSettingsJson != "" {
 		full, err := json.Marshal(opts)

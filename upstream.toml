@@ -98,6 +98,7 @@ divergences = [
   "common/xray/ — порт buf/pipe/signal/stat из Xray (отдельная запись ниже).",
   "option/v2ray_transport.go — XHTTP/gRPC/HTTPUpgrade поля сверх апстрима (Xray parity).",
   "iOS-гейты по памяти NE (50MB jetsam-бюджет): closedConnections history 1000->50 и др.",
+  "log/platform_writer_level_test.go — наш инвариант-тест: platformWriter получает все уровни в обход уровня фабрики (на этом стоит вкладка «Логи»), SetLevel живьём гейтит файловый writer (box.log).",
   "Полный перечень — core/CHANGELOG.md; форк-wide, построчно тут не разворачиваем.",
 ]
 

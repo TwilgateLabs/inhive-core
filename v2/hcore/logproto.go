@@ -17,6 +17,11 @@ func Log(level LogLevel, typ LogType, message ...any) {
 	}
 	msg := fmt.Sprint(message...)
 
+	// Файловый след стрима: то же, что уходит подписчикам, дописывается в
+	// <workingDir>/data/core.log — иначе всё до подписки UI/после смерти
+	// процесса терялось. См. log_file.go.
+	coreLogAppend(level, typ, msg)
+
 	static.logObserver.Publish(&LogMessage{
 		Level:   level,
 		Type:    typ,

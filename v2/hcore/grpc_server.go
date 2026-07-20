@@ -13,6 +13,7 @@ import (
 	"io"
 	"net"
 	"os"
+	"path/filepath"
 	"runtime"
 	"strconv"
 	"strings"
@@ -79,6 +80,11 @@ func Setup(params *SetupRequest, platformInterface libbox.PlatformInterface) err
 	sTempPath = params.TempDir
 	sUserID = os.Getuid()
 	sGroupID = os.Getgid()
+
+	// Персистентный core.log (файловая копия лог-стрима) — рядом с
+	// stderr*.log/heartbeat в data/. До этой точки строки копились в backlog
+	// (workingDir был неизвестен) и сейчас выливаются в файл. См. log_file.go.
+	initCoreLog(filepath.Join(sWorkingPath, "data"))
 
 	// Heartbeat: post-mortem trail for silent process death. sync.Once so
 	// repeated Setup() (mode OLD + GRPC) don't spawn duplicate goroutines.
