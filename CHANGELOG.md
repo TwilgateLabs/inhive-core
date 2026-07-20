@@ -9,6 +9,23 @@ shipped standalone).
 
 ## [Unreleased]
 
+### Fixed — xhttp transport ignored the reset signal (sleep/wake, config restart)
+
+- **The xhttp (CDN) transport did not implement `Close()` — it was a bare `return nil`.**
+  sing-box resets the network on a Windows suspend/resume by calling `Close()` on each
+  outbound's transport so it re-dials fresh; every other protocol honoured this, xhttp
+  silently ignored it. Its warm xmux pool (`maxConnections 6..6` on Xray 26.7.11 defaults)
+  survived the reset sitting on top of dead TCP, so after wake the tunnel hung until an
+  emergency timer fired — h2 `ReadIdleTimeout` 45s + 15s ping, h3 QUIC idle up to 300s —
+  while other protocols recovered at once. `Close()` now resets both xmux pools and actively
+  tears down the h1/h2/h3 connections underneath (h2 via the existing `v2rayhttp.ResetTransport`);
+  the manager lazily re-creates dialers, so the client stays usable for new dials. In-flight
+  senders self-heal — their POST fails on the closed connection and the send loop rotates to a
+  fresh client. Same bare-stub also leaked live H2 sessions on every config restart, now closed.
+- **Windows power events are now logged.** `notifyWindowsPowerEvent` emitted nothing — field
+  diagnostics could not even tell whether a suspend/resume reached the engine. Suspend, resume,
+  and the ignored-resume case are now logged at a level that reaches the app's Logs tab.
+
 ### Fixed — TCP NAT collision on the system stack (sing-tun 0.8.9 → 0.8.11)
 
 - **Two connections from the same source address could share one NAT port, mixing their
