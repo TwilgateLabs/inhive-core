@@ -7,6 +7,7 @@ import (
 	"fmt"
 	"os"
 	"runtime"
+	"sync/atomic"
 	"time"
 
 	"github.com/sagernet/sing-box/adapter"
@@ -68,7 +69,19 @@ func (h *InhiveInstance) readStatus(prev *SystemInfo) *SystemInfo {
 	return &message
 }
 
+// diagFirstRPCLogged — one-shot гейт для TEMPORARY-диагностики бага «ядро не
+// отвечает 10с» (2026-07-22). GetSystemInfo — первый RPC, которым app проверяет
+// готовность ядра (bridge.dart _ensureCoreReady поллит его). Логируем ПЕРВЫЙ
+// вызов на WARNING (в core.log): пара к «gRPC listener ready» из grpc_server.go
+// даёт при следующем сбое однозначную картину — дошёл ли RPC вообще и через
+// сколько после старта listener'а. atomic-once, чтобы не спамить (poll идёт
+// каждые 200мс). Снять вместе с парной строкой, когда баг пойман.
+var diagFirstRPCLogged atomic.Bool
+
 func (s *CoreService) GetSystemInfo(ctx context.Context, req *hcommon.Empty) (resp *SystemInfo, err error) {
+	if diagFirstRPCLogged.CompareAndSwap(false, true) {
+		Log(LogLevel_WARNING, LogType_CORE, "first GetSystemInfo received from app (diag: core reachable)")
+	}
 	return static.readStatus(nil), nil
 
 }
