@@ -9,6 +9,32 @@ shipped standalone).
 
 ## [Unreleased]
 
+### Fixed — hot-add accepts every content class the full build accepts
+
+- **`AddOutbound` no longer fails with `[SingboxParser] unmarshal error: EOF` on
+  servers from container-format subscriptions.** The app stores such a server's
+  identity as a single sing-box outbound JSON object; `parseConfigContent`'s JSON
+  branch wrapped an *empty* map into itself (`jsonObj["outbounds"] =
+  []interface{}{jsonObj}` — a cycle), `json.MarshalIndent` failed with its error
+  discarded, and `UnmarshalJSONContext(nil)` surfaced as EOF. Every soft-switch to
+  such a server fell back to a full engine rebuild (visible reconnect) while the
+  full config build parsed the same server fine (it goes through
+  `ray2sing.Ray2Singbox`). The single-object wrap now uses the parsed object,
+  picks the container by the registry (`wireguard`/`awg` → `endpoints[]`, with an
+  outbounds retry for legacy-form objects), bare JSON *arrays* of outbounds parse
+  (the old `[]map[string]interface{}` assert was unreachable), and a failed
+  sing-box-JSON interpretation falls through to the canonical ray2sing ingest
+  (Xray JSON, Happ arrays, SIP008) instead of aborting — the single-URI path and
+  the subscription path can no longer disagree on what is parseable. Guarded by
+  the `TestParseSingleServerContent` table (22 content classes) and three
+  live-box `TestHotAdd_*` integration tests.
+- **`AddOutbound`/`RemoveOutbound` handle endpoint protocols.** Parsed
+  `endpoints[]` (wireguard/awg — sing-box 1.13 keeps them out of `outbounds[]`)
+  were ignored, so a WG hot-add died with "no usable outbound in content". They
+  are now created through the endpoint manager (same started-mode semantics),
+  join selectors via the `OutboundManager.Outbound` endpoint fallback, and
+  `RemoveOutbound` falls back to the endpoint manager on remove.
+
 ### Fixed — log completeness: debug mode reaches the engine, stream survives on disk
 
 - **`ChangeInhiveSettings` now pushes `log-level` into the logger factory of the

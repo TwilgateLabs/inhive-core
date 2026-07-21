@@ -3,7 +3,9 @@ package hcore
 
 import (
 	"context"
+	"errors"
 	"fmt"
+	"os"
 	"runtime"
 	"time"
 
@@ -188,7 +190,8 @@ func (h *InhiveInstance) AddOutbound(in *AddOutboundRequest) (*AddOutboundRespon
 		return nil, E.New("add outbound: core not started")
 	}
 	// Тот же парс-пайплайн, что у Parse RPC: share-link ИЛИ sing-box JSON
-	// (одиночный outbound-объект оборачивается в outbounds:[...] внутри).
+	// (одиночный outbound-объект оборачивается в outbounds:[...] внутри,
+	// endpoint-типа — в endpoints:[...]; см. config.parseSingboxJSON).
 	opts, parseErr := config.ParseConfig(h.Context(), &config.ReadOptions{Content: in.Content}, true, static.InhiveOptions, false)
 	if parseErr != nil {
 		return nil, E.Cause(parseErr, "add outbound: parse")
@@ -204,14 +207,27 @@ func (h *InhiveInstance) AddOutbound(in *AddOutboundRequest) (*AddOutboundRespon
 			real = append(real, i)
 		}
 	}
-	if len(real) == 0 {
+	if len(real) == 0 && len(opts.Endpoints) == 0 {
 		return nil, E.New("add outbound: no usable outbound in content")
 	}
-	// Первый «настоящий» — главный (его тег идёт в селекторы и в ответ);
-	// остальные (helper'ы вида utproto-пары с detour) создаются как есть.
-	mainIdx := real[0]
-	if in.TagOverride != "" {
-		opts.Outbounds[mainIdx].Tag = in.TagOverride
+	// Главный (его тег идёт в селекторы и в ответ) — первый «настоящий»
+	// outbound, а если их нет — первый endpoint (wireguard/awg: sing-box 1.13+
+	// держит их в endpoints[], создаются через EndpointManager; в селекторе они
+	// полноправные члены — adapter.Endpoint реализует adapter.Outbound, а
+	// OutboundManager.Outbound(tag) резолвит endpoint-теги fallback'ом).
+	// Остальные (helper'ы вида utproto-пары с detour) создаются как есть.
+	mainIsEndpoint := len(real) == 0
+	var mainTag string
+	if mainIsEndpoint {
+		if in.TagOverride != "" {
+			opts.Endpoints[0].Tag = in.TagOverride
+		}
+		mainTag = opts.Endpoints[0].Tag
+	} else {
+		if in.TagOverride != "" {
+			opts.Outbounds[real[0]].Tag = in.TagOverride
+		}
+		mainTag = opts.Outbounds[real[0]].Tag
 	}
 	logFactory := h.CoreLogFactory
 	if logFactory == nil {
@@ -231,7 +247,20 @@ func (h *InhiveInstance) AddOutbound(in *AddOutboundRequest) (*AddOutboundRespon
 			return nil, E.Cause(createErr, "add outbound: create ", ob.Tag)
 		}
 	}
-	mainTag := opts.Outbounds[mainIdx].Tag
+	for i := range opts.Endpoints {
+		ep := opts.Endpoints[i]
+		createErr := box.Endpoint().Create(
+			h.Context(),
+			box.Router(),
+			logFactory.NewLogger("endpoint/hotadd["+ep.Tag+"]"),
+			ep.Tag,
+			ep.Type,
+			ep.Options,
+		)
+		if createErr != nil {
+			return nil, E.Cause(createErr, "add outbound: create endpoint ", ep.Tag)
+		}
+	}
 	created, loaded := box.Outbound().Outbound(mainTag)
 	if !loaded {
 		return nil, E.New("add outbound: created outbound vanished: ", mainTag)
@@ -274,7 +303,14 @@ func (h *InhiveInstance) RemoveOutbound(in *RemoveOutboundRequest) (*hcommon.Res
 			selector.RemoveMember(in.OutboundTag)
 		}
 	}
-	if removeErr := box.Outbound().Remove(in.OutboundTag); removeErr != nil {
+	removeErr := box.Outbound().Remove(in.OutboundTag)
+	if errors.Is(removeErr, os.ErrInvalid) {
+		// Не найден среди outbound'ов — hot-added wireguard/awg живёт в
+		// EndpointManager (оба менеджера возвращают os.ErrInvalid на незнакомый
+		// тег). Симметрия к AddOutbound, который создаёт endpoint'ы там же.
+		removeErr = box.Endpoint().Remove(in.OutboundTag)
+	}
+	if removeErr != nil {
 		return &hcommon.Response{
 			Code:    hcommon.ResponseCode_FAILED,
 			Message: removeErr.Error(),
