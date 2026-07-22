@@ -51,13 +51,13 @@ func getRandomAvailblePort() (uint16, error) {
 // 9.9.9.9:443: operation not permitted` for the multi-DoH resolver). This is the
 // exact registration the main tunnel does (start.go StartService).
 //
-// Gated to Android on purpose: iOS runs the probe inside the NE core (whose dials
-// never loop back through the TUN) or a no-TUN standalone core, and Windows'
-// wintun does not EPERM own-process sockets — both work today, so we leave their
-// side-instance context byte-identical to avoid regressing the just-stabilised
-// iOS ping path. baseContext (libbox.FromContext) does NOT pre-register
-// adapter.PlatformInterface, so MustRegister here is a first registration (no
-// double-register panic). See [[core-crash-fixes-ping-sweep]] neighbour work.
+// Gated to Android + iOS-app-process (see the inline comment below for the full
+// iOS rationale — 4.8.0+142 post-mortem). Windows' wintun does not EPERM
+// own-process sockets, and the iOS NE process's sockets already bypass its own
+// tun — both stay byte-identical (no registration). baseContext
+// (libbox.FromContext) does NOT pre-register adapter.PlatformInterface, so
+// MustRegister here is a first registration (no double-register panic).
+// See [[core-crash-fixes-ping-sweep]] neighbour work.
 func sideInstanceContext(serviceCtx context.Context) context.Context {
 	if static.globalPlatformInterface == nil {
 		return serviceCtx
@@ -77,12 +77,35 @@ func sideInstanceContext(serviceCtx context.Context) context.Context {
 	// tunnel. gstatic / payload hosts resolve REMOTELY at the exit, so only the server
 	// address needed this. See the IP-vs-domain probe-divergence trace.
 	ctx := libbox.FromContext(serviceCtx, static.globalPlatformInterface)
-	// protect(fd) via VpnService.protect is ANDROID-ONLY: without it an Android
-	// side-instance socket is captured by the main TUN route → EPERM (device-log
-	// 2026-07-08). iOS NE / no-TUN standalone never loop own-process sockets through a
-	// TUN, so registering the PlatformInterface adapter there is unnecessary — we keep
-	// the settled iOS path byte-identical except for the now-working type:local resolver.
-	if C.IsAndroid {
+	// Register the PlatformInterface adapter for the side-instance on Android and
+	// on iOS-in-the-APP-process (standalone core). NOT under the NE.
+	//   - Android: protect(fd) via VpnService.protect stops the side-instance
+	//     socket being captured by the main TUN route → EPERM (device-log 2026-07-08).
+	//   - iOS app process (added 2026-07-22): the OLD assumption ("no-TUN standalone
+	//     never loops own-process sockets through a TUN, so it's unnecessary") is
+	//     WRONG when the SYSTEM VPN (our NE PacketTunnelProvider) is up — it holds
+	//     the default route, so the app-process standalone's probe dials get captured
+	//     by that utun and egress THROUGH the tunnel instead of the phone's real
+	//     network → per-server pings of a SECOND subscription measured reachability
+	//     from the exit, not the phone → false × for phone-reachable servers
+	//     (4.8.0+140/142 regression). Without a platform interface the side-instance
+	//     box builds its OWN tun.DefaultInterfaceMonitor, which reports the system
+	//     default route = utunN while the VPN is up, and auto_detect_interface binds
+	//     probe dials INTO the tunnel (device diag 2026-07-22: probe errors carry no
+	//     "dial en0 (17)" prefix + the NE's box.log sees the probes' DNS). Registering
+	//     the PlatformInterface routes the side-instance dialer through the platform
+	//     monitor (StandalonePlatformInterface reports the PHYSICAL interface — utun
+	//     filtered via prohibitedInterfaceTypes:[.other]) → IP_BOUND_IF(en0/pdp_ip)
+	//     bypasses the tunnel (works while includeAllNetworks stays false).
+	//     Byte-identical to the NE's own dial path, whose en0 dials are proven
+	//     working in device logs. See [[debug_ios_ping_stale_green_ne_reroute_2026_07_22]].
+	//   - iOS NE process EXCLUDED on purpose: NE-process sockets already bypass the
+	//     NE's own tun (Apple guarantee) so the bind buys nothing there, and the NE's
+	//     InhivePlatformInterface holds a SINGLE NWPathMonitor — a side-instance
+	//     (speedTest at VPN-on runs INSIDE the NE) calling start/closeDefaultInterface-
+	//     Monitor on it would cancel/replace the LIVE TUNNEL's monitor and break the
+	//     tunnel's dial routing. Keep NE side-instances byte-identical to before.
+	if C.IsAndroid || (C.IsIos && !static.globalPlatformInterface.UnderNetworkExtension()) {
 		service.MustRegister[adapter.PlatformInterface](ctx, libbox.WrapPlatformInterface(static.globalPlatformInterface))
 	}
 	return ctx
