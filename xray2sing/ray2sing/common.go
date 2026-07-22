@@ -24,6 +24,11 @@ const USER_AGENT string = "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit
 type ParserFunc func(string) (*option.Outbound, error)
 type EndpointParserFunc func(string) (*T.Endpoint, error)
 
+// PairParserFunc — парсер схемы, чья одна ссылка даёт ПАРУ связанных
+// detour'ом outbound'ов: (main, helper). main дайлит через helper. См.
+// pairParsers/UTProtoSingbox.
+type PairParserFunc func(string) (main *option.Outbound, helper *option.Outbound, err error)
+
 func getTLSOptions(decoded map[string]string) T.OutboundTLSOptionsContainer {
 	if !(decoded["tls"] == "tls" || decoded["tls"] == "reality" || decoded["security"] == "tls" || decoded["security"] == "reality") {
 		return T.OutboundTLSOptionsContainer{TLS: nil}

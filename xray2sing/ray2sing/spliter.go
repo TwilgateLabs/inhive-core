@@ -21,6 +21,12 @@ func buildRegex() *regexp.Regexp {
 	for k := range xrayConfigTypes {
 		prefixSet[k] = struct{}{}
 	}
+	// pairParsers (utproto://): без этого splitByPrefix не видит границу
+	// utproto-нод и склеивает несколько подряд в один «конфиг» → теряются все
+	// кроме первой.
+	for k := range pairParsers {
+		prefixSet[k] = struct{}{}
+	}
 
 	var prefixes []string
 	for k := range prefixSet {

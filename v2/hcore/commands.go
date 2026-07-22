@@ -12,6 +12,7 @@ import (
 
 	"github.com/sagernet/sing-box/adapter"
 	"github.com/sagernet/sing-box/log"
+	"github.com/sagernet/sing-box/option"
 	"github.com/sagernet/sing-box/protocol/group"
 	"github.com/twilgate/inhive-core/v2/config"
 	hcommon "github.com/twilgate/inhive-core/v2/hcommon"
@@ -241,6 +242,29 @@ func (h *InhiveInstance) AddOutbound(in *AddOutboundRequest) (*AddOutboundRespon
 			opts.Outbounds[real[0]].Tag = in.TagOverride
 		}
 		mainTag = opts.Outbounds[real[0]].Tag
+	}
+	// Пара с ВНУТРЕННИМ detour (utproto: vless-main → utproto-helper из одной
+	// ссылки). mainTag уже уникален в живом боксе (Dart шлёт TagOverride =
+	// probe-tag), а helper несёт counter-тег из xray2sing, где counter
+	// сбрасывается на КАЖДЫЙ AddOutbound-вызов. Два резидента-utproto (тем более
+	// тёзки) дали бы одинаковый helper-тег → столкновение в боксе: main одного
+	// пингуется через транспорт другого. Деривуем helper-тег из уникального
+	// mainTag и чиним main.detour. Обобщается на любую одиночную detour-пару.
+	if !mainIsEndpoint {
+		if dw, ok := opts.Outbounds[real[0]].Options.(option.DialerOptionsWrapper); ok {
+			d := dw.TakeDialerOptions()
+			if d.Detour != "" {
+				for _, j := range real {
+					if j != real[0] && opts.Outbounds[j].Tag == d.Detour {
+						helperTag := mainTag + " · " + opts.Outbounds[j].Type
+						opts.Outbounds[j].Tag = helperTag
+						d.Detour = helperTag
+						break
+					}
+				}
+			}
+			dw.ReplaceDialerOptions(d)
+		}
 	}
 	logFactory := h.CoreLogFactory
 	if logFactory == nil {

@@ -57,7 +57,9 @@ var configTypes = map[string]ParserFunc{
 	"mieru://":   MieruSingbox,
 	"mierus://":  MieruSingbox,
 	"psiphon://": PsiphonSingbox,
-	// "dnstt://" removed 2026-04-19 (dehiddification) — re-add with clean net2share/vaydns upstream wrapper
+	// dnstt: снималось 2026-04-19 (дегиддификация), ре-добавлено 2026-07-22 —
+	// клиентский outbound зарегистрирован, поля 1:1 с Dart (см. dnstt.go).
+	"dnstt://": DnsttSingbox,
 }
 var endpointParsers = map[string]EndpointParserFunc{
 	"wg://":        AWGSingbox,
@@ -65,6 +67,15 @@ var endpointParsers = map[string]EndpointParserFunc{
 	"warp://":      WarpSingbox,
 	"awg://":       AWGSingbox,
 	"[Interface]":  AWGSingboxTxt,
+}
+
+// pairParsers — схемы, чья ОДНА ссылка разворачивается в ПАРУ связанных
+// detour'ом outbound'ов (main + underlying-транспорт). Сейчас только utproto:
+// vless-main дайлит через utproto-helper. Обычные ParserFunc возвращают один
+// outbound и для пары не годятся. Тег/detour-линковку доделывает
+// GenerateConfigLite.
+var pairParsers = map[string]PairParserFunc{
+	"utproto://": UTProtoSingbox,
 }
 
 // xrayConfigTypes — legacy map для случаев когда подписка явно требует xray format.
@@ -90,6 +101,10 @@ func decodeUrlBase64IfNeeded(config string) string {
 type OutEnd struct {
 	outbound *T.Outbound
 	endpoint *T.Endpoint
+	// helper — underlying-транспорт для outbound'а из pairParsers (utproto:
+	// main.outbound=vless дайлит ЧЕРЕЗ helper=utproto). nil для одиночных
+	// парсеров. GenerateConfigLite линкует main.detour → helper.tag.
+	helper *T.Outbound
 }
 
 func processSingleConfig(config string, useXrayWhenPossible bool) (outend *OutEnd, err error) {
@@ -122,6 +137,17 @@ func processSingleConfig(config string, useXrayWhenPossible bool) (outend *OutEn
 		for k, v := range endpointParsers {
 			if strings.HasPrefix(config, k) {
 				outend.endpoint, err = v(config)
+				break
+			}
+		}
+	}
+
+	// Pair-схемы (utproto): одна ссылка → main + helper. Пробуем только если
+	// ни один одиночный парсер не сработал.
+	if outend.outbound == nil && outend.endpoint == nil {
+		for k, v := range pairParsers {
+			if strings.HasPrefix(config, k) {
+				outend.outbound, outend.helper, err = v(config)
 				break
 			}
 		}
@@ -192,7 +218,32 @@ func GenerateConfigLite(input string, useXrayWhenPossible bool) (*option.Options
 				continue
 			}
 
-			if outend.outbound != nil {
+			if outend.outbound != nil && outend.helper != nil {
+				// Пара из pairParsers (utproto). helper — underlying-транспорт
+				// main'а: main дайлит ЧЕРЕЗ helper (main.detour = helper.tag), а
+				// helper продолжает внешнюю ' -> ' цепочку (detourTag). Суффиксуем
+				// оба тега counter'ом (уникальность в пределах ОДНОГО парса — в
+				// подписке counter монотонный по всем нодам). main добавляем
+				// ПЕРВЫМ: hcore.AddOutbound берёт real[0] как главный (в селектор).
+				main := outend.outbound
+				helper := outend.helper
+				main.Tag += " § " + strconv.Itoa(counter)
+				counter += 1
+				helper.Tag += " § " + strconv.Itoa(counter)
+				if dialerOpt, ok := main.Options.(T.DialerOptionsWrapper); ok {
+					d := dialerOpt.TakeDialerOptions()
+					d.Detour = helper.Tag
+					dialerOpt.ReplaceDialerOptions(d)
+				}
+				if dialerOpt, ok := helper.Options.(T.DialerOptionsWrapper); ok {
+					d := dialerOpt.TakeDialerOptions()
+					d.Detour = detourTag
+					dialerOpt.ReplaceDialerOptions(d)
+				}
+				detourTag = main.Tag
+				outbounds = append(outbounds, *main, *helper)
+
+			} else if outend.outbound != nil {
 				outend.outbound.Tag += " § " + strconv.Itoa(counter)
 				if dialerOpt, ok := outend.outbound.Options.(T.DialerOptionsWrapper); ok {
 					d := dialerOpt.TakeDialerOptions()
