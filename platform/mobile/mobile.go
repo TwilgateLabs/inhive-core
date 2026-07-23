@@ -67,6 +67,28 @@ func Parse(content string) (configJSON string, err error) {
 	return string(out), nil
 }
 
+// ConvertToShareLinks renders ANY subscription body (base64 / share-link list /
+// container JSON / single outbound-JSON / Clash YAML) into a newline-joined list
+// of canonical per-server records: a canonical share-link where the node type
+// round-trips, otherwise the minified single-node sing-box JSON so no server is
+// lost. Exact sibling of Parse — a PURE in-process call (the standalone
+// main-process core is MobileSetup'd at launch; no running NE/VPN required), so
+// the Flutter app can call it with the VPN off. Errors surface as a normal
+// (string, error) return, the same convention Parse uses on this surface.
+// Added for the "preview a real config" feature (2026-07-23).
+func ConvertToShareLinks(content string) (records string, err error) {
+	defer func() {
+		if r := recover(); r != nil {
+			err = fmt.Errorf("mobile.ConvertToShareLinks panic: %v\n%s", r, string(debug.Stack()))
+		}
+	}()
+	out, e := ray2sing.ConvertToShareLinks(content)
+	if e != nil {
+		return "", e
+	}
+	return out, nil
+}
+
 func Start(configPath string, configContent string) (err error) {
 	defer func() {
 		if r := recover(); r != nil {

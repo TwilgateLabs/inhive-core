@@ -87,6 +87,33 @@ func parse(content *C.char) (result *C.char) {
 	return C.CString(string(out))
 }
 
+// convertToShareLinks renders ANY subscription body (base64 / share-link list /
+// container JSON / single outbound-JSON / Clash YAML) into a newline-joined list
+// of canonical per-server records — a canonical share-link where the node type
+// round-trips, otherwise the minified single-node sing-box JSON so no server is
+// lost. It is the exact sibling of the `parse` export: a PURE function (no
+// setup()/engine, ray2sing uses libbox.BaseContext internally), so the Flutter
+// app can call it with the VPN off. On error it returns a JSON object with a
+// single "__parse_error__" key, matching parse (the Dart side checks for it).
+// Caller must freeString the result.
+//
+//export convertToShareLinks
+func convertToShareLinks(content *C.char) (result *C.char) {
+	defer func() {
+		if r := recover(); r != nil {
+			msg := fmt.Sprintf("convertToShareLinks panic: %v\n%s", r, string(debug.Stack()))
+			log.Error(msg)
+			result = C.CString(`{"__parse_error__":` + strconv.Quote(msg) + `}`)
+		}
+	}()
+	out, err := ray2sing.ConvertToShareLinks(C.GoString(content))
+	if err != nil {
+		log.Error("convertToShareLinks: " + err.Error())
+		return C.CString(`{"__parse_error__":` + strconv.Quote(err.Error()) + `}`)
+	}
+	return C.CString(out)
+}
+
 //export freeString
 func freeString(str *C.char) {
 	runtime.LockOSThread()

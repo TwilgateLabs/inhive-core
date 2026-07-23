@@ -310,3 +310,70 @@ func Ray2SingboxOptions(ctx context.Context, configs string, useXrayWhenPossible
 	convertedData, err := GenerateConfigLite(configs, useXrayWhenPossible)
 	return convertedData, err
 }
+
+// ConvertToShareLinks renders ANY subscription body into a canonical, per-server
+// representation the app can preview/edit — the reverse of Ray2Singbox, and the
+// single source of truth for "what is the share-link of this node".
+//
+// Input: base64 wrapper / plain share-link list / container JSON (sing-box,
+// Xray, Happ, SIP008) / a single outbound-JSON / Clash YAML.
+//
+// Output: a newline-joined list of records, ONE PER SERVER, in INPUT ORDER. Each
+// record is EITHER
+//   - a canonical share-link URI — when the node's type is covered by the
+//     canonicalizer AND round-trips (see singbox_ingest.go); its display name
+//     rides in the #fragment; OR
+//   - the minified single-node sing-box JSON (one line) — a faithful degradation
+//     for a type we cannot yet canonicalize, so a server is NEVER lost
+//     (universal-client). wireguard/awg endpoints degrade to endpoint JSON.
+//
+// A share-link input is already canonical and is returned as-is. An
+// unrecognized / empty body is a hard error (the platform shim maps it to the
+// same convention parse uses). This is a PURE function — no running engine — so
+// the app can call it with the VPN off, exactly like Parse.
+func ConvertToShareLinks(content string) (out string, err error) {
+	defer func() {
+		if r := recover(); r != nil {
+			out = ""
+			stackTrace := make([]byte, 1024)
+			s := runtime.Stack(stackTrace, false)
+			err = E.New("Error in ConvertToShareLinks", r, "Stack trace:", string(stackTrace[:s]))
+		}
+	}()
+
+	// Outer base64 unwrap, mirroring Ray2SingboxOptions (a JSON/Clash body is not
+	// valid base64, so this is a no-op for containers).
+	decoded, _ := decodeBase64IfNeeded(content)
+
+	// Container JSON (sing-box / Xray / Happ / SIP008 / single outbound): needs
+	// per-entry classification (canonical URI OR JSON fallback), the primary case.
+	if records, ok := convertJSONEntries(decoded); ok {
+		if len(records) == 0 {
+			return "", E.New("No servers found")
+		}
+		return strings.Join(records, "\n"), nil
+	}
+	// Clash / Clash.Meta YAML: ingestClashYAML already rebuilds each proxy into a
+	// canonical share-link URI (every Clash proxy type maps to a share-link
+	// protocol), so its output is already the per-entry canonical form.
+	if uris, ok := ingestClashYAML(decoded); ok {
+		return uris, nil
+	}
+	// Otherwise a text/base64 share-link list — entries are already canonical,
+	// returned as-is (one per line, input order). Guard against pure garbage the
+	// same way parse does (which surfaces "No outbounds found"): require at least
+	// one line to start with a known share-link scheme, else it is not a
+	// subscription at all → hard error.
+	records := expandDecodedConfig(decoded)
+	recognized := false
+	for _, r := range records {
+		if splitPattern.MatchString(r) {
+			recognized = true
+			break
+		}
+	}
+	if !recognized {
+		return "", E.New("No servers found")
+	}
+	return strings.Join(records, "\n"), nil
+}

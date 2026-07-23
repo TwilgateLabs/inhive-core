@@ -217,13 +217,27 @@ func uriFromSingboxOutbound(raw json.RawMessage, typ string) (string, bool) {
 		skip(typ, "sing-box outbound did not unmarshal: "+err.Error())
 		return "", false
 	}
+	lt := strings.ToLower(typ)
+	// Server-less-by-design node types must be handled BEFORE the group/system
+	// server guard below (which keys on an empty server / server_port). dnstt
+	// keys on a DNS delegation zone (no server), psiphon has no endpoint at all,
+	// and a sing-box mieru outbound keeps server_port=0 (the ports live in
+	// portBindings). Each round-trips through its per-protocol share-link parser.
+	switch lt {
+	case "dnstt":
+		return singboxDnstt(raw)
+	case "psiphon":
+		return singboxPsiphon(raw)
+	case "mieru":
+		return singboxMieru(raw)
+	}
 	// Group/system outbounds (selector/urltest/loadbalance/direct/block/dns)
 	// carry no server endpoint — they are not nodes, skip them silently.
 	if ob.Server == "" || ob.ServerPort == 0 {
 		skip(typ, "no server/server_port (group or system outbound)")
 		return "", false
 	}
-	switch strings.ToLower(typ) {
+	switch lt {
 	case "hysteria2", "hy2":
 		return singboxHysteria2(&ob)
 	case "vless":
@@ -236,6 +250,8 @@ func uriFromSingboxOutbound(raw json.RawMessage, typ string) (string, bool) {
 		return singboxShadowsocks(&ob)
 	case "tuic":
 		return singboxTUIC(&ob)
+	case "naive":
+		return singboxNaive(raw)
 	default:
 		skip(typ, "sing-box type not rebuilt to a share-link (skipped, not fatal)")
 		return "", false
@@ -607,4 +623,448 @@ func singboxVMess(ob *singboxOutbound) (string, bool) {
 		return "", false
 	}
 	return "vmess://" + base64.StdEncoding.EncodeToString(b), true
+}
+
+// ---------------------------------------------------------------------------
+// Extra sing-box outbound types (JSON -> canonical share-link URI).
+//
+// Each reverse function below is the inverse of one processSingleConfig parser
+// (dnstt.go / psiphon.go / mieru.go / naive.go). The bar is a FAITHFUL
+// round-trip: processSingleConfig(uriFromSingboxOutbound(json)) must be
+// semantically identical to the input outbound (compat_corpus_test locks this).
+// A field the forward parser cannot reconstruct means the type is NOT
+// canonicalized for that node — it degrades to a JSON fallback in
+// ConvertToShareLinks, never dropped (universal-client). The emitted query keys
+// match BOTH the ray2sing forward parser and the Dart protocol registry
+// (app/lib/features/proxy/data/protocol_registry.dart).
+// ---------------------------------------------------------------------------
+
+// singboxDnstt rebuilds dnstt://DOMAIN?pubkey=&resolver=#name. dnstt is
+// server-less (it keys on a DNS delegation zone), so DnsttSingbox parses
+// domain = host + escaped-path via url.Parse — mirror that by placing the whole
+// zone in the authority+path. Query keys (pubkey/resolver) match DnsttSingbox
+// and the Dart _parseDnstt registry entry.
+func singboxDnstt(raw json.RawMessage) (string, bool) {
+	var d struct {
+		Tag      string `json:"tag"`
+		Domain   string `json:"domain"`
+		Pubkey   string `json:"pubkey"`
+		Resolver string `json:"resolver"`
+	}
+	if err := json.Unmarshal(raw, &d); err != nil || d.Domain == "" || d.Pubkey == "" {
+		skip("dnstt", "missing domain/pubkey")
+		return "", false
+	}
+	q := url.Values{}
+	q.Set("pubkey", d.Pubkey)
+	if d.Resolver != "" {
+		q.Set("resolver", d.Resolver)
+	}
+	name := d.Tag
+	if name == "" {
+		name = d.Domain
+	}
+	// Built by hand: the zone (host[+path]) must survive verbatim, and url.URL
+	// would re-escape a hostname-only authority carrying a path suffix oddly.
+	return "dnstt://" + d.Domain + "?" + q.Encode() + "#" + url.PathEscape(name), true
+}
+
+// singboxPsiphon rebuilds psiphon://?region=&remote_server_list_*=#name. Psiphon
+// has no endpoint (PsiphonSingbox ignores host/port), so the authority is empty.
+// Query keys match PsiphonSingbox's getOneOfN lookups and the Dart _parsePsiphon
+// registry entry.
+func singboxPsiphon(raw json.RawMessage) (string, bool) {
+	var p struct {
+		Tag                                string `json:"tag"`
+		EgressRegion                       string `json:"egress_region"`
+		RemoteServerListURL                string `json:"remote_server_list_url"`
+		RemoteServerListDownloadFilename   string `json:"remote_server_list_download_filename"`
+		RemoteServerListSignaturePublicKey string `json:"remote_server_list_signature_public_key"`
+	}
+	if err := json.Unmarshal(raw, &p); err != nil {
+		skip("psiphon", "outbound did not unmarshal")
+		return "", false
+	}
+	q := url.Values{}
+	if p.EgressRegion != "" {
+		q.Set("region", p.EgressRegion)
+	}
+	if p.RemoteServerListURL != "" {
+		q.Set("remote_server_list_url", p.RemoteServerListURL)
+	}
+	if p.RemoteServerListDownloadFilename != "" {
+		q.Set("remote_server_list_download_filename", p.RemoteServerListDownloadFilename)
+	}
+	if p.RemoteServerListSignaturePublicKey != "" {
+		q.Set("remote_server_list_signature_public_key", p.RemoteServerListSignaturePublicKey)
+	}
+	name := p.Tag
+	if name == "" {
+		name = "Psiphon"
+	}
+	uri := "psiphon://"
+	if enc := q.Encode(); enc != "" {
+		uri += "?" + enc
+	}
+	return uri + "#" + url.PathEscape(name), true
+}
+
+// singboxMieru rebuilds mieru://user:pass@server?protocol=&port=&...#name. A
+// sing-box mieru outbound keeps server_port=0 and carries the ports inside
+// portBindings, so the authority has NO port and MieruSingbox reads the aligned
+// protocol/port lists from the query. Multiplexing/handshake-mode/mtu keys match
+// MieruSingbox and the Dart _parseMieru registry entry.
+func singboxMieru(raw json.RawMessage) (string, bool) {
+	var m struct {
+		Tag           string `json:"tag"`
+		Server        string `json:"server"`
+		Username      string `json:"username"`
+		Password      string `json:"password"`
+		Multiplexing  string `json:"multiplexing"`
+		HandshakeMode string `json:"handshake_mode"`
+		MTU           int    `json:"mtu"`
+		PortBindings  []struct {
+			Protocol  string `json:"protocol"`
+			PortRange string `json:"portRange"`
+			Port      uint16 `json:"port"`
+		} `json:"portBindings"`
+	}
+	if err := json.Unmarshal(raw, &m); err != nil || m.Server == "" || len(m.PortBindings) == 0 {
+		skip("mieru", "missing server/portBindings")
+		return "", false
+	}
+	protocols := make([]string, 0, len(m.PortBindings))
+	ports := make([]string, 0, len(m.PortBindings))
+	for _, b := range m.PortBindings {
+		if b.Protocol == "" || (b.PortRange == "" && b.Port == 0) {
+			skip("mieru", "portBinding missing protocol/port")
+			return "", false
+		}
+		protocols = append(protocols, b.Protocol)
+		if b.PortRange != "" {
+			ports = append(ports, b.PortRange)
+		} else {
+			ports = append(ports, strconv.Itoa(int(b.Port)))
+		}
+	}
+	q := url.Values{}
+	q.Set("protocol", strings.Join(protocols, ","))
+	q.Set("port", strings.Join(ports, ","))
+	if m.Multiplexing != "" {
+		q.Set("multiplexing", m.Multiplexing)
+	}
+	if m.HandshakeMode != "" {
+		q.Set("handshake-mode", m.HandshakeMode)
+	}
+	if m.MTU != 0 {
+		q.Set("mtu", strconv.Itoa(m.MTU))
+	}
+	name := m.Tag
+	if name == "" {
+		name = m.Server
+	}
+	u := url.URL{
+		Scheme:   "mieru",
+		User:     url.UserPassword(m.Username, m.Password),
+		Host:     m.Server, // no port: portBindings carry the ports
+		RawQuery: q.Encode(),
+		Fragment: name,
+	}
+	return u.String(), true
+}
+
+// singboxNaive rebuilds naive+https:// (or naive+quic://) from a sing-box naive
+// outbound. NaiveSingbox negotiates ALPN inside cronet and force-zeroes
+// tls.alpn/insecure/disable_sni, and the reverse path models neither
+// extra_headers nor receive-window/ech/reality — so a node carrying any of those
+// cannot be rebuilt without silent loss and is left to the JSON fallback (never
+// dropped). The clean case (server/user/pass + sni + optional fp + quic knobs)
+// round-trips. Keys match NaiveSingbox and the Dart _parseNaive registry entry.
+func singboxNaive(raw json.RawMessage) (string, bool) {
+	var n struct {
+		Tag                      string                  `json:"tag"`
+		Server                   string                  `json:"server"`
+		ServerPort               int                     `json:"server_port"`
+		Username                 string                  `json:"username"`
+		Password                 string                  `json:"password"`
+		InsecureConcurrency      int                     `json:"insecure_concurrency"`
+		QUIC                     bool                    `json:"quic"`
+		QUICCongestionControl    string                  `json:"quic_congestion_control"`
+		ExtraHeaders             map[string]stringOrList `json:"extra_headers"`
+		ReceiveWindow            json.RawMessage         `json:"stream_receive_window"`
+		QUICSessionReceiveWindow json.RawMessage         `json:"quic_session_receive_window"`
+		UDPOverTCP               *struct {
+			Enabled bool `json:"enabled"`
+		} `json:"udp_over_tcp"`
+		TLS *singboxTLS `json:"tls"`
+	}
+	if err := json.Unmarshal(raw, &n); err != nil || n.Server == "" || n.ServerPort == 0 {
+		skip("naive", "missing server/server_port")
+		return "", false
+	}
+	// Faithful round-trip guard (see the function comment). Any of these means a
+	// field the reverse cannot reconstruct → JSON fallback.
+	if len(n.ExtraHeaders) > 0 || len(n.ReceiveWindow) > 0 || len(n.QUICSessionReceiveWindow) > 0 {
+		return "", false
+	}
+	if n.TLS != nil {
+		if len(n.TLS.ALPN) > 0 || n.TLS.Insecure ||
+			(n.TLS.ECH != nil && n.TLS.ECH.Enabled) ||
+			(n.TLS.Reality != nil && n.TLS.Reality.Enabled) {
+			return "", false
+		}
+	}
+	q := url.Values{}
+	q.Set("security", "tls") // naive is TLS-by-spec; forward defaults it too
+	if n.TLS != nil {
+		if n.TLS.ServerName != "" {
+			q.Set("sni", n.TLS.ServerName)
+		}
+		if n.TLS.UTLS != nil && n.TLS.UTLS.Fingerprint != "" {
+			q.Set("fp", n.TLS.UTLS.Fingerprint)
+		}
+	}
+	if n.InsecureConcurrency > 0 {
+		q.Set("insecure_concurrency", strconv.Itoa(n.InsecureConcurrency))
+	}
+	if n.QUICCongestionControl != "" {
+		q.Set("quic_congestion_control", n.QUICCongestionControl)
+	}
+	// UDPOverTCP: NaiveSingbox defaults enabled=true (uot != "false"/"0"); emit
+	// uot=false only to reproduce an explicitly disabled UoT.
+	if n.UDPOverTCP != nil && !n.UDPOverTCP.Enabled {
+		q.Set("uot", "false")
+	}
+	scheme := "naive+https"
+	if n.QUIC {
+		scheme = "naive+quic"
+	}
+	name := n.Tag
+	if name == "" {
+		name = n.Server
+	}
+	u := url.URL{
+		Scheme:   scheme,
+		User:     url.UserPassword(n.Username, n.Password),
+		Host:     hostPort(n.Server, n.ServerPort),
+		RawQuery: q.Encode(),
+		Fragment: name,
+	}
+	return u.String(), true
+}
+
+// ---------------------------------------------------------------------------
+// sing-box endpoint (wireguard / awg) -> canonical share-link URI.
+//
+// Endpoints live in the config's "endpoints" array (not "outbounds"), so the
+// container walk collects them separately. AWGSingbox is the forward parser for
+// wg:// / wireguard:// / awg://; a single share-link URI can only carry ONE
+// peer, so a multi-peer endpoint (or one with WireGuard "noise" / listen_port /
+// integrated-tun that the URI form cannot express) is NOT canonicalized and
+// falls back to endpoint JSON. Query keys match AWGSingbox and the Dart
+// _parseAmnezia / _buildWireguard registry entries (privatekey/peerpublickey/
+// presharedkey/address/allowedips/keepalive/reserved/mtu, plus the AWG obfs set).
+// ---------------------------------------------------------------------------
+
+type singboxWGPeer struct {
+	Address                     string       `json:"address"`
+	Port                        uint16       `json:"port"`
+	PublicKey                   string       `json:"public_key"`
+	PreSharedKey                string       `json:"pre_shared_key"` // wireguard peer spelling
+	PresharedKey                string       `json:"preshared_key"`  // awg peer spelling
+	AllowedIPs                  stringOrList `json:"allowed_ips"`
+	PersistentKeepaliveInterval uint16       `json:"persistent_keepalive_interval"`
+	Reserved                    []int        `json:"reserved"`
+}
+
+type singboxEndpoint struct {
+	Type             string          `json:"type"`
+	Tag              string          `json:"tag"`
+	PrivateKey       string          `json:"private_key"`
+	Address          stringOrList    `json:"address"`
+	MTU              uint32          `json:"mtu"`
+	ListenPort       uint16          `json:"listen_port"`
+	Workers          int             `json:"workers"`
+	UseIntegratedTun bool            `json:"useIntegratedTun"`
+	Noise            json.RawMessage `json:"noise"`
+	Peers            []singboxWGPeer `json:"peers"`
+
+	// AmneziaWG obfuscation set (presence flips the scheme to awg://).
+	Jc, Jmin, Jmax     int    `json:"-"`
+	S1, S2, S3, S4     int    `json:"-"`
+	H1, H2, H3, H4     string `json:"-"`
+	I1, I2, I3, I4, I5 string `json:"-"`
+	J1, J2, J3         string `json:"-"`
+	Itime              int    `json:"-"`
+}
+
+// UnmarshalJSON reads the AWG scalar fields alongside the shared endpoint fields
+// without repeating the whole tag set on the exported struct.
+func (e *singboxEndpoint) UnmarshalJSON(data []byte) error {
+	type plain singboxEndpoint
+	var p plain
+	if err := json.Unmarshal(data, &p); err != nil {
+		return err
+	}
+	*e = singboxEndpoint(p)
+	// Decode the AWG scalars explicitly (the exported fields are json:"-").
+	var m struct {
+		Jc    int    `json:"jc"`
+		Jmin  int    `json:"jmin"`
+		Jmax  int    `json:"jmax"`
+		S1    int    `json:"s1"`
+		S2    int    `json:"s2"`
+		S3    int    `json:"s3"`
+		S4    int    `json:"s4"`
+		H1    string `json:"h1"`
+		H2    string `json:"h2"`
+		H3    string `json:"h3"`
+		H4    string `json:"h4"`
+		I1    string `json:"i1"`
+		I2    string `json:"i2"`
+		I3    string `json:"i3"`
+		I4    string `json:"i4"`
+		I5    string `json:"i5"`
+		J1    string `json:"j1"`
+		J2    string `json:"j2"`
+		J3    string `json:"j3"`
+		Itime int    `json:"itime"`
+	}
+	if err := json.Unmarshal(data, &m); err != nil {
+		return err
+	}
+	e.Jc, e.Jmin, e.Jmax = m.Jc, m.Jmin, m.Jmax
+	e.S1, e.S2, e.S3, e.S4 = m.S1, m.S2, m.S3, m.S4
+	e.H1, e.H2, e.H3, e.H4 = m.H1, m.H2, m.H3, m.H4
+	e.I1, e.I2, e.I3, e.I4, e.I5 = m.I1, m.I2, m.I3, m.I4, m.I5
+	e.J1, e.J2, e.J3 = m.J1, m.J2, m.J3
+	e.Itime = m.Itime
+	return nil
+}
+
+// hasWGNoise reports whether a WireGuard endpoint carries a non-empty "noise"
+// (WARP-style fake-packet obfuscation). An empty/zero noise block round-trips to
+// AWGSingbox's default (no noise); a non-empty one has no share-link spelling.
+func hasWGNoise(raw json.RawMessage) bool {
+	if len(raw) == 0 {
+		return false
+	}
+	var probe struct {
+		FakePacket struct {
+			Enabled bool   `json:"enabled"`
+			Count   string `json:"count"`
+			Size    string `json:"size"`
+			Delay   string `json:"delay"`
+			Mode    string `json:"mode"`
+		} `json:"fake_packet"`
+	}
+	if json.Unmarshal(raw, &probe) != nil {
+		return false
+	}
+	fp := probe.FakePacket
+	return fp.Enabled || fp.Mode != "" || fp.Count != "" || fp.Size != "" || fp.Delay != ""
+}
+
+func uriFromSingboxEndpoint(raw json.RawMessage) (string, bool) {
+	var ep singboxEndpoint
+	if err := json.Unmarshal(raw, &ep); err != nil {
+		skip("endpoint", "sing-box endpoint did not unmarshal: "+err.Error())
+		return "", false
+	}
+	typ := strings.ToLower(ep.Type)
+	if typ != "wireguard" && typ != "awg" {
+		// Other endpoint types (e.g. tailscale) have no share-link form.
+		return "", false
+	}
+	// A single share-link carries exactly one peer and cannot express noise /
+	// listen_port / integrated-tun — anything else degrades to endpoint JSON.
+	if len(ep.Peers) != 1 || ep.ListenPort != 0 || ep.UseIntegratedTun || hasWGNoise(ep.Noise) {
+		return "", false
+	}
+	p := ep.Peers[0]
+	if ep.PrivateKey == "" || p.Address == "" || p.Port == 0 || p.PublicKey == "" {
+		return "", false
+	}
+	isAwg := ep.Jc != 0 || ep.Jmin != 0 || ep.Jmax != 0 ||
+		ep.S1 != 0 || ep.S2 != 0 || ep.S3 != 0 || ep.S4 != 0 || ep.Itime != 0 ||
+		ep.H1 != "" || ep.H2 != "" || ep.H3 != "" || ep.H4 != "" ||
+		ep.I1 != "" || ep.I2 != "" || ep.I3 != "" || ep.I4 != "" || ep.I5 != "" ||
+		ep.J1 != "" || ep.J2 != "" || ep.J3 != ""
+
+	q := url.Values{}
+	// privatekey travels as a query param (not userinfo): wireguard:// in the
+	// Dart registry has no userinfo, and AWGSingbox reads privatekey/pk from the
+	// query before falling back to userinfo — so a param works for both schemes.
+	q.Set("privatekey", ep.PrivateKey)
+	q.Set("peerpublickey", p.PublicKey)
+	if psk := orDefault(p.PreSharedKey, p.PresharedKey); psk != "" {
+		q.Set("presharedkey", psk)
+	}
+	if addr := strings.Join(ep.Address, ","); addr != "" {
+		q.Set("address", addr)
+	}
+	if len(p.AllowedIPs) > 0 {
+		q.Set("allowedips", strings.Join(p.AllowedIPs, ","))
+	}
+	if p.PersistentKeepaliveInterval > 0 {
+		q.Set("keepalive", strconv.Itoa(int(p.PersistentKeepaliveInterval)))
+	}
+	if len(p.Reserved) > 0 {
+		parts := make([]string, len(p.Reserved))
+		for i, r := range p.Reserved {
+			parts[i] = strconv.Itoa(r)
+		}
+		q.Set("reserved", strings.Join(parts, ","))
+	}
+	if ep.MTU > 0 {
+		q.Set("mtu", strconv.Itoa(int(ep.MTU)))
+	}
+	if ep.Workers > 0 {
+		q.Set("workers", strconv.Itoa(ep.Workers))
+	}
+	scheme := "wireguard"
+	if isAwg {
+		scheme = "awg"
+		setInt := func(k string, v int) {
+			if v != 0 {
+				q.Set(k, strconv.Itoa(v))
+			}
+		}
+		setStr := func(k, v string) {
+			if v != "" {
+				q.Set(k, v)
+			}
+		}
+		setInt("jc", ep.Jc)
+		setInt("jmin", ep.Jmin)
+		setInt("jmax", ep.Jmax)
+		setInt("s1", ep.S1)
+		setInt("s2", ep.S2)
+		setInt("s3", ep.S3)
+		setInt("s4", ep.S4)
+		setStr("h1", ep.H1)
+		setStr("h2", ep.H2)
+		setStr("h3", ep.H3)
+		setStr("h4", ep.H4)
+		setStr("i1", ep.I1)
+		setStr("i2", ep.I2)
+		setStr("i3", ep.I3)
+		setStr("i4", ep.I4)
+		setStr("i5", ep.I5)
+		setStr("j1", ep.J1)
+		setStr("j2", ep.J2)
+		setStr("j3", ep.J3)
+		setInt("itime", ep.Itime)
+	}
+	name := ep.Tag
+	if name == "" {
+		name = p.Address
+	}
+	u := url.URL{
+		Scheme:   scheme,
+		Host:     hostPort(p.Address, int(p.Port)),
+		RawQuery: q.Encode(),
+		Fragment: name,
+	}
+	return u.String(), true
 }

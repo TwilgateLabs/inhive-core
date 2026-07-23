@@ -63,14 +63,97 @@ func looksLikeJSON(s string) (byte, bool) {
 // body is not a JSON shape we recognize (so the caller falls back to the
 // text/base64 path). Entries that cannot be faithfully rebuilt are skipped with
 // a logged warning rather than failing the whole import.
+//
+// This drives the SAME per-entry container walk as ConvertToShareLinks
+// (collectContainerEntries) so the two consumers never drift. It deliberately
+// keeps the historical Parse-path behavior byte-for-byte: only entries that
+// transcode to a URI are kept, and ENDPOINTS (wireguard/awg) are NOT ingested
+// here — connect/ping consume this output and never handled endpoints from a
+// JSON container. ConvertToShareLinks is the surface that adds endpoint support.
 func ingestJSON(body string) (string, bool) {
-	sniff, ok := looksLikeJSON(body)
+	entries, ok := collectContainerEntries(body)
 	if !ok {
 		return "", false
 	}
-
 	var uris []string
+	for _, e := range entries {
+		if e.isEndpoint {
+			continue // parity: the Parse path never ingested container endpoints
+		}
+		if u, ok := e.toURI(); ok {
+			uris = append(uris, u)
+		}
+	}
+	if len(uris) == 0 {
+		return "", false
+	}
+	return strings.Join(uris, "\n"), true
+}
 
+// convertJSONEntries is the per-entry orchestration behind ConvertToShareLinks:
+// it walks the SAME container structure as ingestJSON but produces, for each
+// node IN INPUT ORDER, EITHER its canonical share-link URI (when the type is
+// covered and round-trips) OR the minified single-node sing-box JSON as a
+// fallback — so a server is NEVER lost (universal-client). Non-nodes
+// (freedom/blackhole/dns/selector/urltest/…) are dropped. Endpoints
+// (wireguard/awg) are canonicalized to wg:// / awg:// when they round-trip,
+// otherwise emitted as endpoint JSON. Returns (_, false) when the body is not a
+// recognized JSON container (caller falls through to the share-link path).
+func convertJSONEntries(body string) ([]string, bool) {
+	entries, ok := collectContainerEntries(body)
+	if !ok {
+		return nil, false
+	}
+	var records []string
+	for _, e := range entries {
+		if rec, ok := e.toRecord(); ok {
+			records = append(records, rec)
+		}
+	}
+	return records, true
+}
+
+// containerObject is the union of the wrapper shapes we accept. We read
+// "outbounds" (Xray/sing-box), "endpoints" (sing-box wireguard/awg) and
+// "servers" (SIP008). "dns" / "routing" / "rules" are deliberately NOT fields
+// here — see the file header: they are dropped on purpose.
+//
+// "remarks"/"remark" is the Happ marker: Happ exports a JSON ARRAY where each
+// element is a FULL Xray config object carrying the human node name in a
+// top-level "remarks" field (the inner outbound is always the generic tag
+// "proxy"). Its presence flips this object into "Happ per-node" mode (see
+// entriesFromContainerObject): emit exactly ONE server named by remarks, instead
+// of expanding every outbound — otherwise Happ "Авто" bundles (which pack the
+// whole node list as outbounds for client-side smart routing) would explode
+// into dozens of duplicate "proxy" entries. (Happ ingest fix 2026-07-06.)
+type containerObject struct {
+	Outbounds []json.RawMessage `json:"outbounds"`
+	Endpoints []json.RawMessage `json:"endpoints"`
+	Servers   []json.RawMessage `json:"servers"`
+	Remarks   string            `json:"remarks"`
+	Remark    string            `json:"remark"`
+}
+
+// containerEntry is one node pulled out of a JSON container, in input order.
+// rename (non-empty only in Happ per-node mode) overrides the produced URI's
+// #fragment / the fallback JSON "tag".
+type containerEntry struct {
+	raw        json.RawMessage
+	isEndpoint bool
+	rename     string
+}
+
+// collectContainerEntries parses a JSON-container body into an ordered list of
+// node entries (outbounds, then SIP008 servers, then endpoints; per array item
+// for the array shapes). Returns (nil,false) when the body is not a recognized
+// JSON object/array. This is the SINGLE container walk shared by ingestJSON
+// (URIs only) and convertJSONEntries (uri-or-fallback), so the two can't drift.
+func collectContainerEntries(body string) ([]containerEntry, bool) {
+	sniff, ok := looksLikeJSON(body)
+	if !ok {
+		return nil, false
+	}
+	var entries []containerEntry
 	switch sniff {
 	case '[':
 		// Two array shapes:
@@ -78,99 +161,202 @@ func ingestJSON(body string) (string, bool) {
 		//   (b) bare array of entries: [{...outbound...}, ...] or SIP008 servers.
 		var rawItems []json.RawMessage
 		if err := json.Unmarshal([]byte(body), &rawItems); err != nil {
-			return "", false
+			return nil, false
 		}
 		for _, item := range rawItems {
-			// Try the wrapper form first (object carrying "outbounds"/"servers").
-			if added := urisFromContainerObject(item); len(added) > 0 {
-				uris = append(uris, added...)
+			if added, isWrapper := entriesFromContainerObject(item); isWrapper {
+				entries = append(entries, added...)
 				continue
 			}
 			// Otherwise treat the item itself as a single entry (Xray outbound
 			// object or SIP008 server object).
-			if u, ok := uriFromAnyEntry(item); ok {
-				uris = append(uris, u)
-			}
+			entries = append(entries, containerEntry{raw: item})
 		}
-
 	case '{':
-		// A single JSON object. Either a full config ({"outbounds":[...]} or
-		// SIP008 {"servers":[...]}), or — degenerate — a single bare outbound.
+		// A single JSON object. Either a full config ({"outbounds":[...]} /
+		// {"endpoints":[...]} / SIP008 {"servers":[...]}), or — degenerate — a
+		// single bare outbound.
 		raw := json.RawMessage(body)
-		if added := urisFromContainerObject(raw); len(added) > 0 {
-			uris = append(uris, added...)
-		} else if u, ok := uriFromAnyEntry(raw); ok {
-			// Single bare outbound/server object with no wrapper array.
-			uris = append(uris, u)
+		if added, isWrapper := entriesFromContainerObject(raw); isWrapper {
+			entries = append(entries, added...)
+		} else {
+			entries = append(entries, containerEntry{raw: raw})
 		}
 	}
-
-	if len(uris) == 0 {
-		return "", false
+	if len(entries) == 0 {
+		return nil, false
 	}
-	return strings.Join(uris, "\n"), true
+	return entries, true
 }
 
-// containerObject is the union of the wrapper shapes we accept. We read ONLY
-// "outbounds" (Xray/sing-box) and "servers" (SIP008). "dns" / "routing" /
-// "rules" are deliberately NOT fields here — see the file header: they are
-// dropped on purpose.
-//
-// "remarks"/"remark" is the Happ marker: Happ exports a JSON ARRAY where each
-// element is a FULL Xray config object carrying the human node name in a
-// top-level "remarks" field (the inner outbound is always the generic tag
-// "proxy"). Its presence flips this object into "Happ per-node" mode (see
-// urisFromContainerObject): emit exactly ONE server named by remarks, instead
-// of expanding every outbound — otherwise Happ "Авто" bundles (which pack the
-// whole node list as outbounds for client-side smart routing) would explode
-// into dozens of duplicate "proxy" entries. (Happ ingest fix 2026-07-06.)
-type containerObject struct {
-	Outbounds []json.RawMessage `json:"outbounds"`
-	Servers   []json.RawMessage `json:"servers"`
-	Remarks   string            `json:"remarks"`
-	Remark    string            `json:"remark"`
-}
-
-// urisFromContainerObject pulls the proxy entries out of a wrapper object and
-// transcodes each to a URI. Returns nil when the object carries neither
-// "outbounds" nor "servers".
-func urisFromContainerObject(raw json.RawMessage) []string {
+// entriesFromContainerObject pulls the node entries out of a wrapper object.
+// isWrapper is true when the object carries outbounds/servers/endpoints or the
+// Happ "remarks" marker (so the caller does NOT also treat it as a bare entry);
+// the returned slice may still be empty (recognized wrapper with nothing usable).
+func entriesFromContainerObject(raw json.RawMessage) (entries []containerEntry, isWrapper bool) {
 	var c containerObject
 	if err := json.Unmarshal(raw, &c); err != nil {
-		return nil
+		return nil, false
+	}
+	if len(c.Outbounds) == 0 && len(c.Servers) == 0 && len(c.Endpoints) == 0 &&
+		orDefault(c.Remarks, c.Remark) == "" {
+		return nil, false
 	}
 
 	// Happ per-node mode: a wrapper carrying "remarks" is one node whose real
 	// name lives in remarks and whose inner outbounds are always tagged generic
-	// "proxy"/"proxy-N". Emit exactly ONE server — the FIRST real proxy outbound
-	// — renamed to remarks. This (a) restores the country name instead of
-	// "proxy", and (b) collapses "Авто" bundles (which carry the whole server
-	// list) to a single node, matching what the Happ client itself shows.
+	// "proxy"/"proxy-N". Emit exactly ONE entry — the FIRST real proxy outbound —
+	// renamed to remarks. Prefer the first that transcodes to a URI (matches the
+	// historical behavior); if none does, keep the first outbound carrying a
+	// server so ConvertToShareLinks can still preserve it as JSON, renamed.
 	if name := orDefault(c.Remarks, c.Remark); name != "" && len(c.Outbounds) > 0 {
+		var firstNode json.RawMessage
 		for _, ob := range c.Outbounds {
-			if u, ok := uriFromAnyEntry(ob); ok {
-				return []string{renameURIFragment(u, name)}
+			if _, ok := uriFromAnyEntry(ob); ok {
+				return []containerEntry{{raw: ob, rename: name}}, true
 			}
-			// non-proxy locals (freedom/blackhole/dns/…) are skipped by
-			// uriFromAnyEntry → keep scanning for the first real proxy.
+			if firstNode == nil && isNodeEntry(ob, false) {
+				firstNode = ob
+			}
 		}
-		return nil
+		if firstNode != nil {
+			return []containerEntry{{raw: firstNode, rename: name}}, true
+		}
+		return nil, true
 	}
 
-	var uris []string
-	// Xray/sing-box full config: ingest outbounds, drop dns/routing (by design).
+	// Xray/sing-box full config: ingest outbounds + endpoints, drop dns/routing
+	// (by design). Order: outbounds, then SIP008 servers, then endpoints.
 	for _, ob := range c.Outbounds {
-		if u, ok := uriFromAnyEntry(ob); ok {
-			uris = append(uris, u)
-		}
+		entries = append(entries, containerEntry{raw: ob})
 	}
-	// SIP008: a Shadowsocks server list.
 	for _, sv := range c.Servers {
-		if u, ok := uriFromSIP008(sv); ok {
-			uris = append(uris, u)
+		entries = append(entries, containerEntry{raw: sv})
+	}
+	for _, ep := range c.Endpoints {
+		entries = append(entries, containerEntry{raw: ep, isEndpoint: true})
+	}
+	return entries, true
+}
+
+// toURI transcodes one entry to its canonical share-link URI (ok=false when the
+// type is not covered or does not faithfully round-trip). rename overrides the
+// #fragment (Happ per-node).
+func (e containerEntry) toURI() (string, bool) {
+	var uri string
+	var ok bool
+	if e.isEndpoint {
+		uri, ok = uriFromSingboxEndpoint(e.raw)
+	} else {
+		uri, ok = uriFromAnyEntry(e.raw)
+	}
+	if !ok {
+		return "", false
+	}
+	if e.rename != "" {
+		uri = renameURIFragment(uri, e.rename)
+	}
+	return uri, true
+}
+
+// toRecord returns the ConvertToShareLinks record for one entry: the canonical
+// URI if it transcodes, else the minified node JSON (fallback) when the entry is
+// a real server/endpoint, else ("",false) to drop a non-node.
+func (e containerEntry) toRecord() (string, bool) {
+	if uri, ok := e.toURI(); ok {
+		return uri, true
+	}
+	if !isNodeEntry(e.raw, e.isEndpoint) {
+		return "", false
+	}
+	return minifyNodeJSON(e.raw, e.rename)
+}
+
+// isNodeEntry reports whether a JSON entry represents a real server/endpoint (a
+// node worth preserving) rather than a group/system/local outbound. Endpoints
+// (wireguard/awg) are always nodes. For outbounds the decision keys on the
+// protocol/type NOT on a server field, so that server-less nodes (dnstt/psiphon)
+// are preserved while true locals are dropped.
+func isNodeEntry(raw json.RawMessage, isEndpoint bool) bool {
+	if isEndpoint {
+		return true
+	}
+	var probe struct {
+		Protocol string `json:"protocol"`
+		Type     string `json:"type"`
+		Method   string `json:"method"`
+		Server   string `json:"server"`
+	}
+	if json.Unmarshal(raw, &probe) != nil {
+		return false
+	}
+	if probe.Protocol != "" {
+		switch strings.ToLower(probe.Protocol) {
+		case "freedom", "blackhole", "dns", "loopback", "dokodemo-door":
+			return false
+		}
+		return true
+	}
+	if probe.Type != "" {
+		switch strings.ToLower(probe.Type) {
+		case "selector", "urltest", "loadbalance", "direct", "block", "dns":
+			return false
+		}
+		return true
+	}
+	// SIP008 server object.
+	return probe.Method != "" && probe.Server != ""
+}
+
+// minifyNodeJSON re-marshals a node object as a single compact line, stamping
+// the tag (Happ rename) and stripping any accidental " § N" pipeline suffix so
+// the record never leaks the internal uniquifier. The object is otherwise passed
+// through untouched — for a native sing-box outbound/endpoint this IS a valid
+// sing-box node, the same degraded representation the app stored before.
+func minifyNodeJSON(raw json.RawMessage, rename string) (string, bool) {
+	var obj map[string]json.RawMessage
+	if err := json.Unmarshal(raw, &obj); err != nil {
+		return "", false
+	}
+	if rename != "" {
+		if b, err := json.Marshal(rename); err == nil {
+			obj["tag"] = b
+		}
+	} else if tagRaw, ok := obj["tag"]; ok {
+		var tag string
+		if json.Unmarshal(tagRaw, &tag) == nil {
+			if clean := stripTagSuffix(tag); clean != tag {
+				if b, err := json.Marshal(clean); err == nil {
+					obj["tag"] = b
+				}
+			}
 		}
 	}
-	return uris
+	out, err := json.Marshal(obj)
+	if err != nil {
+		return "", false
+	}
+	return string(out), true
+}
+
+// stripTagSuffix removes a trailing " § <digits>" positional suffix (added by
+// GenerateConfigLite for in-box tag uniqueness) from a node tag. Defensive: raw
+// container tags never carry it, but the record must not expose it if they do.
+func stripTagSuffix(tag string) string {
+	i := strings.LastIndex(tag, " § ")
+	if i < 0 {
+		return tag
+	}
+	suffix := tag[i+len(" § "):]
+	if suffix == "" {
+		return tag
+	}
+	for _, r := range suffix {
+		if r < '0' || r > '9' {
+			return tag
+		}
+	}
+	return tag[:i]
 }
 
 // renameURIFragment overwrites the #fragment (display name) of an already-built
