@@ -246,16 +246,20 @@ func StartService(ctx context.Context, in *StartRequest) (coreResponse *CoreInfo
 	// daemon context so it dies with the engine; Stop() also cancels it
 	// explicitly so we don't rely on goroutine-after-shutdown semantics.
 	//
-	// NE-quiescence (2026-07-19): НЕ запускаем на iOS. Причины: (1) на iOS
+	// NE-quiescence (2026-07-19): НЕ запускаем на iOS. Причина: на iOS
 	// Mode-2→Mode-1 recovery всё равно не advance'ится автоматически (см.
-	// urltest_watcher.go doc), т.е. watcher полу-функционален; (2) он
-	// подписан на группу "" и на каждом событии зовёт OutboundsHistory("")
-	// → Touch() → OutboundMonitoring-карусель НИКОГДА не уходит в idleTimeout
-	// → 5-мин URLTest TLS-пробы всех outbound'ов крутятся вечно на
-	// подключённом туннеле (SecTrust-шум = триггер jetsam в NE). Без watcher
-	// карусель усыпляется штатно, когда UI не открыт; UI-пинги на iOS идут
-	// отдельным on-demand путём (clash-delay). На iOS кросс-мод свитч всё
-	// равно инициирует app (рестарт NE), не ядро.
+	// urltest_watcher.go doc), т.е. watcher полу-функционален, а платить за
+	// полу-функциональность фоновой активностью в NE незачем. UI-пинги на iOS
+	// идут отдельным on-demand путём (clash-delay); кросс-мод свитч там
+	// инициирует app (рестарт NE), не ядро.
+	//
+	// Вторая причина ОТПАЛА 2026-07-26 (фикс на месте, гейт оставлен по первой):
+	// watcher подписан на группу "" и на каждом событии звал OutboundsHistory("")
+	// → Touch() → карусель НИКОГДА не уходила в idleTimeout → 5-мин URLTest
+	// TLS-пробы всех outbound'ов крутились вечно на подключённом туннеле, на
+	// Windows/Android в том числе. Теперь watcher читает через
+	// OutboundsHistoryPassive() (без Touch) — контур разорван, карусель
+	// усыпляется штатно, когда её результаты никто не смотрит.
 	if boxCtx := static.Context(); boxCtx != nil {
 		if !C.IsIos {
 			startModeWatcher(boxCtx, static)

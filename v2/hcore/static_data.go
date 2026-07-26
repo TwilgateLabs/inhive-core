@@ -34,7 +34,17 @@ type InhiveInstance struct {
 	debug                   bool
 	ListenPort              uint16
 	BaseContext             context.Context
-	endPauseTimer           *time.Timer // only for ios
+	// endPauseTimer (only for ios) — авто-DeviceWake через минуту после Pause.
+	// Доступ ТОЛЬКО под pauseMu: Pause() приходит с NE-потока gomobile, а
+	// resetPauseState() — из Stop()/StopAndAlert() (gRPC-поток).
+	endPauseTimer *time.Timer
+	pauseMu       sync.Mutex
+	// pausedAtNano — UnixNano момента последнего Pause() (sleep девайса), 0 когда
+	// не в паузе. Пишется в Pause(), читается+сбрасывается в Wake() для гейта
+	// wake-reset'а (см. pause.go wakeResetMinPause) и чистится при остановке
+	// бокса (resetPauseState). Atomic: Pause/Wake приходят последовательно с
+	// NE-очереди, но wake-reset читает из горутины, а сброс — из Stop().
+	pausedAtNano atomic.Int64
 
 	logLevel LogLevel
 

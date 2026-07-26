@@ -20,6 +20,7 @@ import (
 	sync "sync"
 	"time"
 
+	"github.com/sagernet/sing-box/common/memlite"
 	C "github.com/sagernet/sing-box/constant"
 	"github.com/sagernet/sing-box/experimental/libbox"
 	"github.com/sagernet/sing-box/log"
@@ -379,11 +380,12 @@ func heartbeatLoop(workingDir string) {
 	}
 	fmt.Fprintf(f, "==== heartbeat start %s os=%s arch=%s go=%s pid=%d ====\n",
 		time.Now().UTC().Format(time.RFC3339), runtime.GOOS, runtime.GOARCH, runtime.Version(), os.Getpid())
-	var m runtime.MemStats
 	ticker := time.NewTicker(time.Minute)
 	for range ticker.C {
-		runtime.ReadMemStats(&m)
+		// memlite.HeapAlloc == MemStats.HeapAlloc (живые heap-объекты), но
+		// через runtime/metrics без stop-the-world — минутный ReadMemStats-STW
+		// на Win/Android был лишним (тот же приём, что mem_sampler на iOS).
 		fmt.Fprintf(f, "%s gor=%d heap=%dMB\n",
-			time.Now().UTC().Format(time.RFC3339), runtime.NumGoroutine(), m.HeapAlloc/(1024*1024))
+			time.Now().UTC().Format(time.RFC3339), runtime.NumGoroutine(), memlite.HeapAlloc()/(1024*1024))
 	}
 }

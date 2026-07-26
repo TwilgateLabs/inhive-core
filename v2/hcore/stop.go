@@ -38,6 +38,8 @@ func Stop() (coreResponse *CoreInfoResponse, err error) {
 	// Гасим сэмплер памяти (mem_sampler.go) — он бьётся к box-контексту,
 	// но останавливаем явно, чтобы не полагаться на goroutine-after-shutdown.
 	stopMemSampler()
+	// Хвосты sleep/wake-цикла привязаны к ЭТОМУ боксу — см. resetPauseState.
+	resetPauseState()
 	ss := static.StartedService
 	if ss == nil {
 		return SetCoreStatus(CoreStates_STOPPED, MessageType_ALREADY_STOPPED, ""), nil

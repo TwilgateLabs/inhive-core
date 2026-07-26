@@ -140,6 +140,20 @@ func setOutbounds(options *option.Options, input *option.Options, opt *InhiveOpt
 	// 		InterruptExistConnections: true,
 	// 	},
 	// }
+	// ⚠️ ЗАРЯЖЕННАЯ ГРАБЛЯ — этот core-side путь клиент СЕЙЧАС НЕ ИСПОЛЬЗУЕТ
+	// (боевой конфиг строит Dart: app singbox_config_builder.dart), но он
+	// остаётся дефолтом BuildConfig для не-raw стартов. Включишь — получишь
+	// сразу два известных класса проблем:
+	//  1) балансировщик lowest-delay держит urltest-карусель ЖИВОЙ вечно
+	//     (SIBLING: protocol/group/balancer/balancer.go:135 — там Touch()
+	//     оставлен намеренно, это его работа) — на iOS NE это те самые
+	//     5-мин TLS-пробы всех outbound'ов, ради усыпления которых mode-watcher
+	//     гейтнут !IsIos (v2/hcore/start.go, NE-quiescence 2026-07-19);
+	//  2) InterruptExistConnections:true ниже (и у селектора) рвёт ЖИВЫЕ
+	//     юзерские соединения на каждой перебалансировке/переключении.
+	// В Dart-конфиге селектор сознательно БЕЗ interrupt_exist_connections, а
+	// баланс-группы нет вовсе (selector + app-side выбор). Прежде чем оживлять
+	// этот путь — сверь с обоими решениями, не тащи дефолты как есть.
 	urlTest := option.Outbound{
 		Type: C.TypeBalancer,
 		Tag:  OutboundURLTestTag,

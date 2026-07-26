@@ -9,6 +9,145 @@ shipped standalone).
 
 ## [Unreleased]
 
+### Fixed — wake after device sleep: stale sessions are dropped instead of timing out one by one
+
+- **`Wake()` now resets stale network state after ≥30s of device sleep.** The iOS
+  path did nothing on wake: the same-interface update is deduplicated by the
+  platform monitor, so — unlike the Windows resume path, which has called
+  `ResetNetwork` since 2026-07-19 — every long-lived session that died during
+  sleep (the gRPC/xhttp transport to the server, the DoH H2 connection to the
+  DNS provider, QUIC) stayed in the pools and new traffic was pushed into them
+  until each hit its own emergency timeout. Field logs 2026-07-25: 10–20 seconds
+  of "connected but dead" after unlocking the phone. On wake after a pause of
+  30s or more (threshold documented at `wakeResetMinPause`: frozen process ⇒ no
+  live in-flight connections; NAT mappings expire from ~30s; hysteria2's QUIC
+  idle timeout is exactly 30s) the engine now closes all proxied connections,
+  lets every outbound/endpoint rebuild its transport, and resets the DNS
+  transports. Deliberately *not* included: the platform DNS-cache flush (on iOS
+  it re-asserts the tunnel — seconds of downtime, the opposite of the goal) and
+  the engine's own DNS cache (TTL-valid entries are still valid; a cold cache
+  would slow the wake-up further). Short screen-offs stay untouched — iOS calls
+  sleep/wake frequently, and an unconditional reset would cut live downloads.
+- **The one-minute auto-unpause timer no longer wakes a dead engine.** The iOS
+  pause path arms a timer that lifts `DevicePause` after a minute (so overnight
+  push traffic isn't frozen forever). The timer captured the pause manager of
+  the *first* engine instance and was only ever `Reset()` afterwards — after any
+  engine rebuild inside a living tunnel process (subscription switch, hot-add
+  fallback) it woke the closed engine's manager, and the actual engine stayed
+  paused until the next real wake: WireGuard timers and all paused tickers
+  frozen for the whole night. The timer is now re-created on every pause with
+  the current engine's manager.
+- **DoH over HTTP/2 detects a dead connection instead of burning the query
+  deadline.** The DNS-over-HTTPS transport had no HTTP/2 health check, so a
+  connection that died during device sleep (NAT dropped it; no RST ever
+  arrives) hung every query for the full 10s DNS timeout, and the short
+  negative-cache added up to 5s more — the DNS half of the wake stall. An h2
+  PING now goes out after 5s of read silence and the connection is torn down
+  4s later if unanswered (9s worst case, deliberately under the 10s query
+  deadline), for the first query as well as for the transport clone made after
+  each reset. A DoH connection nobody has used for five minutes is now dropped
+  rather than kept alive by those pings indefinitely — the next query pays one
+  TLS handshake, which it would have paid anyway once the connection went stale.
+  The `v2rayhttp` (h2) client transport gets the same treatment with
+  browser-profile timings (45s keep-alive period, matching our xhttp port and
+  Chrome), applied only when the subscription doesn't set `idle_timeout` itself;
+  a negative `idle_timeout` turns the pings off entirely, the same convention
+  our xhttp port already follows.
+- **An interface change is no longer swallowed when the interface list lags.**
+  `notifyInterfaceUpdate` bailed out (`// race`) when the freshly-changed
+  default interface wasn't in the cached interface list yet — but the platform
+  monitor had already recorded the new interface, so the follow-up callback was
+  deduplicated and `ResetNetwork` never ran: connections stayed bound to the
+  old network until the *next* real change. Most likely right after an iOS
+  wake, when the re-created path monitor hasn't warmed up its interface list.
+  The list is now refreshed and re-checked once, and if the interface is still
+  missing the reset proceeds anyway (with a plainer log line) — an extra reset
+  is cheaper than a silently lost one.
+
+### Changed — the engine stops making work for itself while the tunnel is idle
+
+- **The server latency carousel goes back to sleep.** Probing every server in the
+  subscription is meant to run only while someone is looking at the results, and
+  to stop ten minutes after the last read. It never stopped: an internal watcher
+  woke on every probe cycle, read the results, and that read counted as "someone
+  is watching" — which kept the probes running, which produced another cycle. The
+  loop could not exit, so a full TLS sweep of every server ran every five minutes
+  for as long as the tunnel was up (Windows and Android; on Apple platforms the
+  watcher was already disabled, for this reason among others). The watcher now
+  reads results without claiming to be a viewer. On a weak mobile connection this
+  removes a periodic burst competing with real traffic — and a burst of
+  simultaneous connections to every one of your servers, on a five-minute
+  metronome, is also a distinctive thing to emit on a hostile network.
+- **Memory is returned to the OS when it actually grows, not on a schedule.** The
+  engine forced a full garbage collection every two minutes on both mobile
+  platforms. The condition that matters — footprint above a threshold — was
+  already checked in the same place, so the timer was a second belt on the same
+  hole, paid for with two stop-the-world pauses every two minutes on live
+  traffic. The timer is gone, and the remaining threshold check now runs only on
+  Apple platforms: that is where a process is killed for its footprint. Android
+  has no such limit and was paying for nothing.
+- **The engine's memory line is visible in the field.** Memory, heap and
+  goroutine counts were logged at a level the client filters out by default, so
+  the one line that shows whether the engine is growing never reached the Logs
+  tab, the log file, or a diagnostic snapshot. Once a minute the line is now
+  logged at a level that gets through; the ten-second samples in between keep
+  their old level, so the log file doesn't fill up with them.
+
+### Fixed — the memory backstop on Apple platforms was never actually running
+
+- **The adaptive memory poller is started with the engine.** On Apple platforms
+  the poller was created but only ever started from the system-wide memory
+  pressure callback, on `critical` — the very signal that stays silent when the
+  system kills a process for exceeding its own per-process limit, which is the
+  entire reason the poller exists. In practice the backstop never ran: four
+  process kills in one day (2026-07-14) passed without a single check. It now
+  starts with the engine, like it always did on other platforms, and a
+  "system is back to normal" event no longer stops it when it is watching a
+  per-process budget rather than system pressure. Without this the graceful
+  path (close connections, return memory, keep the tunnel) never gets a chance
+  and the process just dies mid-session.
+- **Per-server download counters report bytes again.** The per-outbound download
+  total was incremented by a constant instead of the read size — a typo in our
+  own patch, with the upload side always correct. "Downloaded through server X"
+  in the app was understated by roughly two orders of magnitude. Traffic itself
+  was never affected, only the number.
+
+### Fixed — a server marked dead on the old network no longer stays "dead" after a network switch
+
+- **The circuit breaker forgets its probe clock when the network changes.** A
+  server that racked up 8 failed dials on a dying Wi-Fi got marked down with a
+  probe backoff of up to 30 seconds — and switching to LTE (or waking after
+  long sleep) kept fast-failing every dial on the new, working network until
+  that clock ran out: "switched networks and the VPN still played dead for
+  half a minute". `ResetNetwork` now also resets the probe timers, so the
+  first dial on the new network goes out as a real connection attempt
+  immediately. The down mark itself is deliberately NOT cleared — only an
+  actual successful dial clears it (per the 2026-07-17 decision: the client
+  never declares a server healthy on its own, and auto-clearing would bring
+  back the very connection storm the breaker exists to prevent). Cost: one
+  full dial (≤5s) per downed server per network change; everything else still
+  fast-fails.
+
+### Fixed — the engine no longer stops the world once a second for a memory readout
+
+- **Per-second memory stats switched from `runtime.ReadMemStats` (a
+  stop-the-world pause of every goroutine) to `runtime/metrics` reads.** Four
+  sites ticked it: the system-info stream feeding the app's status line (1/s
+  per subscriber whenever the app window is open), the Clash traffic snapshot
+  (1/s while the Connections tab is open), `daemon.ReadStatus` on non-darwin
+  (darwin already used the native no-STW path), and the once-a-minute
+  Win/Android heartbeat. On iOS NE with GOMAXPROCS=1 this was a once-a-second
+  micro-stall layered over live traffic. The number shown in the UI is
+  unchanged — the new reads sum the exact `runtime/metrics` equivalents of the
+  old formula (documented in `common/memlite`).
+- **Pause bookkeeping is cleared when the engine stops.** The wake-after-sleep
+  reset gate and the one-minute auto-unpause timer are tied to a specific
+  engine instance; an engine restart between sleep and wake could hand the new
+  instance a stale "you slept" mark (a needless connection reset on its first
+  wake) or fire a timer against the stopped instance's pause manager. Both are
+  now cleared on every stop, and timer access is mutex-guarded (pause arrives
+  on the NE thread, stop on the gRPC thread).
+
 ### Fixed — hot-add accepts every content class the full build accepts
 
 - **`AddOutbound` no longer fails with `[SingboxParser] unmarshal error: EOF` on

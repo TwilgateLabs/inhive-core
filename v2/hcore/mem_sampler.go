@@ -43,10 +43,19 @@ const memSamplerInterval = 10 * time.Second
 //     группового контейнера, потому Caches, а не workingDir);
 //   - при phys_footprint > memDiagProfileAtBytes — одноразовый дамп heap- и
 //     goroutine-профилей туда же (go tool pprof назовёт утечку поимённо);
-//   - каждый 12-й тик (120с) + при footprint > memFreeOSAtBytes —
+//   - при footprint > memFreeOSAtBytes (не чаще раза в минуту) —
 //     runtimeDebug.FreeOSMemory(): jetsam считает phys_footprint, а Go-scavenger
 //     отдаёт освобождённые страницы ОС лениво (разово это уже делает start.go
-//     после старта — здесь периодически). Гейт iOS/Android как в start.go.
+//     после старта — здесь по факту роста). **iOS-only** — см. ниже.
+//
+// InHive 2026-07-26: раньше FreeOSMemory звался ещё и каждый 12-й тик (120с)
+// безусловно, и на Android тоже. Убрано и то, и другое:
+//   - безусловный таймер — это реакция на часы, а не на сигнал. Нужное условие
+//     (footprint реально вырос выше порога) стояло в той же строке рядом;
+//     таймер поверх него — вторая страховка на ту же дырку, ценой двух STW-пауз
+//     каждые 2 минуты НА ЖИВОМ ТРАФИКЕ;
+//   - Android: там нет ни memlimit'а, ни jetsam'а — phys_footprint никто не
+//     меряет, платить полным GC не за что.
 const (
 	memDiagFileMaxBytes   = 512 * 1024
 	memDiagProfileAtBytes = 42 << 20
@@ -153,7 +162,10 @@ func runMemSampler(ctx context.Context) {
 	tick := 0
 	profileDumped := false
 	var lastFreeOS time.Time
-	mobile := runtime.GOOS == "ios" || runtime.GOOS == "android"
+	// Только iOS: возврат страниц ОС имеет смысл там, где нас по ним и убивают
+	// (jetsam меряет phys_footprint). На Android лимита нет — форсировать GC не
+	// за чем; на десктопе тем более.
+	footprintKills := runtime.GOOS == "ios"
 
 	for {
 		select {
@@ -179,7 +191,22 @@ func runMemSampler(ctx context.Context) {
 					" goroutines=" + strconv.Itoa(goroutines) +
 					" gc=" + strconv.FormatUint(gc, 10)
 			}
-			Log(LogLevel_INFO, LogType_CORE, line)
+			// Раз в минуту строка идёт на WARN, остальные — на INFO.
+			//
+			// InHive 2026-07-26: клиент по умолчанию ставит ядру уровень 'warn'
+			// (singbox_config_builder.dart `_baseLog`), поэтому INFO-строка не
+			// доходит ни до вкладки «Логи», ни до box.log, ни до снимка
+			// диагностики — память и goroutines ядра в поле были не видны
+			// вообще (ровно то же соображение, что у xhttp-строк ниже). Но
+			// поднимать ВСЕ строки на WARN нельзя: 10-секундный такт — это
+			// ~8.6к строк в сутки, они бы вытеснили из ротации box.log всё
+			// остальное. Раз в минуту достаточно, чтобы видеть тренд памяти, и
+			// стоит ~130KB в сутки.
+			memLevel := LogLevel_INFO
+			if tick%6 == 0 {
+				memLevel = LogLevel_WARNING
+			}
+			Log(memLevel, LogType_CORE, line)
 
 			// InHive instrumentation (TEMPORARY, see v2rayxhttp/chunkhist.go): packet-up
 			// POST payload sizes as an INTERVAL snapshot, into the log stream readable on
@@ -236,9 +263,10 @@ func runMemSampler(ctx context.Context) {
 					"mem: high-water ", formatMB(uint64(footprint)), " — heap/goroutine profiles dumped")
 			}
 
-			// Периодический возврат страниц ОС (jetsam считает phys_footprint).
-			if mobile && (tick%12 == 0 ||
-				(footprint > memFreeOSAtBytes && time.Since(lastFreeOS) > time.Minute)) {
+			// Возврат страниц ОС ПО ФАКТУ РОСТА, не по расписанию (см. шапку
+			// файла): footprint перевалил порог и с прошлого раза прошла минута.
+			if footprintKills && footprint > memFreeOSAtBytes &&
+				time.Since(lastFreeOS) > time.Minute {
 				lastFreeOS = time.Now()
 				runtimeDebug.FreeOSMemory()
 			}

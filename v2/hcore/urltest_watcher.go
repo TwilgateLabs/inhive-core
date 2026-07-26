@@ -124,7 +124,14 @@ func (h *InhiveInstance) runModeWatcher(ctx context.Context) {
 		// One sing-box urltest cycle completed for this group. Compute
 		// best-of-cycle verdict: cycle is "healthy" if at least one
 		// outbound came back with a usable delay.
-		hist := monitor.OutboundsHistory("")
+		//
+		// InHive 2026-07-26: Passive — БЕЗ Touch. Обычный OutboundsHistory
+		// говорит карусели «результаты кому-то нужны, не засыпай», а нас сюда
+		// разбудило её же событие: получался вечный двигатель, свип всех
+		// серверов каждые 5 минут навсегда (разбор — в комментарии
+		// OutboundsHistoryPassive). Watcher читает уже посчитанное и права
+		// продлевать жизнь тикера не имеет.
+		hist := monitor.OutboundsHistoryPassive("")
 		failed := isCycleFailed(hist)
 
 		window = appendBounded(window, failed, modeWatcherWindow)

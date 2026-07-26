@@ -17,15 +17,20 @@ import (
 	"github.com/twilgate/inhive-core/v2/config"
 	hcommon "github.com/twilgate/inhive-core/v2/hcommon"
 
+	"github.com/sagernet/sing-box/common/memlite"
 	"github.com/sagernet/sing-box/common/monitoring"
 	E "github.com/sagernet/sing/common/exceptions"
-	"github.com/sagernet/sing/common/memory"
 	"google.golang.org/grpc"
 )
 
 func (h *InhiveInstance) readStatus(prev *SystemInfo) *SystemInfo {
 	var message SystemInfo
-	message.Memory = int64(memory.Inuse())
+	// memlite.Inuse == memory.Inuse по смыслу и цифре (см. пакет memlite), но
+	// без stop-the-world: этот метод тикает 1/с на КАЖДОГО подписчика
+	// GetSystemInfoStream всё время, пока открыто окно приложения, и
+	// секундный ReadMemStats-STW здесь был микро-джиттером поверх туннеля
+	// (особенно iOS NE с GOMAXPROCS=1).
+	message.Memory = int64(memlite.Inuse())
 	message.Goroutines = int32(runtime.NumGoroutine())
 
 	if ss := h.StartedService; ss != nil {
