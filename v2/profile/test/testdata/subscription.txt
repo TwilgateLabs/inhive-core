@@ -1,0 +1,8 @@
+// Синтетическая подписка для тестов — все UUID, пароли и хосты выдуманы.
+// Формат намеренно «как у боевой» — список share-link'ов открытым текстом.
+// В комментариях НЕ должно быть двоеточий (кроме строк-заголовков): их ловит
+// parseHeadersFromContent (profile_parser.go:152) и превращает в HTTP-заголовки.
+vless://0a1b2c3d-4e5f-6071-8293-a4b5c6d7e8f9@1.2.3.4:443?security=reality&pbk=eLVH-wqasU5th1LgWxkL82y_wCp1dSApnc_E0kDp40s&sid=6ba85179&fp=chrome&type=tcp&flow=xtls-rprx-vision&encryption=none#NL%20TCP
+vless://0a1b2c3d-4e5f-6071-8293-a4b5c6d7e8f9@cdn.example.com:443?security=tls&sni=cdn.example.com&type=xhttp&path=%2Fxh&mode=auto&encryption=none#XHTTP
+trojan://trojanpass@example.com:443?type=ws&path=%2Fws&security=tls&sni=example.com#Trojan%20WS
+#vless://0a1b2c3d-4e5f-6071-8293-a4b5c6d7e8f9@5.6.7.8:443?security=tls&type=tcp&encryption=none#Disabled
