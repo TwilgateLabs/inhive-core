@@ -243,6 +243,7 @@ divergences = [
   "Scope запроса = lifetime СОЕДИНЕНИЯ (WithoutCancel(dial-ctx) + cancel в onClose), не dial-ctx: upload_queue собирает строго по seq.",
   "hClient передаётся параметром, а не читается из поля — гонка при ротации xmux.",
   "ОСОЗНАННОЕ УПРОЩЕНИЕ: мажорная версия Chrome в UA не ротируется так, как у Xray (см. комментарий в option/v2ray_transport.go).",
+  "2026-07-29 зомби-xmux: prune в GetXmuxClient у Xray выкидывает протухшего клиента из пула БЕЗ Close — его http2.Transport/горутины/uTLS живут, пока их держит хоть один стрим (download-GET packet-up = вся жизнь проксируемого conn), и копятся зомби-хвостом (device-снимок 255ч: connsCreated=70 при live≤6). У нас: свободный клиент закрывается при prune сразу, занятый паркуется в retired и закрывается sweep'ом (onClose проксируемого conn / следующий GetXmuxClient / Reset), когда OpenUsage и inflightPosts падают до 0; закрытие гейтится grace-паузой от последней выдачи (гонка «выдан, но ещё не посчитан»). inflightPosts — наш счётчик летящих POST'ов (OpenUsage ротационных клиентов не покрывает). Это UPSTREAM-БАГ, кандидат в PR к XTLS/Xray-core. См. mux.go + mux_reap_test.go.",
 ]
 
 # ---------------------------------------------------------------------------
