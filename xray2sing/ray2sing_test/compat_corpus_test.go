@@ -261,6 +261,82 @@ func TestCorpus_UTLS_Guards(t *testing.T) {
 	if u := sub(tls, "utls"); u == nil || u["fingerprint"] != "chrome" {
 		t.Errorf("nosni=1 + fp: utls must be preserved, got %v", tls["utls"])
 	}
+
+	// hysteria2/tuic carry fp= in the URI but the QUIC parsers must NOT translate
+	// it into a tls.utls block: the core has no uTLS-over-QUIC (utls_client.go
+	// STDConfig => "unsupported usage for uTLS", and sing-quic calls STDConfig
+	// unconditionally). A stray fp= on a hy2/tuic node must be inert, not a dead
+	// outbound. (Client-side companion: the Dart builder's _kQuicProtocols gate.)
+	hy2 := mustOutbound(t, "hysteria2://pw@host:443?sni=example.com&fp=chrome&obfs=salamander&obfs-password=x#hy2")
+	if hy2["type"] != "hysteria2" {
+		t.Fatalf("hy2 type = %v, want hysteria2", hy2["type"])
+	}
+	if u := sub(hy2, "tls")["utls"]; u != nil {
+		t.Errorf("hysteria2 + fp: utls must be nil (no uTLS-over-QUIC), got %v", u)
+	}
+	tuicNode := mustOutbound(t, "tuic://"+corpusUUID+":pw@host:443?sni=example.com&fp=firefox&congestion_control=bbr#tuic")
+	if tuicNode["type"] != "tuic" {
+		t.Fatalf("tuic type = %v, want tuic", tuicNode["type"])
+	}
+	if u := sub(tuicNode, "tls")["utls"]; u != nil {
+		t.Errorf("tuic + fp: utls must be nil (no uTLS-over-QUIC), got %v", u)
+	}
+}
+
+// naive terminates TLS in cronet, so protocol/naive/outbound.go:49-85 rejects a
+// list of TLS knobs at construction. Our fork swaps a rejected outbound for
+// InvalidConfig instead of failing the config, so any leak here is a SILENTLY
+// dead server. getTLSOptions is shared with vless/vmess/trojan and sets all of
+// them, so naive.go must zero every one. (Audit 2026-07-30.)
+func TestCorpus_Naive_RejectedTLSKnobsStripped(t *testing.T) {
+	const base = "naive+https://user:pass@host:443?sni=example.com"
+	for _, tc := range []struct {
+		name, uri, key string
+	}{
+		{"fp", base + "&fp=chrome#n", "utls"},
+		{"minversion", base + "&minversion=1.2#n", "min_version"},
+		{"maxversion", base + "&maxversion=1.3#n", "max_version"},
+		{"reality", base + "&security=reality&pbk=K&sid=00#n", "reality"},
+		{"alpn", base + "&alpn=h2#n", "alpn"},
+		{"insecure", base + "&insecure=1#n", "insecure"},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			ob := mustOutbound(t, tc.uri)
+			if ob["type"] != "naive" {
+				t.Fatalf("type = %v, want naive", ob["type"])
+			}
+			tls := sub(ob, "tls")
+			if v, ok := tls[tc.key]; ok {
+				t.Errorf("naive tls.%s must be stripped (naive outbound rejects it "+
+					"=> silently dead server), got %v", tc.key, v)
+			}
+			// Sibling: stripping must not gut the block — SNI still has to survive,
+			// or naive loses cert verification along with the bad knob.
+			if tls["server_name"] != "example.com" {
+				t.Errorf("server_name lost: %v", tls["server_name"])
+			}
+		})
+	}
+
+	// mc=1 (tls_tricks mixed-case SNI) is DELIBERATELY left in place: naive does
+	// not reject it, so stripping it here would be a second silent behaviour. The
+	// runtime warns instead (protocol/naive/outbound.go), which is the honest
+	// treatment for a no-op knob — the node keeps working, the user is told the
+	// trick is not applied. Guards that decision from being "tidied up" into a
+	// strip later, which would take the warning away with it.
+	mc := mustOutbound(t, base+"&mc=1#n")
+	tricks := sub(sub(mc, "tls"), "tls_tricks")
+	if tricks == nil || tricks["mixedcase_sni"] != true {
+		t.Errorf("naive mc=1: tls_tricks must be preserved (runtime warns, does not "+
+			"strip), got %v", sub(mc, "tls")["tls_tricks"])
+	}
+
+	// Sibling-маркер: тот же fp= на vless ОБЯЗАН остаться — гейт узкий, по
+	// протоколу, а не «вырезаем uTLS везде».
+	v := mustOutbound(t, "vless://"+corpusUUID+"@host:443?type=ws&security=tls&fp=chrome&sni=example.com&host=example.com&path=/p#v")
+	if u := sub(sub(v, "tls"), "utls"); u == nil || u["fingerprint"] != "chrome" {
+		t.Errorf("vless+fp must keep utls, got %v", sub(v, "tls")["utls"])
+	}
 }
 
 // #1/#4/#5/#6 — mieru/ssh route to the canonical CORE parser (the Dart app no
