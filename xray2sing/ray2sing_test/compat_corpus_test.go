@@ -857,3 +857,43 @@ func TestCorpus_JSON_WS_ALPN_Clamp(t *testing.T) {
 		t.Errorf("grpc+tls JSON alpn = %v, want [h2]", alpn)
 	}
 }
+
+// 2026-08-01 — knob'ы stream-down keepalive framing (Xray PR #6562, «Вариант 2»)
+// обязаны доезжать из ПОДПИСКИ.
+//
+// Фикс бесполезен, если его нельзя включить тем каналом, которым к юзеру
+// приезжает конфиг: клиентский флаг живёт в `extra` (xhttpSettings), а не в
+// нашем UI. Тест держит именно этот путь — тот же класс, что уже дважды ловили
+// на xmux и obfs-полях (транскодер молча выбрасывал то, чего не знал).
+//
+// Второй инвариант: БЕЗ явного включения полей в транспорте нет вовсе —
+// дефолт выключен, провод прежний.
+func TestCorpus_XHTTP_DownFrameFromSubscription(t *testing.T) {
+	u := corpusUUID
+	link := "vless://" + u + "@1.2.3.4:443?type=xhttp&security=tls&sni=cdn.example.com&encryption=none" +
+		"&path=%2Fx&mode=packet-up" +
+		"&extra=" + urlQueryEscape(`{"downFrame":true,"downFrameKey":"x_zz","scStreamDownServerSecs":"20-40"}`) + "#n"
+	tr := sub(mustOutbound(t, link), "transport")
+	if tr == nil || tr["type"] != "xhttp" {
+		t.Fatalf("transport = %v, want xhttp", tr)
+	}
+	if tr["downFrame"] != true {
+		t.Errorf("downFrame = %v, want true (клиентский флаг не доехал из extra)", tr["downFrame"])
+	}
+	if tr["downFrameKey"] != "x_zz" {
+		t.Errorf("downFrameKey = %v, want x_zz", tr["downFrameKey"])
+	}
+	if tr["scStreamDownServerSecs"] != "20-40" {
+		t.Errorf("scStreamDownServerSecs = %v, want 20-40", tr["scStreamDownServerSecs"])
+	}
+
+	// sibling: без extra полей нет вовсе (omitempty) — дефолт «выключено».
+	plain := "vless://" + u + "@1.2.3.4:443?type=xhttp&security=tls&sni=cdn.example.com&encryption=none&path=%2Fx&mode=packet-up#n"
+	tr2 := sub(mustOutbound(t, plain), "transport")
+	if _, present := tr2["downFrame"]; present {
+		t.Errorf("downFrame присутствует без явного включения: %v", tr2["downFrame"])
+	}
+	if _, present := tr2["scStreamDownServerSecs"]; present {
+		t.Errorf("scStreamDownServerSecs присутствует без явного включения: %v", tr2["scStreamDownServerSecs"])
+	}
+}
