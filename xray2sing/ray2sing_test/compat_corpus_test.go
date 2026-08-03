@@ -897,3 +897,48 @@ func TestCorpus_XHTTP_DownFrameFromSubscription(t *testing.T) {
 		t.Errorf("scStreamDownServerSecs присутствует без явного включения: %v", tr2["scStreamDownServerSecs"])
 	}
 }
+
+// #15 — написание транспорта не должно решать судьбу узла.
+//
+// Xray принимает синонимы (`infra/conf/transport_internet.go`: "ws"/"websocket",
+// "raw"/"tcp", "xhttp"/"splithttp", "h2"/"http"), и подписки пишут их вперемешку.
+// Любое непонятое написание у нас = `unknown transport type` = узел молча
+// исчезает из списка, хотя в Xray/Happ он живой. "websocket" был последней
+// незакрытой ячейкой (2026-08-03).
+func TestCorpus_TransportNameAliases(t *testing.T) {
+	base := "vless://d43ee5e3-1b07-56d7-b2ea-8d22c44fdc66@example.com:443?security=tls&sni=example.com&path=%2Fws&host=example.com"
+	for _, tc := range []struct{ net, want string }{
+		{"ws", "ws"},
+		{"websocket", "ws"}, // ← Xray-написание
+		{"raw", ""},         // raw == tcp: транспорта нет вовсе
+		{"tcp", ""},
+		{"splithttp", "xhttp"},
+		{"xhttp", "xhttp"},
+		{"h2", "http"},
+	} {
+		ob := mustOutbound(t, base+"&type="+tc.net+"#node")
+		tr := sub(ob, "transport")
+		got := ""
+		if tr != nil {
+			got, _ = tr["type"].(string)
+		}
+		if got != tc.want {
+			t.Errorf("type=%s: transport = %q, want %q", tc.net, got, tc.want)
+		}
+	}
+}
+
+// #16 — h3 отвергается ЯВНО, а не подменяется на http.
+//
+// sing-box не несёт HTTP-транспорта поверх QUIC. Тихая подмена на "http" дала бы
+// собравшийся конфиг, который не возит трафик — ровно тот немой отказ, ради
+// которого этот файл и существует. Причина обязана быть в тексте ошибки.
+func TestCorpus_H3TransportRejectedExplicitly(t *testing.T) {
+	uri := "vless://d43ee5e3-1b07-56d7-b2ea-8d22c44fdc66@example.com:443?security=tls&type=h3&sni=example.com#node"
+	if n := outboundCount(t, uri); n != 0 {
+		t.Errorf("type=h3: built %d outbound(s), want 0 (явный отказ, не подмена транспорта)", n)
+	}
+	if _, err := ray2sing.VlessSingbox(uri); err == nil || !strings.Contains(strings.ToLower(err.Error()), "h3") {
+		t.Errorf("VlessSingbox(type=h3) должен вернуть ошибку с упоминанием h3, got: %v", err)
+	}
+}

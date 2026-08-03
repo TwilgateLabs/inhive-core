@@ -225,6 +225,12 @@ func getTransportOptions(decoded map[string]string) (*option.V2RayTransportOptio
 	if net == "splithttp" {
 		net = "xhttp"
 	}
+	// "websocket" is Xray's own spelling of "ws" (infra/conf/transport_internet.go
+	// accepts both). JSON-shaped subscriptions do emit the long form; without the
+	// alias the whole outbound died as "unknown transport type: websocket".
+	if net == "websocket" {
+		net = "ws"
+	}
 
 	switch net {
 	case "tcp":
@@ -565,6 +571,13 @@ func getTransportOptions(decoded map[string]string) (*option.V2RayTransportOptio
 
 		// res["extra"] = extraConfig
 		// }
+
+	case "h3":
+		// Xray принимает "h3" наравне с "h2"/"http" (HTTP-транспорт поверх QUIC).
+		// У sing-box HTTP-транспорта поверх h3 нет вовсе, а тихо увести узел в
+		// обычный "http" — это подменить транспорт: конфиг соберётся и не
+		// заработает, то есть тот самый немой отказ. Отдаём явную причину.
+		return nil, E.New("h3 transport not supported by InHive core (sing-box has no HTTP/3 V2Ray transport)")
 
 	case "kcp", "mkcp":
 		// InHive: mKCP is not implemented by sing-box (and never was) — the
