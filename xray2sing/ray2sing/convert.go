@@ -185,7 +185,16 @@ func GenerateConfigLite(input string, useXrayWhenPossible bool) (*option.Options
 	// NOTE: ingestJSON intentionally ingests ONLY proxy outbounds/servers and
 	// DROPS any embedded "dns"/"routing"/"rules" (InHive owns DNS + routing
 	// centrally for leak protection). See json_ingest.go for the rationale.
-	if uris, ok := ingestJSON(input); ok {
+	//
+	// AmneziaVPN vpn:// container (also the payload of a `.vpn` file) is
+	// checked FIRST — cheapest sniff, and an import error there must surface
+	// verbatim (unsupported-protocol refusal), not degrade into the generic
+	// "No outbounds found". See amnezia_ingest.go.
+	if uris, ok, err := ingestAmneziaVPN(input); err != nil {
+		return nil, err
+	} else if ok {
+		input = uris
+	} else if uris, ok := ingestJSON(input); ok {
 		input = uris
 	} else if uris, ok := ingestClashYAML(input); ok {
 		// Clash / Clash.Meta YAML (proxies:) — the other dominant container
@@ -357,6 +366,16 @@ func ConvertToShareLinks(content string) (out string, err error) {
 		if len(records) == 0 {
 			return "", E.New("No servers found")
 		}
+		return strings.Join(records, "\n"), nil
+	}
+
+	// AmneziaVPN vpn:// container / `.vpn` file payload — same records contract
+	// as the JSON branch (canonical URI or minified node JSON per server); a
+	// recognized-but-unimportable container is a hard error carrying the
+	// protocol name, mirroring the Parse path.
+	if records, ok, err := convertAmneziaEntries(decoded); err != nil {
+		return "", err
+	} else if ok {
 		return strings.Join(records, "\n"), nil
 	}
 

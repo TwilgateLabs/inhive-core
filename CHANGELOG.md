@@ -11,6 +11,22 @@ shipped standalone).
 
 ### Added
 
+- **AmneziaVPN `vpn://` config import** (also the payload of shared `.vpn` files).
+  The link is unwrapped (base64url, Qt qCompress framing: 4-byte big-endian size +
+  zlib; uncompressed legacy payloads accepted too) and every supported container is
+  converted through the existing pipelines — never a parallel converter:
+  `amnezia-xray`/`amnezia-ssxray` via the Xray-JSON ingest, `amnezia-wireguard`/
+  `amnezia-awg`/`amnezia-awg2` via the same wg-quick INI parser the `[Interface]`
+  path uses (canonicalized to `wireguard://`/`awg://`), `amnezia-shadowsocks` to a
+  SIP002 `ss://` URI. Multiple containers in one file import as separate nodes,
+  the `defaultContainer` node first, named from the export's `description`.
+  Containers we cannot run yet (OpenVPN, OpenVPN-over-Cloak, IKEv2) and Amnezia
+  Free/Premium API keys are refused with one clear line naming the reason instead
+  of a silent zero-node import; embedded `dns1`/`dns2` are dropped by design
+  (InHive owns DNS centrally). Container shapes verified against amnezia-client
+  4.8.21.0 sources; live-fixture + corruption tests in
+  `ray2sing/amnezia_ingest_test.go`.
+
 - **Hermetic liveness gates for our own protocols** (follow-up to the AWG fix: "it
   compiles" had been passing for code that never carried a byte). Each gate brings up
   a genuine responder on loopback and proves an HTTP 204 travels THROUGH the tunnel —
