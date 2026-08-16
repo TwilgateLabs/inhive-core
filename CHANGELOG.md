@@ -11,56 +11,56 @@ shipped standalone).
 
 ### Added
 
-- **`SystemInfo.current_outbound_down` — факт circuit-breaker'а наверх, в UI**
-  (audit A2, «зелёное Подключено врёт»). `readStatus` разворачивает селектор /
-  вложенные группы до тега РЕАЛЬНОГО сервера (`resolveRealOutboundTag`, тот же
-  разворот через `Now()`, что в dns-фиксе — брейкер ключует здоровье по inner-
-  тегу, без разворота сравнение не сработало бы никогда) и спрашивает
-  `ConnectionManager.IsOutboundDown`. Приложение поллит unary `GetSystemInfo`
-  при подключённом туннеле и показывает «сервер не отвечает» вместо зелёного.
-  Новый аксессор `daemon.Instance.ConnectionManager()`. Поведение туннеля не
-  тронуто: никакого авто-переключения/failover (решение 2026-07-17). Гейты —
+- **`SystemInfo.current_outbound_down` — the circuit-breaker fact surfaced to the UI**
+  (audit A2, "the green Connected lies"). `readStatus` unwraps the selector / nested
+  groups down to the tag of the REAL server (`resolveRealOutboundTag` — the same
+  `Now()` unwrap as in the DNS fix: the breaker keys health by the inner tag, so
+  without unwrapping the comparison would never have matched) and asks
+  `ConnectionManager.IsOutboundDown`. The app polls the unary `GetSystemInfo` while
+  the tunnel is connected and shows "server not responding" instead of the green
+  state. New accessor `daemon.Instance.ConnectionManager()`. Tunnel behaviour is
+  untouched: no auto-switch, no failover (decision of 2026-07-17). Gated by
   `hcore/commands_liveness_test.go`.
+- **The circuit-breaker became observable.** The 2026-08-10 diagnostic contained zero
+  traces of the breaker during an obvious dial storm — there was no way to tell "it
+  never tripped" from "it tripped and did not help". State transitions are now logged
+  at WARN (the client's default level; INFO would never reach `box.log`): trip with the
+  consecutive-failure count, probe and its outcome with the backoff, recovery with the
+  time spent down, plus a rate-limited (once per second) counter of fast-failed dials —
+  reusing the same technique as the dial cap rather than inventing a second one.
+  Gated by `route/conn_test.go`.
 
 ### Fixed
 
-- **`ConvertToShareLinks` понимает wg-quick / AmneziaWG `.conf`.** Форвард-парсер
-  `[Interface]`-INI (`AWGSingboxTxt`) был подключён только к Parse-пути, а
-  канонизация возвращала multi-line INI как одну «запись» — приложение режет
-  записи по `\n` и шинковало conf в нераспознаваемые строки (юзер-репорт:
-  «файлы от генераторов Амнезии не вставляются»). Теперь conf детектится по
-  первой значащей строке (BOM/комментарии `#`/`;`/регистр терпимы), режется по
-  `[Interface]`-заголовкам (файл может нести несколько туннелей) и каждый
-  туннель уходит той же канонизацией, что контейнерный JSON: `wg://`/`awg://`
-  URI при round-trip, endpoint-JSON иначе. Попутно: `AllowedIPs` принимает
-  список через запятую (`0.0.0.0/0, ::/0` — так пишет генератор Amnezia;
-  раньше валило весь conf) и починен тег-опечатка `wiregaurd` (виден юзеру как
-  имя сервера). Гейты — `ray2sing_test/awg_conf_test.go`.
-- **DNS-ждуны больше не ждут дольше лидера.** Single-flight в `dns/client.go`
-  давал каждому ждущему запросу его собственные полные 10 секунд, хотя лидер
-  стартовал раньше и падал раньше — при мёртвом транспорте каждое имя стояло
-  ~10s на волну запросов (инцидент 2026-08-10: 1080 из ~2900 ошибок — это
-  `cache wait timeout`, `gateway.icloud.com` висел 5 минут). Теперь рядом с
-  каналом single-flight хранится дедлайн лидера, и ждун ждёт не дольше его
-  остатка; пришедший после дедлайна падает сразу. Кеш-семантика прежняя: при
-  успехе лидера ждуны получают кешированный ответ. Гейты — `dns/client_test.go`.
-- **DNS коротит по down-outbound'у.** Circuit-breaker прикрывал только дайлы
-  приложений, а DNS-путь шёл мимо: даже когда брейкер уже знал, что сервер
-  мёртв, DNS честно жёг таймауты. Теперь transport, чей `detour` помечен down,
-  fast-fail'ит запрос сразу (и лидера, и ждуна), не трогая кеш — ответы из
-  кеша при down-сервере по-прежнему отдаются. Связь transport→outbound — только
-  заявленный в конфиге `detour`, без эвристик; DNS на здоровье outbound'а не
-  влияет (read-only, `IsOutboundDown`).
+- **`ConvertToShareLinks` now understands wg-quick / AmneziaWG `.conf`.** The forward
+  parser for `[Interface]` INI (`AWGSingboxTxt`) was wired only into the Parse path,
+  while canonicalisation returned the multi-line INI as a single "entry" — the app
+  splits entries on `\n` and shredded the conf into unrecognisable lines (user report:
+  "files from Amnezia generators cannot be pasted"). A conf is now detected by its
+  first significant line (tolerant of BOM, `#`/`;` comments and case), split on
+  `[Interface]` headers (one file may carry several tunnels), and each tunnel goes
+  through the same canonicalisation as container JSON: `wg://`/`awg://` URIs on
+  round-trip, endpoint JSON otherwise. Along the way: `AllowedIPs` now accepts a
+  comma-separated list (`0.0.0.0/0, ::/0` — exactly what the Amnezia generator writes;
+  previously it hard-failed the whole conf) and the `wiregaurd` tag typo is fixed (it
+  is user-visible as the server name). Gated by `ray2sing_test/awg_conf_test.go`.
+- **DNS waiters no longer wait longer than the leader.** The single-flight in
+  `dns/client.go` gave every waiting query its own full 10 seconds even though the
+  leader had started earlier and would fail earlier — with a dead transport every name
+  cost ~10s per wave of queries (incident 2026-08-10: 1080 of ~2900 log errors were
+  `cache wait timeout`, and `gateway.icloud.com` hung for 5 minutes). The leader's
+  deadline is now stored next to the single-flight channel, so a waiter waits no longer
+  than what is left of it; one arriving after the deadline fails immediately. Cache
+  semantics are unchanged: on a successful leader, waiters still get the cached answer.
+  Gated by `dns/client_test.go`.
+- **DNS short-circuits on a down outbound.** The circuit-breaker covered only
+  application dials while the DNS path went around it: even when the breaker already
+  knew the server was dead, DNS still burned full timeouts. A transport whose `detour`
+  is marked down now fast-fails the query immediately (both leader and waiters) without
+  touching the cache — cached answers are still served while the server is down. The
+  transport→outbound link comes solely from the `detour` declared in the config, with
+  no heuristics; DNS never affects outbound health (read-only, `IsOutboundDown`).
 
-### Added
-
-- **Circuit-breaker стал наблюдаемым.** В диагностике 2026-08-10 было ноль
-  следов брейкера при явном dial-шторме — нельзя было отличить «не сработал»
-  от «сработал и не помогло». Теперь переходы логируются на WARN (дефолтный
-  уровень клиента): trip с числом подряд-фейлов, probe и его исход с backoff'ом,
-  recovery со временем в down, плюс rate-limited (раз в секунду) счётчик
-  fast-fail'нутых дайлов — тем же приёмом, что у dial-cap. Гейт —
-  `route/conn_test.go`.
 
 ## [4.8.2] - 2026-08-04
 
