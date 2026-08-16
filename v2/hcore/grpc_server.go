@@ -87,6 +87,11 @@ func Setup(params *SetupRequest, platformInterface libbox.PlatformInterface) err
 	// (workingDir был неизвестен) и сейчас выливаются в файл. См. log_file.go.
 	initCoreLog(filepath.Join(sWorkingPath, "data"))
 
+	// Фатальные краши рантайма (паника в ЛЮБОЙ горутине мимо всех recover) —
+	// в свой data/crash.log через debug.SetCrashOutput: stderr-редиректа выше
+	// недостаточно, если хост его перенаправит или затрёт. См. crash_output.go.
+	setupCrashOutput(filepath.Join(sWorkingPath, "data"))
+
 	// Heartbeat: post-mortem trail for silent process death. sync.Once so
 	// repeated Setup() (mode OLD + GRPC) don't spawn duplicate goroutines.
 	//

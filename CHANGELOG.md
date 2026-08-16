@@ -29,8 +29,31 @@ shipped standalone).
   time spent down, plus a rate-limited (once per second) counter of fast-failed dials —
   reusing the same technique as the dial cap rather than inventing a second one.
   Gated by `route/conn_test.go`.
+- **Fatal runtime crashes now leave a post-mortem file: `data/crash.log`**
+  (`debug.SetCrashOutput`, wired in Setup next to `initCoreLog`). An unrecovered
+  panic in any goroutine bypasses every recover and kills the process; on Windows
+  the Flutter host does not capture stderr, so such deaths were invisible
+  (unreportable-bug-class). The previous non-empty dump is kept as
+  `crash.log.old`. Gated by `hcore/crash_output_test.go`.
 
 ### Fixed
+
+- **AmneziaWG endpoint never started its device and killed the whole app on close**
+  (field crash 2026-08-16: pinging an imported Amnezia `.conf` on Windows made the
+  process vanish without a trace). `protocol/awg` `Endpoint.Start` shadowed the
+  embedded transport `Device.Start` and never called it, so the amneziawg device
+  was never created — the tunnel could not handshake, and the endpoint's `Close`
+  dereferenced the nil device inside a box-close goroutine: an unrecoverable
+  SIGSEGV that no gRPC-boundary recover can catch. Three-part fix: `Start` now
+  delegates to the device, `Close` is nil-safe, and the AWG bind gets a real
+  context (it was nil, which would have panicked the first `ListenPacket` once
+  the device actually started). The awg `readyChecker` also now mirrors the
+  wireguard endpoint (probe through the tunnel, flip ready on success) instead of
+  a blind 10-second timer that lied both ways and cost every awg ping the full
+  `waitDetourReady` budget. Gated by `hcore/url_test_config_awg_test.go` (the
+  crash reproducer — it SIGSEGV'd the test binary before the fix) and
+  `hcore/url_test_config_awg_live_test.go` (green ping through a real
+  amneziawg-go responder with matching junk/obfuscation params).
 
 - **`ConvertToShareLinks` now understands wg-quick / AmneziaWG `.conf`.** The forward
   parser for `[Interface]` INI (`AWGSingboxTxt`) was wired only into the Parse path,
