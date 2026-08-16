@@ -241,6 +241,9 @@ jobs:
         run: go vet -tags "${{ steps.ctx.outputs.tags }}" $(cat /tmp/pkgs-vet.txt)
 
       # Тесты в модулях sing-box/xray2sing до этого не запускались НИ РАЗУ —
+      # Гейт naive (TestUrlTestConfig_Naive_Live) в ЭТОТ шаг не попадает по
+      # построению: тестовые теги без with_naive_outbound (см. выше). Его
+      # исполняет отдельный job naive-live на macOS ниже.
       # они лежали вне `./...`. Теги обязательны: без них часть падает не по
       # существу, а на заглушках (например transport/v2rayxhttp без with_utls:
       # "uTLS ... is not included in this build"). Набор тегов здесь свой —
@@ -251,3 +254,41 @@ jobs:
       # прогон, дошедший сюда, и будет первым фактическим запуском.
       - name: Run tests
         run: go test -tags "${{ steps.ctx.outputs.tags_test }}" -count=1 -timeout 10m $(cat /tmp/pkgs-test.txt)
+
+  # Liveness-гейт naive на macOS. Почему отдельный job: linux-раннер не может
+  # ЛИНКОВАТЬ бинари с libcronet.a (GNU ld «skipping incompatible», разбор — в
+  # шаге «Resolve tags and packages» выше), поэтому основной тестовый прогон
+  # идёт без with_naive_outbound и код naive там никогда не ИСПОЛНЯЕТСЯ —
+  # только компилируется. Это ровно тот класс, где «компилируется» ничего не
+  # доказывает: cronet — рантайм-движок, сборка всегда зелёная (инцидент
+  # 4.7.0). На macOS arm64 cronet линкуется статически через CGO, и
+  # TestUrlTestConfig_Naive_Live гоняет НАСТОЯЩИЙ движок против настоящего
+  # naive-инбаунда через loopback — герметично, без сети наружу.
+  naive-live:
+    runs-on: macos-15
+    steps:
+      - name: Rewrite SSH to HTTPS for submodules
+        run: git config --global url."https://github.com/".insteadOf "git@github.com:"
+
+      - name: Checkout
+        uses: actions/checkout@34e114876b0b11c390a56381ad16ebd13914f8d5  # v4.3.1
+        with:
+          submodules: recursive
+
+      - name: Setup Go
+        uses: actions/setup-go@40f1582b2485089dde7abd97c1529aa768e1baff  # v5.6.0
+        with:
+          # Держать в одной версии с основным job'ом и go.mod (см. комментарий там).
+          go-version: '1.26.5'
+
+      - name: Run naive liveness gate
+        run: |
+          set -euo pipefail
+          # Теги — из Makefile, та же дисциплина, что в основном job'е: полный
+          # BASE_TAGS, ВКЛЮЧАЯ with_naive_outbound (весь смысл этого job'а).
+          TAGS=$(sed -n 's/^BASE_TAGS=//p' Makefile | head -1)
+          if [ -z "$TAGS" ]; then
+            echo "::error::не удалось прочитать BASE_TAGS из Makefile"
+            exit 1
+          fi
+          go test -tags "$TAGS" -run 'TestUrlTestConfig_Naive_Live' -count=1 -timeout 10m -v ./v2/hcore

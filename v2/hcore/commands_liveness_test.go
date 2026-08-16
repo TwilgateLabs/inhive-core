@@ -20,12 +20,12 @@ type stubOutbound struct {
 	tag string
 }
 
-func (s *stubOutbound) Type() string          { return "stub" }
-func (s *stubOutbound) Tag() string           { return s.tag }
-func (s *stubOutbound) Network() []string     { return []string{N.NetworkTCP} }
+func (s *stubOutbound) Type() string           { return "stub" }
+func (s *stubOutbound) Tag() string            { return s.tag }
+func (s *stubOutbound) Network() []string      { return []string{N.NetworkTCP} }
 func (s *stubOutbound) Dependencies() []string { return nil }
-func (s *stubOutbound) DisplayType() string   { return "stub" }
-func (s *stubOutbound) IsReady() bool         { return true }
+func (s *stubOutbound) DisplayType() string    { return "stub" }
+func (s *stubOutbound) IsReady() bool          { return true }
 func (s *stubOutbound) DialContext(ctx context.Context, network string, destination M.Socksaddr) (net.Conn, error) {
 	return nil, nil
 }

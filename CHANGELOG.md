@@ -11,6 +11,27 @@ shipped standalone).
 
 ### Added
 
+- **Hermetic liveness gates for our own protocols** (follow-up to the AWG fix: "it
+  compiles" had been passing for code that never carried a byte). Each gate brings up
+  a genuine responder on loopback and proves an HTTP 204 travels THROUGH the tunnel —
+  no internet, no external servers. `mieru`: real `enfein/mieru` server (the same
+  library `mita` runs) ↔ our outbound via `UrlTestConfig`
+  (`hcore/url_test_config_mieru_live_test.go`). `dnstt`: reference `dnstt-server`
+  logic ported onto the same importable library packages (dns/noise/turbotunnel/
+  kcp/smux) ↔ our outbound, exercising the base32/TXT encoding, KCP, Noise NK and
+  smux for real (`hcore/url_test_config_dnstt_live_test.go`). `naive`: genuine naive
+  inbound (h2-over-TLS, throwaway CA) ↔ the cronet-backed outbound — the only test
+  that actually executes the cronet engine; runs in a dedicated macOS CI job
+  (`naive-live` in build.yml) because the linux runner cannot link `libcronet.a`
+  (`hcore/url_test_config_naive_live_test.go`). `olcrtc`: adapter-level traffic gate
+  (SOCKS5 detour plumbing carries verified bytes; validation + lazy-lifecycle locks)
+  plus a registry gate proving the `with_olcrtc` wiring resolves to the real
+  constructor, not the stub (`protocol/olcrtc/outbound_test.go`,
+  `hcore/url_test_config_olcrtc_test.go`). Known honest limits: the olcrtc WebRTC
+  link itself needs a live SFU (covered only by the fork's e2e), and the naive gate
+  links cronet statically, so the Windows purego DLL↔go.mod version sync remains
+  guarded only by the build pipeline (`sync-naive-lib-windows.ps1`).
+
 - **`SystemInfo.current_outbound_down` — the circuit-breaker fact surfaced to the UI**
   (audit A2, "the green Connected lies"). `readStatus` unwraps the selector / nested
   groups down to the tag of the REAL server (`resolveRealOutboundTag` — the same
