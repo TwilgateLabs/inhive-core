@@ -3,6 +3,11 @@
 *.so
 
 *cronet*
+# ...но не наши СКРИПТЫ про cronet: правило выше нацелено на бинари
+# (libcronet.dll/.a весом под 10MB), а по имени оно глотает и код.
+# Ловится молча: файл создан, git его не показывает ни в status, ни в diff.
+!scripts/*cronet*.ps1
+!scripts/*cronet*.sh
 /bin/*
 !/bin/.gitkeep
 .build
