@@ -4,6 +4,7 @@ import (
 	"context"
 	"fmt"
 	"os"
+	"regexp"
 	"runtime"
 
 	"strconv"
@@ -345,6 +346,20 @@ func ConvertToShareLinks(content string) (out string, err error) {
 	// valid base64, so this is a no-op for containers).
 	decoded, _ := decodeBase64IfNeeded(content)
 
+	// wg-quick / AmneziaWG .conf ([Interface] INI). Checked FIRST: the detection
+	// (first significant line) is the cheapest and most specific, and a conf
+	// starts with '[' — the same byte the JSON sniff below keys on. Without this
+	// branch the INI fell through to the share-link text path, which returned the
+	// MULTI-LINE body as one "record" — the app splits records on '\n' and
+	// shredded the conf into unparseable lines ("не распознано" for every
+	// generator-produced .conf, user-reported).
+	if records, ok := convertAWGConfEntries(decoded); ok {
+		if len(records) == 0 {
+			return "", E.New("No servers found")
+		}
+		return strings.Join(records, "\n"), nil
+	}
+
 	// Container JSON (sing-box / Xray / Happ / SIP008 / single outbound): needs
 	// per-entry classification (canonical URI OR JSON fallback), the primary case.
 	if records, ok := convertJSONEntries(decoded); ok {
@@ -376,4 +391,81 @@ func ConvertToShareLinks(content string) (out string, err error) {
 		return "", E.New("No servers found")
 	}
 	return strings.Join(records, "\n"), nil
+}
+
+// awgConfHeader matches an "[Interface]" section-header line — the start of one
+// wg-quick / AmneziaWG tunnel. Case-insensitive: wg(8) treats section names
+// case-insensitively (AWGSingboxTxt lowercases them too), only the prefix
+// dispatch in endpointParsers is exact-case.
+var awgConfHeader = regexp.MustCompile(`(?im)^[ \t]*\[interface\][ \t]*\r?$`)
+
+// looksLikeAWGConf reports whether the body's first significant line — after
+// skipping a UTF-8 BOM, blank lines and #/; comment lines (generators write
+// both) — is an [Interface] header, i.e. the body is a wg-quick / AmneziaWG
+// .conf rather than a share-link list / JSON / YAML. Mirrors the Dart-side
+// detection (looksLikeWireGuardConf in server_uri_parser.dart) so the app and
+// the core agree on what is a conf.
+func looksLikeAWGConf(body string) bool {
+	for _, raw := range strings.Split(body, "\n") {
+		line := strings.TrimSpace(raw)
+		if line == "" || strings.HasPrefix(line, "#") || strings.HasPrefix(line, ";") {
+			continue
+		}
+		return awgConfHeader.MatchString(line)
+	}
+	return false
+}
+
+// convertAWGConfEntries renders a wg-quick / AmneziaWG .conf body into
+// ConvertToShareLinks records. ok=false when the body is not a conf (caller
+// falls through); an empty records slice with ok=true means a detected conf
+// with no parseable tunnel (caller hard-errors, same as the other branches).
+//
+// The body is split on [Interface] headers (a file may concatenate several
+// tunnels), each chunk is parsed by AWGSingboxTxt — the SAME forward parser the
+// Parse path dispatches via endpointParsers — and the resulting endpoints are
+// re-marshaled into a {"endpoints":[...]} container fed through
+// convertJSONEntries. That reuses the endpoint canonicalization verbatim
+// (wg:// / awg:// URI when the tunnel round-trips, minified endpoint JSON
+// otherwise), so .conf import and container import can never drift.
+func convertAWGConfEntries(body string) ([]string, bool) {
+	body = strings.TrimPrefix(body, "\uFEFF")
+	if !looksLikeAWGConf(body) {
+		return nil, false
+	}
+	// Non-empty given the detection above matched an [Interface] line.
+	idx := awgConfHeader.FindAllStringIndex(body, -1)
+	var endpoints []T.Endpoint
+	for i, loc := range idx {
+		end := len(body)
+		if i+1 < len(idx) {
+			end = idx[i+1][0]
+		}
+		// AWGSingboxTxt is section-name case-insensitive, so the chunk goes in
+		// verbatim. A broken tunnel is skipped with a warning, not fatal —
+		// mirroring the per-entry error handling of GenerateConfigLite.
+		ep, err := AWGSingboxTxt(body[loc[0]:end])
+		if err != nil {
+			skip("awg-conf", err.Error())
+			continue
+		}
+		endpoints = append(endpoints, *ep)
+	}
+	if len(endpoints) == 0 {
+		return []string{}, true
+	}
+	// Marshal needs no option registry (registries are an UNmarshal concern —
+	// Ray2Singbox marshals full Options with a bare context the same way).
+	opts := T.Options{Endpoints: endpoints}
+	blob, err := opts.MarshalJSONContext(context.Background())
+	if err != nil {
+		skip("awg-conf", "endpoints did not marshal: "+err.Error())
+		return []string{}, true
+	}
+	records, ok := convertJSONEntries(string(blob))
+	if !ok {
+		// Cannot happen for a container we just marshaled; stay honest anyway.
+		return []string{}, true
+	}
+	return records, true
 }

@@ -150,11 +150,21 @@ func AWGSingboxTxt(content string) (*T.Endpoint, error) {
 				}
 
 			case "AllowedIPs":
-				pfx, err := netip.ParsePrefix(val)
-				if err != nil {
-					return nil, fmt.Errorf("invalid AllowedIPs: %w", err)
+				// wg-quick allows a comma-separated list ("0.0.0.0/0, ::/0" —
+				// exactly what Amnezia's generator writes) and repeating the key;
+				// both semantics are append. A single ParsePrefix(val) here used
+				// to hard-fail the WHOLE conf on the typical Amnezia file.
+				for _, part := range strings.Split(val, ",") {
+					part = strings.TrimSpace(part)
+					if part == "" {
+						continue
+					}
+					pfx, err := netip.ParsePrefix(part)
+					if err != nil {
+						return nil, fmt.Errorf("invalid AllowedIPs: %w", err)
+					}
+					peer.AllowedIPs = append(peer.AllowedIPs, pfx)
 				}
-				peer.AllowedIPs = badoption.Listable[netip.Prefix]{pfx}
 
 			case "Endpoint":
 				host, portStr, err := net.SplitHostPort(val)
@@ -223,8 +233,10 @@ func AWGSingboxTxt(content string) (*T.Endpoint, error) {
 			wgopts.MTU = mtu
 		}
 		return &T.Endpoint{
-			Type:    C.TypeWireGuard,
-			Tag:     "wiregaurd",
+			Type: C.TypeWireGuard,
+			// The tag doubles as the user-visible server name in the app
+			// (URI #fragment / JSON tag) — was the "wiregaurd" typo.
+			Tag:     "wireguard",
 			Options: wgopts,
 		}, nil
 	}

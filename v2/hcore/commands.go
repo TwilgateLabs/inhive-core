@@ -23,6 +23,43 @@ import (
 	"google.golang.org/grpc"
 )
 
+// outboundLookup — узкий срез adapter.OutboundManager, достаточный для
+// resolveRealOutboundTag. Отдельный интерфейс единственно ради юнит-теста
+// (commands_liveness_test.go): полный OutboundManager стабить незачем.
+type outboundLookup interface {
+	Outbound(tag string) (adapter.Outbound, bool)
+}
+
+// resolveRealOutboundTag разворачивает цепочку групп (селектор → возможно
+// вложенные группы) до тега РЕАЛЬНОГО outbound'а — того самого, по которому
+// circuit-breaker ключует здоровье. "" = тег не найден (чужой конфиг без
+// нашего селектора — universal client) или пустая группа. Потолок итераций —
+// защита от цикла групп в кривом конфиге (тот же приём, что в dns/client.go).
+func resolveRealOutboundTag(om outboundLookup, tag string) string {
+	if om == nil {
+		return ""
+	}
+	if _, loaded := om.Outbound(tag); !loaded {
+		return ""
+	}
+	for i := 0; i < 8; i++ {
+		outbound, loaded := om.Outbound(tag)
+		if !loaded {
+			break
+		}
+		group, isGroup := outbound.(adapter.OutboundGroup)
+		if !isGroup {
+			break
+		}
+		now := group.Now()
+		if now == "" || now == tag {
+			break
+		}
+		tag = now
+	}
+	return tag
+}
+
 func (h *InhiveInstance) readStatus(prev *SystemInfo) *SystemInfo {
 	var message SystemInfo
 	// memlite.Inuse == memory.Inuse по смыслу и цифре (см. пакет memlite), но
@@ -57,6 +94,19 @@ func (h *InhiveInstance) readStatus(prev *SystemInfo) *SystemInfo {
 					if now := g.Now(); now != "" {
 						message.CurrentOutbound = fmt.Sprint(message.CurrentOutbound, "→", TrimTagName(now))
 					}
+				}
+			}
+			// InHive 2026-08-11 (audit A2, «зелёное Подключено врёт»): факт
+			// «circuit-breaker пометил активный outbound down» — наверх, в UI.
+			// Health брейкера ключуется по тегу РЕАЛЬНОГО сервера (Selector
+			// делегирует дайл в выбранный inner, route/conn.go берёт
+			// this.(adapter.Outbound).Tag()), поэтому селектор/вложенные группы
+			// обязательно разворачиваем через Now() — как в dns/client.go
+			// (exchangeCircuitOpenErr), иначе сравнение тегов из разных
+			// пространств не сработает никогда.
+			if cm := h.ConnectionManager(); cm != nil {
+				if realTag := resolveRealOutboundTag(box.Outbound(), config.OutboundSelectTag); realTag != "" {
+					message.CurrentOutboundDown = cm.IsOutboundDown(realTag)
 				}
 			}
 		}

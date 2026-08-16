@@ -92,6 +92,15 @@ func (h *InhiveInstance) Context() context.Context {
 	return ins.Context()
 }
 
+// ConnectionManager — менеджер соединений живого box'а (circuit-breaker живёт
+// в нём). nil, пока сервис не поднят. InHive 2026-08-11 (audit A2).
+func (h *InhiveInstance) ConnectionManager() adapter.ConnectionManager {
+	if ins := h.Instance(); ins != nil {
+		return ins.ConnectionManager()
+	}
+	return nil
+}
+
 func (h *InhiveInstance) TrafficManager() *trafficontrol.Manager {
 	if ins := h.Instance(); ins != nil {
 		if s := ins.ClashServer(); s != nil {

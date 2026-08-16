@@ -85,6 +85,11 @@ message SystemInfo {
   int64 downlink_total = 9;
   string current_outbound = 10;
   string current_profile = 11;
+  // InHive 2026-08-11 (audit A2, «зелёное Подключено врёт»): circuit-breaker
+  // ядра пометил АКТИВНЫЙ outbound down (route/conn.go, trip после 8
+  // подряд-фейлов дайла). true = туннель поднят, но трафик через текущий
+  // сервер не идёт. Снимается только фактическим успешным дайлом (probe).
+  bool current_outbound_down = 12;
 }
 
 message OutboundInfo {

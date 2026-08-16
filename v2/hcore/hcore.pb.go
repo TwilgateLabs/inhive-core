@@ -640,8 +640,13 @@ type SystemInfo struct {
 	DownlinkTotal    int64                  `protobuf:"varint,9,opt,name=downlink_total,json=downlinkTotal,proto3" json:"downlink_total,omitempty"`
 	CurrentOutbound  string                 `protobuf:"bytes,10,opt,name=current_outbound,json=currentOutbound,proto3" json:"current_outbound,omitempty"`
 	CurrentProfile   string                 `protobuf:"bytes,11,opt,name=current_profile,json=currentProfile,proto3" json:"current_profile,omitempty"`
-	unknownFields    protoimpl.UnknownFields
-	sizeCache        protoimpl.SizeCache
+	// InHive 2026-08-11 (audit A2, «зелёное Подключено врёт»): circuit-breaker
+	// ядра пометил АКТИВНЫЙ outbound down (route/conn.go, trip после 8
+	// подряд-фейлов дайла). true = туннель поднят, но трафик через текущий
+	// сервер не идёт. Снимается только фактическим успешным дайлом (probe).
+	CurrentOutboundDown bool `protobuf:"varint,12,opt,name=current_outbound_down,json=currentOutboundDown,proto3" json:"current_outbound_down,omitempty"`
+	unknownFields       protoimpl.UnknownFields
+	sizeCache           protoimpl.SizeCache
 }
 
 func (x *SystemInfo) Reset() {
@@ -749,6 +754,13 @@ func (x *SystemInfo) GetCurrentProfile() string {
 		return x.CurrentProfile
 	}
 	return ""
+}
+
+func (x *SystemInfo) GetCurrentOutboundDown() bool {
+	if x != nil {
+		return x.CurrentOutboundDown
+	}
+	return false
 }
 
 type OutboundInfo struct {
@@ -3091,7 +3103,7 @@ const file_v2_hcore_hcore_proto_rawDesc = "" +
 	"\x06secret\x18\x06 \x01(\tR\x06secret\x12\x14\n" +
 	"\x05debug\x18\a \x01(\bR\x05debug\x12$\n" +
 	"\x04mode\x18\b \x01(\x0e2\x10.hcore.SetupModeR\x04mode\x12*\n" +
-	"\x11fix_android_stack\x18\t \x01(\bR\x0ffixAndroidStack\"\x93\x03\n" +
+	"\x11fix_android_stack\x18\t \x01(\bR\x0ffixAndroidStack\"\xc7\x03\n" +
 	"\n" +
 	"SystemInfo\x12\x16\n" +
 	"\x06memory\x18\x01 \x01(\x03R\x06memory\x12\x1e\n" +
@@ -3107,7 +3119,8 @@ const file_v2_hcore_hcore_proto_rawDesc = "" +
 	"\x0edownlink_total\x18\t \x01(\x03R\rdownlinkTotal\x12)\n" +
 	"\x10current_outbound\x18\n" +
 	" \x01(\tR\x0fcurrentOutbound\x12'\n" +
-	"\x0fcurrent_profile\x18\v \x01(\tR\x0ecurrentProfile\"\x89\x05\n" +
+	"\x0fcurrent_profile\x18\v \x01(\tR\x0ecurrentProfile\x122\n" +
+	"\x15current_outbound_down\x18\f \x01(\bR\x13currentOutboundDown\"\x89\x05\n" +
 	"\fOutboundInfo\x12\x10\n" +
 	"\x03tag\x18\x01 \x01(\tR\x03tag\x12\x12\n" +
 	"\x04type\x18\x02 \x01(\tR\x04type\x12>\n" +
