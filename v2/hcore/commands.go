@@ -97,8 +97,10 @@ func (h *InhiveInstance) readStatus(prev *SystemInfo) *SystemInfo {
 				}
 			}
 			// InHive 2026-08-11 (audit A2, «зелёное Подключено врёт»): факт
-			// «circuit-breaker пометил активный outbound down» — наверх, в UI.
-			// Health брейкера ключуется по тегу РЕАЛЬНОГО сервера (Selector
+			// «активный outbound в дегрейде (серия отказов дайла)» — наверх,
+			// в UI. Проводное поле осталось CurrentOutboundDown (контракт с
+			// Dart-клиентом, gRPC не переименовываем), семантика — degraded.
+			// Health ключуется по тегу РЕАЛЬНОГО сервера (Selector
 			// делегирует дайл в выбранный inner, route/conn.go берёт
 			// this.(adapter.Outbound).Tag()), поэтому селектор/вложенные группы
 			// обязательно разворачиваем через Now() — как в dns/client.go
@@ -106,7 +108,7 @@ func (h *InhiveInstance) readStatus(prev *SystemInfo) *SystemInfo {
 			// пространств не сработает никогда.
 			if cm := h.ConnectionManager(); cm != nil {
 				if realTag := resolveRealOutboundTag(box.Outbound(), config.OutboundSelectTag); realTag != "" {
-					message.CurrentOutboundDown = cm.IsOutboundDown(realTag)
+					message.CurrentOutboundDown = cm.IsOutboundDegraded(realTag)
 				}
 			}
 		}

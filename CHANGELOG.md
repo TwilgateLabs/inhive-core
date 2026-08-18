@@ -9,6 +9,25 @@ shipped standalone).
 
 ## [Unreleased]
 
+### Changed
+
+- **Outbound circuit-breaker reworked from a remembered "server down" verdict to a
+  saturation-based dial budget** (`route/conn.go`). Field data from mac TestFlight
+  (11 trips over 5 days, up to 56s stuck open, 4429 fast-failed dials) showed the
+  probe/backoff scheme kept refusing dials for up to 30s after a failure that lasted
+  seconds. Now, after 8 consecutive dial failures the outbound is marked *degraded*:
+  dials are no longer auto-refused but compete for a per-outbound budget of 32
+  concurrent blocking dials (checked before the global 256-dial cap; the budget slot
+  is released on every exit path). With the budget free a dial runs the full path
+  with the normal timeout; only saturation sheds, with the same rate-limited WARN
+  counter. Recovery is instant: attempts are always in flight, so the first success
+  (~RTT after the server comes back) clears the degraded mark — the probe/backoff
+  machinery is deleted. Resource protection from the 2026-07-17 storm incident
+  (iOS thread-exhaustion SIGABRT) is preserved: a degraded outbound can pin at most
+  32 threads. `IsOutboundDown` is renamed `IsOutboundDegraded` (the gRPC
+  `current_outbound_down` wire field is unchanged); DNS fast-fail on a degraded
+  detour outbound is kept and now unblocks immediately on recovery.
+
 ### Added
 
 - **AmneziaVPN `vpn://` config import** (also the payload of shared `.vpn` files).
