@@ -2,9 +2,14 @@ package ray2sing
 
 // amnezia_ingest_test.go — unit tests for the AmneziaVPN vpn:// ingestion.
 //
-// testdata/amnezia_config.vpn is a REAL export (single amnezia-xray container,
-// vless+reality) — the live fixture the feature was built against. Hermetic:
-// no network, everything else is synthesized in-process (hermetic-tests rule).
+// testdata/amnezia_config.vpn is a real AmneziaVPN export (single amnezia-xray
+// container, vless+reality) with every credential replaced by a synthetic one:
+// TEST-NET-2 host, zero-derived UUID and reality key, throwaway shortId. The
+// frame, the field set and the nesting are byte-for-byte what Amnezia writes,
+// which is the only part the parser cares about. Do NOT restore a live export
+// here — this repo is public, and a working client credential in testdata is a
+// credential anyone can clone (it was, until 2026-08-18). Hermetic: no network,
+// everything else is synthesized in-process (hermetic-tests rule).
 
 import (
 	"bytes"
@@ -134,12 +139,12 @@ func TestAmneziaFixtureIngest(t *testing.T) {
 		t.Fatalf("want exactly 1 node, got %d: %q", len(lines), uris)
 	}
 	u := lines[0]
-	for _, want := range []string{"vless://", "188.253.27.250", "security=reality", "flow=xtls-rprx-vision", "fp=chrome"} {
+	for _, want := range []string{"vless://", "198.51.100.7", "security=reality", "flow=xtls-rprx-vision", "fp=chrome"} {
 		if !strings.Contains(u, want) {
 			t.Errorf("URI missing %q: %s", want, u)
 		}
 	}
-	if !strings.HasSuffix(u, "#Osnova") {
+	if !strings.HasSuffix(u, "#Example") {
 		t.Errorf("node not named from description: %s", u)
 	}
 }
@@ -156,7 +161,7 @@ func TestAmneziaFixtureEndToEndParse(t *testing.T) {
 	if ob.Type != "vless" {
 		t.Errorf("want vless outbound, got %s", ob.Type)
 	}
-	if !strings.HasPrefix(ob.Tag, "Osnova") {
+	if !strings.HasPrefix(ob.Tag, "Example") {
 		t.Errorf("tag should carry the Amnezia description, got %q", ob.Tag)
 	}
 }
@@ -170,7 +175,7 @@ func TestAmneziaFixtureConvertToShareLinks(t *testing.T) {
 	if len(recs) != 1 || !strings.HasPrefix(recs[0], "vless://") {
 		t.Fatalf("want 1 vless record, got: %q", out)
 	}
-	if !strings.HasSuffix(recs[0], "#Osnova") {
+	if !strings.HasSuffix(recs[0], "#Example") {
 		t.Errorf("record not named from description: %s", recs[0])
 	}
 }
