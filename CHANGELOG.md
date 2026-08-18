@@ -9,6 +9,8 @@ shipped standalone).
 
 ## [Unreleased]
 
+## [4.8.3] - 2026-08-18
+
 ### Changed
 
 - **Outbound circuit-breaker reworked from a remembered "server down" verdict to a
