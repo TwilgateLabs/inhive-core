@@ -42,7 +42,6 @@ require (
 	github.com/alexbrainman/sspi v0.0.0-20231016080023-1a75b4708caa // indirect
 	github.com/ameshkov/dnscrypt/v2 v2.4.0 // indirect
 	github.com/ameshkov/dnsstamps v1.0.3 // indirect
-	github.com/amnezia-vpn/amneziawg-go v0.2.19 // indirect
 	github.com/anthropics/anthropic-sdk-go v1.26.0 // indirect
 	github.com/antlr4-go/antlr/v4 v4.13.1 // indirect
 	github.com/anytls/sing-anytls v0.0.11 // indirect
@@ -64,7 +63,6 @@ require (
 	github.com/dgryski/go-farm v0.0.0-20240924180020-3414d57e47da // indirect
 	github.com/dustin/go-humanize v1.0.0 // indirect
 	github.com/ebitengine/purego v0.10.0 // indirect
-	github.com/enfein/mieru/v3 v3.34.0 // indirect
 	github.com/florianl/go-nfqueue/v2 v2.0.2 // indirect
 	github.com/flynn/noise v1.1.0 // indirect
 	github.com/frostbyte73/core v0.1.1 // indirect
@@ -180,8 +178,6 @@ require (
 	github.com/twitchtv/twirp v8.1.3+incompatible // indirect
 	github.com/wlynxg/anet v0.0.5 // indirect
 	github.com/x448/float16 v0.8.4 // indirect
-	github.com/xtaci/kcp-go/v5 v5.6.72 // indirect
-	github.com/xtaci/smux v1.5.57 // indirect
 	github.com/zarazaex69/j v0.0.1-inhive // indirect
 	github.com/zeebo/xxh3 v1.1.0 // indirect
 	go.etcd.io/bbolt v1.3.11 // indirect
@@ -197,7 +193,6 @@ require (
 	golang.zx2c4.com/wireguard/windows v0.5.3 // indirect
 	google.golang.org/genproto/googleapis/api v0.0.0-20260523011958-0a33c5d7ca68 // indirect
 	gvisor.dev/gvisor v0.0.0-20250606233247-e3c4c4cad86f // indirect
-	www.bamsoftware.com/git/dnstt.git v1.20260501.0 // indirect
 )
 
 require (
@@ -247,7 +242,7 @@ require (
 	go.uber.org/multierr v1.11.0 // indirect
 	go.uber.org/zap v1.28.0 // indirect
 	go4.org/netipx v0.0.0-20231129151722-fdeea329fbba // indirect
-	golang.org/x/crypto v0.52.0 // indirect
+	golang.org/x/crypto v0.52.0
 	golang.org/x/exp v0.0.0-20260508232706-74f9aab9d74a // indirect
 	golang.org/x/mod v0.37.0 // indirect
 	golang.org/x/net v0.56.0
@@ -259,10 +254,15 @@ require (
 )
 
 require (
+	github.com/amnezia-vpn/amneziawg-go v0.2.19
+	github.com/enfein/mieru/v3 v3.34.0
 	github.com/sagernet/sing-box v1.13.0
 	github.com/twilgate/xray2sing v0.0.0-00010101000000-000000000000
 	github.com/xmdhs/clash2singbox v0.1.4
+	github.com/xtaci/kcp-go/v5 v5.6.72
+	github.com/xtaci/smux v1.5.57
 	gopkg.in/yaml.v3 v3.0.1
+	www.bamsoftware.com/git/dnstt.git v1.20260501.0
 )
 
 replace github.com/sagernet/sing-dns => github.com/shtorm-7/sing-dns v0.4.6-extended-1.0.0
