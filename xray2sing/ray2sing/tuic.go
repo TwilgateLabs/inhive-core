@@ -38,11 +38,18 @@ func TuicSingbox(tuicUrl string) (*T.Outbound, error) {
 	}
 
 	// Heartbeat: read from the URI when present, default 10s (matches sing-box).
+	// Only accept a STRICTLY POSITIVE result: sing-quic's client special-cases
+	// only ==0, so a negative value (heartbeat=-1 passes Atoi cleanly) or an
+	// int64 overflow-to-negative (secs>=~9.3e9, e.g. milliseconds pasted as
+	// seconds) reaches time.NewTicker in a bare dial goroutine, which PANICS on
+	// d<=0 and crashes the whole process — no recover covers it.
 	heartbeat := badoption.Duration(10 * time.Second)
 	if hb := getOneOfN(decoded, "", "heartbeat"); hb != "" {
 		if secs, err := strconv.Atoi(hb); err == nil {
-			heartbeat = badoption.Duration(time.Duration(secs) * time.Second)
-		} else if d, err := time.ParseDuration(hb); err == nil {
+			if d := time.Duration(secs) * time.Second; secs > 0 && d > 0 {
+				heartbeat = badoption.Duration(d)
+			}
+		} else if d, err := time.ParseDuration(hb); err == nil && d > 0 {
 			heartbeat = badoption.Duration(d)
 		}
 	}

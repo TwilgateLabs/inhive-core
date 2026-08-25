@@ -1,6 +1,8 @@
 package ray2sing
 
 import (
+	"encoding/base64"
+	"encoding/hex"
 	"errors"
 	"fmt"
 	"net"
@@ -12,6 +14,163 @@ import (
 	T "github.com/sagernet/sing-box/option"
 	"github.com/sagernet/sing/common/json/badoption"
 )
+
+// normalizeWgKey validates a WireGuard/AWG curve25519 key and returns it
+// re-encoded in the standard base64 alphabet (what sing-box's endpoint
+// creation decodes with base64.StdEncoding). Accepts the url-safe alphabet
+// and missing padding (subscription tooling re-encodes/strips both). An
+// empty value is returned as-is — optionality is the caller's decision.
+//
+// A key that is not base64 fails sing-box at endpoint CREATION; a key that
+// decodes to != 32 bytes passes creation and kills the WHOLE profile inside
+// IpcSet at Start (FromHex's length check in wireguard-go noise-types.go) —
+// so both are rejected HERE with an error naming the parameter. Key material
+// is deliberately never echoed into the error text (it lands in logs).
+func normalizeWgKey(name, val string) (string, error) {
+	k := strings.TrimSpace(val)
+	if k == "" {
+		return "", nil
+	}
+	k = strings.ReplaceAll(k, "-", "+")
+	k = strings.ReplaceAll(k, "_", "/")
+	k = strings.TrimRight(k, "=")
+	if n := len(k) % 4; n != 0 {
+		k += strings.Repeat("=", 4-n)
+	}
+	raw, err := base64.StdEncoding.DecodeString(k)
+	if err != nil {
+		return "", fmt.Errorf("invalid %s: not valid base64 (%d chars)", name, len(val))
+	}
+	if len(raw) != 32 {
+		return "", fmt.Errorf("invalid %s: decodes to %d bytes, want 32", name, len(raw))
+	}
+	return base64.StdEncoding.EncodeToString(raw), nil
+}
+
+// validateMagicHeader checks an H1-H4 spec against the exact grammar the
+// linked amneziawg-go v0.2.19 accepts (device/magic-header.go newMagicHeader):
+// a decimal uint32, or a "start-end" decimal range with end >= start. Hex
+// ("0x..."), overflow and reversed ranges fail newMagicHeader inside IpcSet
+// at Start and kill the whole profile — reject them here instead, naming the
+// parameter and value.
+func validateMagicHeader(name, spec string) error {
+	if spec == "" {
+		return nil
+	}
+	parts := strings.Split(spec, "-")
+	if len(parts) > 2 {
+		return fmt.Errorf("invalid %s %q: want a decimal uint32 or \"start-end\" range", name, spec)
+	}
+	start, err := strconv.ParseUint(parts[0], 10, 32)
+	if err != nil {
+		return fmt.Errorf("invalid %s %q: want a decimal uint32 or \"start-end\" range", name, spec)
+	}
+	if len(parts) == 2 {
+		end, err := strconv.ParseUint(parts[1], 10, 32)
+		if err != nil {
+			return fmt.Errorf("invalid %s %q: want a decimal uint32 or \"start-end\" range", name, spec)
+		}
+		if end < start {
+			return fmt.Errorf("invalid %s %q: range is reversed", name, spec)
+		}
+	}
+	return nil
+}
+
+// validateObfSpec checks an I1-I5 obfuscation spec against the tag vocabulary
+// of the LINKED amneziawg-go v0.2.19 (device/obf.go obfBuilders): b, t, r,
+// rc, rd, d, ds, dz. The official AWG 1.5 tags <c> (counter) and <wt> (wait
+// timeout) are NOT in that runtime — newObfChain returns "unknown tag" from
+// IpcSet at Start, killing the whole profile, so an unsupported/malformed
+// spec is rejected here with an error naming the parameter. Value grammar
+// mirrors the builders: <b>/<d> take hex bytes (b requires them, even
+// length), <r>/<rc>/<rd>/<dz> take a non-negative decimal length (a negative
+// length passes Atoi in the builder but panics on slicing at packet time),
+// <t>/<ds> ignore their value.
+func validateObfSpec(name, spec string) error {
+	if spec == "" {
+		return nil
+	}
+	remaining := spec
+	for {
+		start := strings.IndexByte(remaining, '<')
+		if start == -1 {
+			break
+		}
+		end := strings.IndexByte(remaining[start:], '>')
+		if end == -1 {
+			return fmt.Errorf("invalid %s %q: missing enclosing '>'", name, spec)
+		}
+		end += start
+		parts := strings.Fields(remaining[start+1 : end])
+		if len(parts) == 0 {
+			return fmt.Errorf("invalid %s %q: empty tag", name, spec)
+		}
+		key := parts[0]
+		val := ""
+		if len(parts) > 1 {
+			val = parts[1]
+		}
+		switch key {
+		case "b":
+			v := strings.TrimPrefix(val, "0x")
+			if v == "" || len(v)%2 != 0 {
+				return fmt.Errorf("invalid %s %q: tag <b> needs an even-length hex value", name, spec)
+			}
+			if _, err := hex.DecodeString(v); err != nil {
+				return fmt.Errorf("invalid %s %q: tag <b> value is not hex", name, spec)
+			}
+		case "t", "d", "ds":
+			// value ignored by the builder
+		case "r", "rc", "rd", "dz":
+			n, err := strconv.Atoi(val)
+			if err != nil || n < 0 {
+				return fmt.Errorf("invalid %s %q: tag <%s> needs a non-negative decimal length", name, spec, key)
+			}
+		default:
+			return fmt.Errorf("invalid %s %q: tag <%s> is not supported by the linked amneziawg runtime (supported: b, t, r, rc, rd, d, ds, dz)", name, spec, key)
+		}
+		remaining = remaining[end+1:]
+	}
+	return nil
+}
+
+// clampAwgInt drops (returns 0 = omitted from the UAPI config) a parsed AWG
+// numeric param that is below its accepted minimum, logging the correction.
+// amneziawg-go v0.2.19 rejects jc/jmin/jmax <= 0 ("must be a positive
+// value") and s1-s4 < 0 ("must be non-negative") inside IpcSet at Start —
+// a whole-profile kill for one bad link. 0 always means "not set".
+func clampAwgInt(name string, v, min int) int {
+	if v != 0 && v < min {
+		skip("awg", fmt.Sprintf("dropping %s=%d: below minimum %d", name, v, min))
+		return 0
+	}
+	return v
+}
+
+// parseReservedList parses a comma-separated Cloudflare/WARP reserved list.
+// The plain-WireGuard endpoint rejects any count other than exactly 3 at
+// endpoint creation (transport/wireguard/endpoint.go), and the awg endpoint
+// silently ignores a wrong count — both wrong outcomes, so a non-empty list
+// must have exactly 3 byte values or the link fails with a clear error.
+func parseReservedList(raw string) ([]uint8, error) {
+	var out []uint8
+	for _, part := range strings.Split(raw, ",") {
+		part = strings.TrimSpace(part)
+		if part == "" {
+			continue
+		}
+		num, err := strconv.ParseUint(part, 10, 8)
+		if err != nil {
+			return nil, fmt.Errorf("invalid reserved %q: values must be bytes (0-255)", raw)
+		}
+		out = append(out, uint8(num))
+	}
+	if len(out) != 0 && len(out) != 3 {
+		return nil, fmt.Errorf("invalid reserved %q: want exactly 3 comma-separated values, got %d", raw, len(out))
+	}
+	return out, nil
+}
 
 func AWGSingboxTxt(content string) (*T.Endpoint, error) {
 
@@ -191,6 +350,10 @@ func AWGSingboxTxt(content string) (*T.Endpoint, error) {
 	if privateKey == "" {
 		return nil, errors.New("missing PrivateKey")
 	}
+	privateKey, err := normalizeWgKey("PrivateKey", privateKey)
+	if err != nil {
+		return nil, err
+	}
 
 	if len(peers) == 0 {
 		return nil, errors.New("missing peer Endpoint")
@@ -199,10 +362,41 @@ func AWGSingboxTxt(content string) (*T.Endpoint, error) {
 		if peers[i].Address == "" || peers[i].Port == 0 {
 			return nil, errors.New("missing peer Endpoint")
 		}
+		// The URL path rejects a missing peer public key (see AWGSingbox); an
+		// INI [Peer] without one used to slip through and fail IpcSet at Start.
+		if peers[i].PublicKey == "" {
+			return nil, errors.New("missing peer PublicKey")
+		}
+		if peers[i].PublicKey, err = normalizeWgKey("PublicKey", peers[i].PublicKey); err != nil {
+			return nil, err
+		}
+		if peers[i].PresharedKey, err = normalizeWgKey("PresharedKey", peers[i].PresharedKey); err != nil {
+			return nil, err
+		}
+		if n := len(peers[i].Reserved); n != 0 && n != 3 {
+			return nil, fmt.Errorf("invalid Reserved: want exactly 3 comma-separated values, got %d", n)
+		}
 		if len(peers[i].AllowedIPs) == 0 {
 			peers[i].AllowedIPs = badoption.Listable[netip.Prefix]([]netip.Prefix{
 				netip.MustParsePrefix("0.0.0.0/0"), netip.MustParsePrefix("::/0"),
 			})
+		}
+	}
+
+	// Out-of-range AWG numerics are dropped (0 = omitted); junk H/I specs fail
+	// the conf — both would otherwise kill the whole profile inside IpcSet at
+	// Start (see the helper docs).
+	jc, jmin, jmax = clampAwgInt("Jc", jc, 1), clampAwgInt("Jmin", jmin, 1), clampAwgInt("Jmax", jmax, 1)
+	s1, s2, s3, s4 = clampAwgInt("S1", s1, 0), clampAwgInt("S2", s2, 0), clampAwgInt("S3", s3, 0), clampAwgInt("S4", s4, 0)
+	itime = clampAwgInt("Itime", itime, 0)
+	for _, h := range []struct{ name, spec string }{{"H1", h1}, {"H2", h2}, {"H3", h3}, {"H4", h4}} {
+		if err := validateMagicHeader(h.name, h.spec); err != nil {
+			return nil, err
+		}
+	}
+	for _, i := range []struct{ name, spec string }{{"I1", i1}, {"I2", i2}, {"I3", i3}, {"I4", i4}, {"I5", i5}} {
+		if err := validateObfSpec(i.name, i.spec); err != nil {
+			return nil, err
 		}
 	}
 
@@ -375,34 +569,37 @@ func AWGSingbox(raw string) (*T.Endpoint, error) {
 	if peer.Address == "" || peer.Port == 0 {
 		return nil, errors.New("missing peer endpoint (host:port)")
 	}
+	if pk, err = normalizeWgKey("private_key", pk); err != nil {
+		return nil, err
+	}
+	if peer.PublicKey, err = normalizeWgKey("peer_public_key", peer.PublicKey); err != nil {
+		return nil, err
+	}
+	if peer.PresharedKey, err = normalizeWgKey("preshared_key", peer.PresharedKey); err != nil {
+		return nil, err
+	}
 	// Cloudflare/WARP 3-byte reserved (comma-separated). Applied in the bind at
 	// send time since WireGuard's UAPI has no reserved key.
 	if reservedStr, ok := u.Params["reserved"]; ok {
-		for _, part := range strings.Split(reservedStr, ",") {
-			part = strings.TrimSpace(part)
-			if part == "" {
-				continue
-			}
-			num, err := strconv.ParseUint(part, 10, 8)
-			if err != nil {
-				return nil, err
-			}
-			peer.Reserved = append(peer.Reserved, uint8(num))
+		reserved, err := parseReservedList(reservedStr)
+		if err != nil {
+			return nil, err
 		}
+		peer.Reserved = reserved
 	}
 	opts := T.AwgEndpointOptions{
 
 		PrivateKey: pk,
 		Address:    addresses,
 
-		Jc:   getInt("jc"),
-		Jmin: getInt("jmin"),
-		Jmax: getInt("jmax"),
+		Jc:   clampAwgInt("jc", getInt("jc"), 1),
+		Jmin: clampAwgInt("jmin", getInt("jmin"), 1),
+		Jmax: clampAwgInt("jmax", getInt("jmax"), 1),
 
-		S1: getInt("s1"),
-		S2: getInt("s2"),
-		S3: getInt("s3"),
-		S4: getInt("s4"),
+		S1: clampAwgInt("s1", getInt("s1"), 0),
+		S2: clampAwgInt("s2", getInt("s2"), 0),
+		S3: clampAwgInt("s3", getInt("s3"), 0),
+		S4: clampAwgInt("s4", getInt("s4"), 0),
 		H1: getOneOfN(u.Params, "", "h1"),
 		H2: getOneOfN(u.Params, "", "h2"),
 		H3: getOneOfN(u.Params, "", "h3"),
@@ -418,9 +615,19 @@ func AWGSingbox(raw string) (*T.Endpoint, error) {
 		J1:    getOneOfN(u.Params, "", "j1"),
 		J2:    getOneOfN(u.Params, "", "j2"),
 		J3:    getOneOfN(u.Params, "", "j3"),
-		Itime: getInt("itime"),
+		Itime: clampAwgInt("itime", getInt("itime"), 0),
 
 		Peers: []T.AwgPeerOptions{peer},
+	}
+	for _, h := range []struct{ name, spec string }{{"h1", opts.H1}, {"h2", opts.H2}, {"h3", opts.H3}, {"h4", opts.H4}} {
+		if err := validateMagicHeader(h.name, h.spec); err != nil {
+			return nil, err
+		}
+	}
+	for _, i := range []struct{ name, spec string }{{"i1", opts.I1}, {"i2", opts.I2}, {"i3", opts.I3}, {"i4", opts.I4}, {"i5", opts.I5}} {
+		if err := validateObfSpec(i.name, i.spec); err != nil {
+			return nil, err
+		}
 	}
 	if mtuStr, ok := u.Params["mtu"]; ok {
 		if mtu, err := strconv.ParseUint(mtuStr, 10, 32); err == nil {
@@ -450,22 +657,28 @@ func AWGSingbox(raw string) (*T.Endpoint, error) {
 			// WG default otherwise (do not pin 1280).
 			Noise: getWireGuardNoise(u.Params, false),
 		}
-		if mtu := getOneOfN(u.Params, "", "mtu"); mtu != "" {
-			wgopts.MTU = uint32(toInt(mtu))
-		}
-		if reservedStr, ok := u.Params["reserved"]; ok {
-			reservedParts := strings.Split(reservedStr, ",")
-			for _, part := range reservedParts {
-				num, err := strconv.ParseUint(part, 10, 8)
-				if err != nil {
-					return nil, err // Handle the error appropriately
-				}
-				wgopts.Peers[0].Reserved = append(wgopts.Peers[0].Reserved, uint8(num))
+		// Guarded ParseUint (same pattern as the awg branch above): the old
+		// uint32(toInt(mtu)) silently wrapped "-1" into 4294967295.
+		if mtuStr := getOneOfN(u.Params, "", "mtu"); mtuStr != "" {
+			if mtu, err := strconv.ParseUint(mtuStr, 10, 32); err == nil {
+				wgopts.MTU = uint32(mtu)
 			}
 		}
+		if reservedStr, ok := u.Params["reserved"]; ok {
+			reserved, err := parseReservedList(reservedStr)
+			if err != nil {
+				return nil, err
+			}
+			wgopts.Peers[0].Reserved = reserved
+		}
 		if workerStr, ok := u.Params["workers"]; ok {
-			if workers, err := strconv.Atoi(workerStr); err == nil {
+			// Only a positive count is usable: wireguard-go special-cases only
+			// workers == 0 (-> NumCPU) and a negative value drives
+			// queue.encryption.wg.Add(workers) into a WaitGroup panic at Start.
+			if workers, err := strconv.Atoi(workerStr); err == nil && workers > 0 {
 				wgopts.Workers = workers
+			} else {
+				skip("wireguard", "dropping workers="+workerStr+": want a positive integer")
 			}
 		}
 		out = &T.Endpoint{

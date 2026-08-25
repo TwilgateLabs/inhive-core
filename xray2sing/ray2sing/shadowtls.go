@@ -27,12 +27,23 @@ func ShadowTLSSingbox(url string) (*T.Outbound, error) {
 	// Version: 0 in the option defaults to 1 in the outbound, but the common
 	// real-world default for share-links is 3. Honor an explicit ?version=.
 	version := toInt(getOneOfN(decoded, "", "version"))
-	if version == 0 {
+	switch version {
+	case 1, 2, 3:
+		// exactly the set sing-shadowtls' NewClient accepts
+	default:
+		// unset (0), non-numeric (toInt->0), or out-of-range (4, -1, ...) —
+		// clamp to the real-world default instead of letting sing-shadowtls
+		// reject the node with "unknown protocol version" at creation.
 		version = 3
 	}
 
-	// ShadowTLS always runs TLS; ensure getTLSOptions emits a TLS block.
-	if decoded["security"] == "" && decoded["tls"] == "" {
+	// ShadowTLS always runs TLS; ensure getTLSOptions emits a TLS block. Any
+	// share-link value other than reality (including generator-emitted
+	// "security=none"/"tls=none" or garbage) must not defeat this — ShadowTLS
+	// is definitionally TLS-only, unlike vless/trojan where "none" is
+	// meaningful. Without this, security=none leaves the TLS block nil and the
+	// outbound dies with ErrTLSRequired at creation.
+	if decoded["security"] != "reality" && decoded["tls"] != "reality" {
 		decoded["security"] = "tls"
 	}
 

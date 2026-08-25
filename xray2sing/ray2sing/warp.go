@@ -1,12 +1,21 @@
 package ray2sing
 
 import (
+	"strconv"
+
 	C "github.com/sagernet/sing-box/constant"
 	T "github.com/sagernet/sing-box/option"
 )
 
 func WarpSingbox(url string) (*T.Endpoint, error) {
 	u, err := ParseUrl(url, 0)
+	if err != nil {
+		return nil, err
+	}
+	// Same 32-byte base64 contract as any WG key; validated here so a broken
+	// profile key fails this one link with a named error instead of dying at
+	// endpoint start. Empty is fine — the core registers an anonymous account.
+	profileKey, err := normalizeWgKey("privatekey", getOneOfN(u.Params, "", "privatekey", "pk"))
 	if err != nil {
 		return nil, err
 	}
@@ -24,13 +33,16 @@ func WarpSingbox(url string) (*T.Endpoint, error) {
 			License:    getOneOfN(u.Params, "", "license", "key"),
 			ID:         getOneOfN(u.Params, "", "id", "deviceid"),
 			AuthToken:  getOneOfN(u.Params, "", "token", "authtoken"),
-			PrivateKey: getOneOfN(u.Params, "", "privatekey", "pk"),
+			PrivateKey: profileKey,
 		},
 	}
 	// Set MTU only when explicitly given; let the core apply its native default
-	// otherwise (do not pin 1280).
-	if mtu := getOneOfN(u.Params, "", "mtu"); mtu != "" {
-		warpOpts.MTU = uint32(toInt(mtu))
+	// otherwise (do not pin 1280). Guarded ParseUint — uint32(toInt(...))
+	// silently wrapped negative/overflow values.
+	if mtuStr := getOneOfN(u.Params, "", "mtu"); mtuStr != "" {
+		if mtu, err := strconv.ParseUint(mtuStr, 10, 32); err == nil {
+			warpOpts.MTU = uint32(mtu)
+		}
 	}
 	out := T.Endpoint{
 		Type:    C.TypeWARP,

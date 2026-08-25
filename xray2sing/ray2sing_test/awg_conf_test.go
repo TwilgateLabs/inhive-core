@@ -79,11 +79,11 @@ func TestConvert_AWGConf_CanonicalURI(t *testing.T) {
 // Plain WireGuard conf (no Jc/S/H obfs params) must emit wireguard://, not awg://.
 func TestConvert_PlainWGConf_CanonicalURI(t *testing.T) {
 	conf := `[Interface]
-PrivateKey = kL9x+Yz3/AbC7dEf+GhI2jKl/MnOp4=
+PrivateKey = NGC+MSAeaf7aoO7ouZl/XHwpmf2v5ZMlPNZUr0361xQ=
 Address = 10.13.13.2/32
 
 [Peer]
-PublicKey = Pub+Key/With+Slash2jKlMnOpQrStUv=
+PublicKey = J6Cus/7pIy+K8iEfnuSRxbEL7LVWO/web5NCfsvI/ik=
 AllowedIPs = 0.0.0.0/0
 Endpoint = vpn.example.com:51820
 `
@@ -122,11 +122,11 @@ Endpoint = 146.70.12.34:51820
 // A file concatenating several tunnels yields one record per [Interface] block.
 func TestConvert_AWGConf_MultipleTunnels(t *testing.T) {
 	two := awgConfBody + "\n" + `[Interface]
-PrivateKey = kL9x+Yz3/AbC7dEf+GhI2jKl/MnOp4=
+PrivateKey = NGC+MSAeaf7aoO7ouZl/XHwpmf2v5ZMlPNZUr0361xQ=
 Address = 10.13.13.2/32
 
 [Peer]
-PublicKey = Pub+Key/With+Slash2jKlMnOpQrStUv=
+PublicKey = J6Cus/7pIy+K8iEfnuSRxbEL7LVWO/web5NCfsvI/ik=
 Endpoint = vpn.example.com:51820
 `
 	recs := records(t, two)
@@ -142,15 +142,15 @@ Endpoint = vpn.example.com:51820
 // fallback (universal-client: the server is never lost).
 func TestConvert_AWGConf_MultiPeerFallback(t *testing.T) {
 	conf := `[Interface]
-PrivateKey = kL9x+Yz3/AbC7dEf+GhI2jKl/MnOp4=
+PrivateKey = NGC+MSAeaf7aoO7ouZl/XHwpmf2v5ZMlPNZUr0361xQ=
 Address = 10.13.13.2/32
 
 [Peer]
-PublicKey = cHViMQ==
+PublicKey = t7CHFus/wSiWuWIjF3SUKHczwo7oulO9tWuIJFd9U+w=
 Endpoint = a.example.com:51820
 
 [Peer]
-PublicKey = cHViMg==
+PublicKey = wopwphx1EKHNiSFsoWz/yupJh0d+htvMuXBG/C4YOE4=
 Endpoint = b.example.com:51821
 `
 	rec := oneRecord(t, conf)

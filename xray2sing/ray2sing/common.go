@@ -3,10 +3,12 @@ package ray2sing
 //based on https://github.com/XTLS/Xray-core/issues/91
 //todo merge with https://github.com/XTLS/libXray/
 import (
+	"encoding/base64"
 	"encoding/json"
 	"fmt"
 	"net"
 	"net/url"
+	"os"
 	"strconv"
 
 	"strings"
@@ -49,6 +51,36 @@ func getTLSOptions(decoded map[string]string) T.OutboundTLSOptionsContainer {
 	var ECHOpts *option.OutboundECHOptions
 	valECH, hasECH := decoded["ech"]
 	if hasECH {
+		// ech=0/false/off/none — «выключено» в чужом словаре; раньше сам факт
+		// наличия ключа включал ECH, и такой узел ломался на хендшейке.
+		switch strings.ToLower(strings.TrimSpace(valECH)) {
+		case "0", "false", "no", "off", "none":
+			hasECH = false
+		}
+	}
+	if hasECH && len(valECH) > 5 && !strings.Contains(valECH, "-----BEGIN ECH CONFIGS-----") {
+		// В base64-блобе легитимных пробелов нет; пробелы здесь — это сырой '+'
+		// рукописной ссылки, искалеченный form-декодингом query ('+'→space).
+		valECH = strings.ReplaceAll(strings.TrimSpace(valECH), " ", "+")
+		// Блоб обязан быть base64 ECHConfigList — иначе PEM-обёртка гарантирует
+		// «invalid ECH configs pem» на создании аутбаунда (узел мёртв). Мусор
+		// (ech=enabled и т.п.) выбрасываем целиком с warn'ом. Порог 16: реальный
+		// ECHConfigList в base64 длиннее, а короткие слова («enabled»)
+		// случайно валидны как RawStd-base64.
+		ok := len(valECH) >= 16
+		if ok {
+			if _, decodeErr := base64.StdEncoding.DecodeString(valECH); decodeErr != nil {
+				if _, decodeErr = base64.RawStdEncoding.DecodeString(valECH); decodeErr != nil {
+					ok = false
+				}
+			}
+		}
+		if !ok {
+			fmt.Fprintf(os.Stderr, "ech= value is not a base64 ECHConfigList, dropping ECH: %.32q\n", valECH)
+			hasECH = false
+		}
+	}
+	if hasECH {
 		ECHOpts = &option.OutboundECHOptions{
 			Enabled: true,
 		}
@@ -73,7 +105,15 @@ func getTLSOptions(decoded map[string]string) T.OutboundTLSOptionsContainer {
 		}
 	}
 
-	fp := decoded["fp"]
+	fp := strings.ToLower(strings.TrimSpace(decoded["fp"]))
+	switch fp {
+	case "none", "unsafe":
+		// mihomo 'client-fingerprint: none' и Xray-пресет 'unsafe' = «без uTLS»
+		// (обычный std-TLS ClientHello); раньше значения шли verbatim и убивали
+		// узел на «unknown uTLS fingerprint». Для reality ниже вернётся chrome —
+		// reality без uTLS не живёт.
+		fp = ""
+	}
 	if fp == "" && (decoded["security"] == "reality" || decoded["tls"] == "reality") {
 		fp = "chrome"
 	}
@@ -107,10 +147,10 @@ func getTLSOptions(decoded map[string]string) T.OutboundTLSOptionsContainer {
 	// NOTE: curvePreferences/cipherSuites are intentionally NOT read here — the
 	// uTLS path drops CurvePreferences and these keys are virtually absent from
 	// share links; deferred to avoid a half-working knob.
-	if mv := getOneOfN(decoded, "", "minversion", "min_version"); mv != "" {
+	if mv := normalizeTLSVersion(getOneOfN(decoded, "", "minversion", "min_version")); mv != "" {
 		tlsOptions.MinVersion = mv
 	}
-	if mv := getOneOfN(decoded, "", "maxversion", "max_version"); mv != "" {
+	if mv := normalizeTLSVersion(getOneOfN(decoded, "", "maxversion", "max_version")); mv != "" {
 		tlsOptions.MaxVersion = mv
 	}
 
@@ -141,7 +181,14 @@ func getTLSOptions(decoded map[string]string) T.OutboundTLSOptionsContainer {
 			// for an h3 ALPN silently breaks the node. The guard was wrongly scoped to
 			// xhttp only — net=quic+fp hit the exact same h3-uTLS bug. (Audit 2026-06-26.)
 			if getALPNversion(tlsOptions.ALPN) == 3 {
-				tlsOptions.UTLS = nil // utls has no h3 ClientHello (h3-only ALPN)
+				if decoded["security"] == "reality" || decoded["tls"] == "reality" {
+					// reality ТРЕБУЕТ uTLS и никогда не ходит по h3 — дропаем
+					// бессмысленный ALPN, а не uTLS (иначе гарантированная
+					// ошибка создания «uTLS is required by reality client»).
+					tlsOptions.ALPN = nil
+				} else {
+					tlsOptions.UTLS = nil // utls has no h3 ClientHello (h3-only ALPN)
+				}
 			}
 		}
 
@@ -152,8 +199,8 @@ func getTLSOptions(decoded map[string]string) T.OutboundTLSOptionsContainer {
 	if decoded["security"] == "reality" || decoded["tls"] == "reality" {
 		tlsOptions.Reality = &option.OutboundRealityOptions{
 			Enabled:   true,
-			PublicKey: decoded["pbk"],
-			ShortID:   decoded["sid"],
+			PublicKey: normalizeRealityPublicKey(decoded["pbk"]),
+			ShortID:   normalizeRealityShortID(decoded["sid"]),
 		}
 	}
 
@@ -174,7 +221,9 @@ func getTricksOptions(decoded map[string]string) *option.TLSTricksOptions {
 }
 func getMuxOptions(decoded map[string]string) *option.OutboundMultiplexOptions {
 	mux := option.OutboundMultiplexOptions{}
-	mux.Protocol = decoded["muxtype"]
+	// sing-mux принимает ровно ""/h2mux/smux/yamux (case-sensitive exact switch);
+	// muxtype=none/off/Smux/h2 из чужой ссылки verbatim убивал узел на создании.
+	mux.Protocol = normalizeMuxProtocol(decoded["muxtype"])
 	if mux.Protocol == "" {
 		return nil
 	}
@@ -185,11 +234,15 @@ func getMuxOptions(decoded map[string]string) *option.OutboundMultiplexOptions {
 	mux.MinStreams = toInt(decoded["mux"])
 	mux.Padding = decoded["muxpad"] == "true"
 
-	if decoded["muxup"] != "" && decoded["muxdown"] != "" {
+	// Гейт по РАСПАРСЕННЫМ значениям: toInt глотает мусор и "0" в 0, а
+	// UpMbps/DownMbps=0 — гарантированная ошибка «brutal: invalid upload speed»
+	// на создании. Без валидных скоростей Brutal просто не включаем — mux без
+	// brutal полностью рабочий.
+	if up, down := toInt(decoded["muxup"]), toInt(decoded["muxdown"]); up > 0 && down > 0 {
 		mux.Brutal = &option.BrutalOptions{
 			Enabled:  true,
-			UpMbps:   toInt(decoded["muxup"]),
-			DownMbps: toInt(decoded["muxdown"]),
+			UpMbps:   up,
+			DownMbps: down,
 		}
 	}
 	return &mux
@@ -199,6 +252,15 @@ func getTransportOptions(decoded map[string]string) (*option.V2RayTransportOptio
 	host, net, path := decoded["host"], decoded["net"], decoded["path"]
 	if net == "" {
 		net = decoded["type"]
+		// Фоллбек net←type ловит и vmess-JSON, где "type" — это headerType, а не
+		// транспорт: минимальный vmess без "net" c "type":"none" превращался в
+		// «unknown transport type: none» и терял узел. headerType-словарь при
+		// фоллбеке значит «обычный tcp» (kcp-обфс имена сюда же — kcp у нас всё
+		// равно не поддержан, а Xray дефолтит отсутствующий network в tcp).
+		switch net {
+		case "none", "srtp", "utp", "wechat-video", "dtls", "wireguard", "dns":
+			net = "tcp"
+		}
 	}
 	if path == "" {
 		// gRPC service name arrives under several key spellings. getOneOfN
@@ -294,24 +356,26 @@ func getTransportOptions(decoded map[string]string) (*option.V2RayTransportOptio
 			}
 			pathURL, err := url.Parse(path)
 			if err != nil {
-				return &option.V2RayTransportOptions{}, err
-			}
-			// InHive: HTTPUpgrade early data (?ed=N). When the path carries an
-			// ed= query, extract it into MaxEarlyData and STRIP it from the path
-			// so the request line no longer mismatches server routing. Unlike
-			// WebSocket (which uses the Sec-WebSocket-Protocol header by
-			// default), httpupgrade early data is path-based, so
-			// EarlyDataHeaderName is left empty. When ed is absent the path is
-			// emitted unchanged and MaxEarlyData stays 0 — byte-identical.
-			pathQuery := pathURL.Query()
-			if maxEarlyDataString := pathQuery.Get("ed"); maxEarlyDataString != "" {
-				if maxEarlyData, perr := strconv.ParseUint(maxEarlyDataString, 10, 32); perr == nil {
-					transportOptions.HTTPUpgradeOptions.MaxEarlyData = uint32(maxEarlyData)
-					pathQuery.Del("ed")
-					pathURL.RawQuery = pathQuery.Encode()
+				// Кривой percent-escape — path берём как опак, не теряя узел.
+				transportOptions.HTTPUpgradeOptions.Path = path
+			} else {
+				// InHive: HTTPUpgrade early data (?ed=N). When the path carries an
+				// ed= query, extract it into MaxEarlyData and STRIP it from the path
+				// so the request line no longer mismatches server routing. Unlike
+				// WebSocket (which uses the Sec-WebSocket-Protocol header by
+				// default), httpupgrade early data is path-based, so
+				// EarlyDataHeaderName is left empty. When ed is absent the path is
+				// emitted unchanged and MaxEarlyData stays 0 — byte-identical.
+				pathQuery := pathURL.Query()
+				if maxEarlyDataString := pathQuery.Get("ed"); maxEarlyDataString != "" {
+					if maxEarlyData, perr := strconv.ParseUint(maxEarlyDataString, 10, 32); perr == nil {
+						transportOptions.HTTPUpgradeOptions.MaxEarlyData = uint32(maxEarlyData)
+						pathQuery.Del("ed")
+						pathURL.RawQuery = pathQuery.Encode()
+					}
 				}
+				transportOptions.HTTPUpgradeOptions.Path = pathURL.String()
 			}
-			transportOptions.HTTPUpgradeOptions.Path = pathURL.String()
 		}
 	case "ws":
 		if decoded["alpn"] == "" {
@@ -334,21 +398,26 @@ func getTransportOptions(decoded map[string]string) (*option.V2RayTransportOptio
 			}
 			pathURL, err := url.Parse(path)
 			if err != nil {
-				return &option.V2RayTransportOptions{}, err
-			}
-			pathQuery := pathURL.Query()
-			transportOptions.WebsocketOptions.MaxEarlyData = 0
-			transportOptions.WebsocketOptions.EarlyDataHeaderName = "Sec-WebSocket-Protocol"
-			maxEarlyDataString := pathQuery.Get("ed")
-			if maxEarlyDataString != "" {
-				maxEarlyDate, err := strconv.ParseUint(maxEarlyDataString, 10, 32)
-				if err == nil {
-					transportOptions.WebsocketOptions.MaxEarlyData = uint32(maxEarlyDate)
-					pathQuery.Del("ed")
-					pathURL.RawQuery = pathQuery.Encode()
+				// Кривой percent-escape (литеральный '%' в path) — Xray/v2rayN
+				// трактуют path как опак; не терять узел, взять строку как есть
+				// (без извлечения ed=).
+				transportOptions.WebsocketOptions.EarlyDataHeaderName = "Sec-WebSocket-Protocol"
+				transportOptions.WebsocketOptions.Path = path
+			} else {
+				pathQuery := pathURL.Query()
+				transportOptions.WebsocketOptions.MaxEarlyData = 0
+				transportOptions.WebsocketOptions.EarlyDataHeaderName = "Sec-WebSocket-Protocol"
+				maxEarlyDataString := pathQuery.Get("ed")
+				if maxEarlyDataString != "" {
+					maxEarlyDate, err := strconv.ParseUint(maxEarlyDataString, 10, 32)
+					if err == nil {
+						transportOptions.WebsocketOptions.MaxEarlyData = uint32(maxEarlyDate)
+						pathQuery.Del("ed")
+						pathURL.RawQuery = pathQuery.Encode()
+					}
 				}
+				transportOptions.WebsocketOptions.Path = pathURL.String()
 			}
-			transportOptions.WebsocketOptions.Path = pathURL.String()
 		}
 	case "grpc":
 		// gRPC runs over HTTP/2; default ALPN to h2 only when the user did not
@@ -403,6 +472,14 @@ func getTransportOptions(decoded map[string]string) (*option.V2RayTransportOptio
 		if decoded["alpn"] == "" {
 			decoded["alpn"] = "h3"
 		}
+		// sing-box требует TLS для QUIC-транспорта (ErrTLSRequired на создании).
+		// Легаси v2ray-QUIC ссылки с tls="" несут свою обфускацию, не TLS —
+		// синтезировать TLS им нельзя (хендшейк всё равно не совпадёт); честная
+		// парс-ошибка вместо криптичной смерти узла на Start.
+		if decoded["tls"] != "tls" && decoded["tls"] != "reality" &&
+			decoded["security"] != "tls" && decoded["security"] != "reality" {
+			return nil, E.New("quic transport requires TLS in sing-box; legacy v2ray QUIC-security links are not supported")
+		}
 		transportOptions.Type = C.V2RayTransportTypeQUIC
 
 	case "xhttp":
@@ -427,7 +504,12 @@ func getTransportOptions(decoded map[string]string) (*option.V2RayTransportOptio
 			x := XHTTPExtra{}
 			err := json.Unmarshal([]byte(extra), &x)
 			if err != nil {
-				return nil, err
+				// extra — тюнинг (xmux/паддинги), а не идентичность узла. Строгие
+				// поля (domainStrategy-enum, Range, int64) режут Xray-словарь;
+				// потерять обфс-ручки лучше, чем потерять сервер. x остаётся
+				// zero-value, top-level host/path/mode уже проставлены выше.
+				fmt.Fprintf(os.Stderr, "xhttp extra= ignored (parse error): %v\n", err)
+				x = XHTTPExtra{}
 			}
 			// Приоритет top-level над `extra` — parity с Xray.
 			//
@@ -727,6 +809,81 @@ func getOneOf(dic map[string]string, headers ...string) (string, error) {
 		}
 	}
 	return "", fmt.Errorf("not found")
+}
+
+// normalizePacketEncoding maps the Xray/v2rayN share-link packetEncoding
+// vocabulary onto sing-box's: Xray's "none" means disabled ("" here), and an
+// unrecognized value is treated as disabled too (Xray parity) rather than
+// passed through — sing-box rejects unknown values at outbound creation.
+func normalizePacketEncoding(v string) string {
+	switch strings.ToLower(strings.TrimSpace(v)) {
+	case "packetaddr":
+		return "packetaddr"
+	case "xudp":
+		return "xudp"
+	default: // "", "none", anything else
+		return ""
+	}
+}
+
+// normalizeMuxProtocol — sing-mux принимает ровно ""/h2mux/smux/yamux
+// (case-sensitive); чужие «выключено»-написания и алиасы мапим, неизвестное —
+// mux просто не включаем (узел работает без mux, вместо смерти на создании).
+func normalizeMuxProtocol(raw string) string {
+	switch strings.ToLower(strings.TrimSpace(raw)) {
+	case "", "none", "off", "disabled", "0":
+		return ""
+	case "h2", "h2mux":
+		return "h2mux"
+	case "smux":
+		return "smux"
+	case "yamux":
+		return "yamux"
+	default:
+		return ""
+	}
+}
+
+// normalizeTLSVersion — sing-box принимает ровно "1.0".."1.3"; чужие написания
+// (tls1.2/TLSv1.2) приводим, мусор — дефолтный диапазон stdlib (как без ключа).
+func normalizeTLSVersion(v string) string {
+	v = strings.ToLower(strings.TrimSpace(v))
+	v = strings.TrimPrefix(v, "tlsv")
+	v = strings.TrimPrefix(v, "tls")
+	switch v {
+	case "1.0", "1.1", "1.2", "1.3":
+		return v
+	default:
+		return ""
+	}
+}
+
+// normalizeRealityPublicKey — reality_client декодит ТОЛЬКО base64.RawURLEncoding;
+// панели сплошь эмитят std-base64 ('+','/' и '=' паддинг), и ровно такие ключи
+// конвертер бережно сохранял (см. overrideRawQueryParams) — чтобы затем sing-box
+// гарантированно их отверг. Приводим к url-safe/unpadded; для уже-правильных
+// значений это no-op.
+func normalizeRealityPublicKey(v string) string {
+	v = strings.TrimRight(strings.TrimSpace(v), "=")
+	return strings.NewReplacer("+", "-", "/", "_").Replace(v)
+}
+
+// normalizeRealityShortID — sid это hex ≤16 символов; более длинный sid ПАНИКОВАЛ
+// в hex.Decode (index out of range, до фикса в reality_client). Невалидный sid
+// дропаем (Xray-parity: он мусорный short_id терпит), сервер решит по пустому.
+func normalizeRealityShortID(v string) string {
+	v = strings.TrimSpace(v)
+	if len(v) > 16 {
+		fmt.Fprintf(os.Stderr, "reality sid too long (%d chars), dropping: %.24q\n", len(v), v)
+		return ""
+	}
+	for _, r := range v {
+		if !(r >= '0' && r <= '9' || r >= 'a' && r <= 'f' || r >= 'A' && r <= 'F') {
+			fmt.Fprintf(os.Stderr, "reality sid is not hex, dropping: %.24q\n", v)
+			return ""
+		}
+	}
+	return v
 }
 
 func getOneOfN(dic map[string]string, defaultval string, headers ...string) string {

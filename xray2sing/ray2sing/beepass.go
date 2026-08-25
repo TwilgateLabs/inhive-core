@@ -6,18 +6,32 @@ import (
 	"net/http"
 	"net/url"
 	"strings"
+	"time"
 
 	T "github.com/sagernet/sing-box/option"
 )
 
 type beepassData struct {
-	Server     string `json:"server"`
-	ServerPort string `json:"server_port"`
-	Password   string `json:"password"`
-	Method     string `json:"method"`
-	Prefix     string `json:"prefix"`
-	Name       string `json:"name"`
+	Server string `json:"server"`
+	// json.Number: the Outline/BeePass dynamic-access-key spec returns
+	// server_port as a NUMBER ({"server_port":443}); some providers quote it as
+	// a string. json.Number unmarshals from either token, where a plain string
+	// field failed on the numeric (spec-conformant) form and silently dropped
+	// the node via the ss://-body fallback.
+	ServerPort json.Number `json:"server_port"`
+	Password   string      `json:"password"`
+	Method     string      `json:"method"`
+	Prefix     string      `json:"prefix"`
+	Name       string      `json:"name"`
 }
+
+// SSConfHTTPClient bounds the ssconf:// fetch. http.Client.Timeout covers the
+// entire round trip (connect + TLS + headers + body read), so a black-holed or
+// tarpitting endpoint degrades to a normal per-link error that the conversion
+// loop skips, instead of stalling the WHOLE subscription conversion forever
+// (the old bare http.Get used http.DefaultClient with zero timeout).
+// Exported as a variable so tests can substitute an httptest TLS client.
+var SSConfHTTPClient = &http.Client{Timeout: 10 * time.Second}
 
 func fetchSSConf(parsedURL *url.URL) ([]byte, error) {
 
@@ -25,7 +39,7 @@ func fetchSSConf(parsedURL *url.URL) ([]byte, error) {
 	httpURL := "https://" + parsedURL.Host + parsedURL.Path
 
 	// Make the HTTP request
-	resp, err := http.Get(httpURL)
+	resp, err := SSConfHTTPClient.Get(httpURL)
 	if err != nil {
 		return nil, err
 	}
@@ -74,9 +88,9 @@ func BeepassSingbox(beepassUrl string) (*T.Outbound, error) {
 		Options: &T.ShadowsocksOutboundOptions{
 			ServerOptions: T.ServerOptions{
 				Server:     decoded.Server,
-				ServerPort: toUInt16(decoded.ServerPort, 443),
+				ServerPort: toUInt16(decoded.ServerPort.String(), 443),
 			},
-			Method:   decoded.Method,
+			Method:   normalizeSSMethod(decoded.Method),
 			Password: decoded.Password,
 		},
 	}

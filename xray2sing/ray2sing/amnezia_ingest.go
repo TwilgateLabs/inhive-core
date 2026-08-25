@@ -48,7 +48,9 @@ import (
 	"encoding/base64"
 	"encoding/binary"
 	"encoding/json"
+	"fmt"
 	"io"
+	"os"
 	"strings"
 
 	E "github.com/sagernet/sing/common/exceptions"
@@ -405,6 +407,18 @@ func amneziaRenameRecord(rec, name string) string {
 // dispatchers understand. ok=false only when the body is not a vpn:// link at
 // all; a vpn:// body that cannot be imported returns ok=true + a hard error
 // (never a silent fallthrough into "No outbounds found").
+// safeConvertAWGConfEntries — recover-контракт как у safeIngest: паника
+// парсера одного wg-conf контейнера стоит этого контейнера, не всей подписки.
+func safeConvertAWGConfEntries(body string) (recs []string, ok bool) {
+	defer func() {
+		if r := recover(); r != nil {
+			fmt.Fprintf(os.Stderr, "amnezia wg-conf ingest panicked: %v\n", r)
+			recs, ok = nil, false
+		}
+	}()
+	return convertAWGConfEntries(body)
+}
+
 func ingestAmneziaVPN(body string) (string, bool, error) {
 	if !looksLikeAmneziaVPN(body) {
 		return "", false, nil
@@ -423,7 +437,10 @@ func ingestAmneziaVPN(body string) (string, bool, error) {
 				}
 			}
 		case amneziaPartXrayJSON:
-			uris, ok := ingestJSON(p.body)
+			// safeIngest: этот вызов ingestJSON шёл МИМО recover-обёртки,
+			// которой защищены сиблинги в GenerateConfigLite — паника на битом
+			// last_config стоила всей подписки, а не одного контейнера.
+			uris, ok := safeIngest("amnezia-xray-json", p.body, ingestJSON)
 			if !ok {
 				skip("amnezia-xray", "last_config carries no importable outbounds")
 				continue
@@ -435,7 +452,7 @@ func ingestAmneziaVPN(body string) (string, bool, error) {
 			// Prefer the canonical wg:// / awg:// URI (round-trips through the
 			// endpoint canonicalizer). A tunnel that cannot round-trip goes in as
 			// the raw INI chunk — the [Interface] dispatcher parses it natively.
-			recs, ok := convertAWGConfEntries(p.body)
+			recs, ok := safeConvertAWGConfEntries(p.body)
 			gotURI := false
 			if ok {
 				for _, r := range recs {
@@ -486,7 +503,7 @@ func convertAmneziaEntries(body string) ([]string, bool, error) {
 				records = append(records, amneziaRenameRecord(r, p.name))
 			}
 		case amneziaPartWGConf:
-			recs, ok := convertAWGConfEntries(p.body)
+			recs, ok := safeConvertAWGConfEntries(p.body)
 			if !ok {
 				skip("amnezia-wireguard", "config INI did not parse")
 				continue

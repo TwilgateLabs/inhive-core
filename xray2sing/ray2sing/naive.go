@@ -14,9 +14,13 @@ func NaiveSingbox(vlessURL string) (*T.Outbound, error) {
 		return nil, err
 	}
 	decoded := u.Params
-	if decoded["security"] == "" {
-		decoded["security"] = "tls"
-	}
+	// naive is TLS-inside-cronet only; there is no non-TLS mode. Any foreign
+	// security value (none/xtls/whatever the source panel used) must degrade to
+	// tls UNCONDITIONALLY — an explicit security=none would make getTLSOptions
+	// return a nil TLS container, and protocol/naive/outbound.go then fails with
+	// ErrTLSRequired at creation (silent node death). Same policy as the
+	// fp/minVersion/reality force-clearing below.
+	decoded["security"] = "tls"
 
 	// fmt.Printf("Port %v deco=%v", port, decoded)
 	// Reality is now set inside getTLSOptions (shared by vless/vmess/trojan/naive).
@@ -50,6 +54,22 @@ func NaiveSingbox(vlessURL string) (*T.Outbound, error) {
 		// degrade to plain TLS rather than kill the node.
 		tlsOptions.TLS.Reality = nil
 	}
+	// quic_congestion_control: sing-box's acceptance switch is exact-lowercase
+	// {"","bbr","bbr2","cubic","reno"} (protocol/naive/outbound.go:176-190) and
+	// its default arm kills the node at creation. Normalize case, map the
+	// NaiveProxy/cronet doc spelling "bbrv2" -> "bbr2", and degrade anything
+	// else to "" (cronet default) — normalizePacketEncoding's degrade-don't-die
+	// policy.
+	qcc := strings.ToLower(strings.TrimSpace(getOneOfN(decoded, "", "quic_congestion_control")))
+	if qcc == "bbrv2" {
+		qcc = "bbr2"
+	}
+	switch qcc {
+	case "", "bbr", "bbr2", "cubic", "reno":
+	default:
+		qcc = ""
+	}
+
 	uot := T.UDPOverTCPOptions{
 		Enabled: getOneOfN(decoded, "", "uot") != "false" && getOneOfN(decoded, "", "uot") != "0",
 	}
@@ -65,7 +85,7 @@ func NaiveSingbox(vlessURL string) (*T.Outbound, error) {
 			InsecureConcurrency:         toInt(getOneOfN(decoded, "0", "insecure_concurrency")),
 			ExtraHeaders:                GetHttpHeaders(getOneOfN(decoded, "", "header")),
 			QUIC:                        u.Scheme == "naive+quic" || getOneOfN(decoded, "", "quic") != "",
-			QUICCongestionControl:       getOneOfN(decoded, "", "quic_congestion_control"),
+			QUICCongestionControl:       qcc,
 			OutboundTLSOptionsContainer: tlsOptions,
 			UDPOverTCP:                  &uot,
 		},

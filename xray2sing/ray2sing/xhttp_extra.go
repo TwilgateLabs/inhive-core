@@ -2,6 +2,9 @@ package ray2sing
 
 import (
 	"encoding/json"
+	"regexp"
+	"strconv"
+	"strings"
 
 	"github.com/sagernet/sing-box/option"
 )
@@ -22,7 +25,18 @@ type XHTTPExtra struct {
 func (x *XHTTPExtra) UnmarshalJSON(data []byte) error {
 	type plain XHTTPExtra
 	if err := json.Unmarshal(data, (*plain)(x)); err != nil {
-		return err
+		// Строгие типы полей (domainStrategy-enum sing-box, Range, int64) режут
+		// живой Xray-словарь ("UseIP", числа в кавычках, "-1"). Прежде чем
+		// сдаваться (и терять ручки — common.go тогда игнорирует extra целиком),
+		// пробуем нормализовать словарь и повторить строгий парс.
+		normalized, nerr := normalizeXHTTPExtraJSON(data)
+		if nerr != nil {
+			return err
+		}
+		*x = XHTTPExtra{}
+		if err2 := json.Unmarshal(normalized, (*plain)(x)); err2 != nil {
+			return err
+		}
 	}
 	x.V2RayXHTTPBaseOptions.NormalizeXHTTPObfsAliases()
 	if x.DownloadSettings != nil {
@@ -30,6 +44,75 @@ func (x *XHTTPExtra) UnmarshalJSON(data []byte) error {
 		x.DownloadSettings.normalizeSingboxDialect()
 	}
 	return nil
+}
+
+// rangeOrIntRe — то, что переваривает Range-парсер: "N" или "N-M" (без знака).
+var rangeOrIntRe = regexp.MustCompile(`^\d+(-\d+)?$`)
+
+// normalizeXHTTPExtraJSON лениво декодирует extra-блоб и приводит Xray-словарь
+// к sing-box'овскому: domainStrategy-имена мапятся, числа в кавычках
+// расковычиваются, непереваримые значения выбрасываются (потеря одной ручки
+// лучше потери всего блока). Рекурсивно — xmux/downloadSettings вложены.
+func normalizeXHTTPExtraJSON(data []byte) ([]byte, error) {
+	var m map[string]any
+	if err := json.Unmarshal(data, &m); err != nil {
+		return nil, err
+	}
+	normalizeXHTTPExtraMap(m)
+	return json.Marshal(m)
+}
+
+func normalizeXHTTPExtraMap(m map[string]any) {
+	for k, v := range m {
+		switch vv := v.(type) {
+		case map[string]any:
+			normalizeXHTTPExtraMap(vv)
+			continue
+		case string:
+			lk := strings.ToLower(k)
+			if lk == "domainstrategy" {
+				switch strings.ToLower(strings.TrimSpace(vv)) {
+				case "", "asis", "as_is":
+					m[k] = "as_is"
+				case "useip", "forceip":
+					delete(m, k) // «любой IP» — у sing-box нет прямого аналога, дефолт
+				case "useipv4", "forceipv4", "ipv4_only":
+					m[k] = "ipv4_only"
+				case "useipv6", "forceipv6", "ipv6_only":
+					m[k] = "ipv6_only"
+				case "preferipv4", "prefer_ipv4":
+					m[k] = "prefer_ipv4"
+				case "preferipv6", "prefer_ipv6":
+					m[k] = "prefer_ipv6"
+				default:
+					delete(m, k)
+				}
+				continue
+			}
+			// Числовые/Range-поля, приехавшие строками: "30" → 30; "100-200"
+			// оставляем (Range это ест); мусор и отрицательные — вон.
+			if n, err := strconv.ParseInt(strings.TrimSpace(vv), 10, 64); err == nil && n >= 0 {
+				if looksNumericXHTTPKey(k) {
+					m[k] = n
+				}
+				continue
+			}
+			if looksNumericXHTTPKey(k) && !rangeOrIntRe.MatchString(strings.TrimSpace(vv)) {
+				delete(m, k)
+			}
+		}
+	}
+}
+
+func looksNumericXHTTPKey(k string) bool {
+	switch strings.ToLower(k) {
+	case "scmaxeachpostbytes", "scminpostsintervalms", "scmaxbufferedposts",
+		"scstreamupserversecs", "port", "xpaddingbytes",
+		"hmaxrequesttimes", "hmaxreusablesecs", "cmaxreusetimes", "hkeepaliveperiod",
+		"maxconcurrency", "maxconnections", "cmaxlifetimems":
+		return true
+	}
+	return false
 }
 
 type DownloadSettings struct {

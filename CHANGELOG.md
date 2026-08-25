@@ -9,6 +9,61 @@ shipped standalone).
 
 ## [Unreleased]
 
+### Fixed
+
+- **Fatal-audit 2026-08-25: one bad link can no longer kill a profile, and foreign
+  share-link vocabulary is translated instead of passed through.** Full sweep of the
+  `packetEncoding=none` bug class (multi-agent audit, 61 verified findings, all
+  reachable from real subscriptions). Architecture: outbound-constructor panics now
+  degrade to the per-node invalid stub instead of failing `box.New`
+  (`adapter/outbound/manager.go` recover); endpoints (wireguard/awg) gained the same
+  invalid-stub fallback they never had (`adapter/endpoint/manager.go` +
+  `protocol/invalid/endpoint.go`); selector/urltest member and default tags are
+  linted in `box.New` (unknown member dropped with a warning at import time instead
+  of killing Start); saved profiles are salvaged per-entry on start (`v2/config`:
+  an outbound type removed by a core upgrade drops that entry with a visible log
+  line, not the whole profile); `Ray2Singbox` no longer swallows total-parse errors
+  into a `"null"` config; all converter/fork recover paths format the panic value
+  with `fmt.Sprint` (raw values re-panicked in `format.ToString`, masking the real
+  crash), and the outer parse recover no longer embeds the full subscription body
+  (credentials) in the error. Vocabulary/validation (converter): vless flow
+  (`none`, legacy XTLS → clear error), vmess `scy` + 9-char schemes
+  (svmess/xvmess) + `#fragment` on base64 bodies, ss method aliases/case +
+  unsupported ciphers named per-node + SS2022 url-safe PSK + SIP003 plugin aliases,
+  clash/mihomo: one type-mismatched YAML field costs one node (not the whole
+  subscription), mihomo-only ciphers/plugins skip with a reason; mux protocol
+  (`none`/`Smux`/`h2`), brutal speed gating, uTLS `fp=none`/`unsafe`, TLS
+  min/max version spellings, `ech=` value-checked (bool spellings + base64
+  validation), reality `pbk` re-encoded to the url-safe form sing-box accepts and
+  overlong `sid` dropped (it used to PANIC `hex.Decode` and kill the profile),
+  reality+`alpn=h3` keeps uTLS, `quic` transport without TLS is a per-link parse
+  error, ws/httpupgrade paths with bad percent-escapes survive verbatim, xhttp
+  `extra=` is normalized (Xray `domainStrategy` names, quoted numbers) and a still
+  unparseable blob loses only the tuning, not the server; socks version, naive
+  `security=none`/congestion-control, mieru protocol default + mtu clamp +
+  `MULTIPLEXING_OFF`, tuic heartbeat guard (negative value crashed the process at
+  first dial), ssh `pk_passphrase`/`client_version` dead lookups, beepass numeric
+  ports + 10s fetch timeout, shadowtls version clamp + forced TLS; wg/awg: full key
+  (both base64 alphabets, 32-byte length), reserved-count, magic-header, junk-param
+  and mtu/workers validation with per-link errors (`workers=-1` used to panic
+  `sync.WaitGroup` at Start), `+` preserved in key query params. Fork error-path
+  hygiene: `[]byte` in TLS cert errors (panic), ssh host-key error kept the nil key
+  instead of the input, wireguard IpcSet failure no longer embeds private keys in
+  the user-visible error, psiphon stub registered with its real options type (a
+  `psiphon://…?region=` link killed the whole profile at unmarshal). Regression
+  guard: 60+ new tests across `fatal_audit_{shared,proto,ssfam,awg}_test.go` and
+  `v2/config/salvage_test.go`; key fixes red-green verified.
+- **`packetEncoding=none` in vless/vmess share links no longer breaks the whole
+  config start** (`xray2sing/ray2sing/vless.go`, `vmess.go`). Xray/v2rayN links
+  use `none` for "disabled"; the converter passed it through verbatim and
+  sing-box rejects anything outside ``""``/`packetaddr`/`xudp`, so one such link
+  in a subscription killed `Start` for the entire profile (live report:
+  vlessforu subscription, 2026-08-24). `none` and unknown values now map to
+  disabled (Xray parity). Bonus fix in the vendored sing-box
+  (`protocol/vless/outbound.go`): the "unknown packet encoding" error passed a
+  `*string` to `E.New`, which panics as `unknown value` and hid the actual bad
+  value — now dereferenced (recorded in `upstream.toml`).
+
 ## [4.8.3] - 2026-08-18
 
 ### Changed

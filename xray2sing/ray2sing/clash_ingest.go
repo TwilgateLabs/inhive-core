@@ -14,6 +14,7 @@ package ray2sing
 import (
 	"encoding/base64"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"net/url"
 	"sort"
@@ -116,7 +117,18 @@ func ingestClashYAML(input string) (string, bool) {
 		return "", false
 	}
 	var doc clashDoc
-	if err := yaml.Unmarshal([]byte(input), &doc); err != nil || len(doc.Proxies) == 0 {
+	err := yaml.Unmarshal([]byte(input), &doc)
+	// yaml.v3 returns *yaml.TypeError for a field type mismatch but KEEPS
+	// decoding every other node — treating it as fatal meant one quoted port
+	// (`port: "8443"`) in ONE proxy rejected the ENTIRE subscription. Tolerate
+	// the partial decode: uriFromClashProxy's Server==""/Port==0 guard already
+	// isolates the individual half-decoded proxies. One bad field must cost
+	// one node, not the subscription.
+	var typeErr *yaml.TypeError
+	if err != nil && !errors.As(err, &typeErr) {
+		return "", false
+	}
+	if len(doc.Proxies) == 0 {
 		return "", false
 	}
 	var links []string
@@ -360,6 +372,27 @@ func clashShadowsocks(p *clashProxy) (string, bool) {
 		skip("shadowsocks", "clash: no cipher")
 		return "", false
 	}
+	// mihomo's cipher superset (chacha8-*, aegis-*, aes-*-gcm-siv, lea-*,
+	// rabbit128-*, bare chacha20, ...) is wider than what sing-shadowsocks2
+	// implements. An unsupported cipher would die at outbound creation as an
+	// invalid stub; a single-cipher fleet (the common case) would then trip the
+	// all-invalid profile gate. Skip such nodes here, with the reason visible.
+	if !ssSupportedMethods[normalizeSSMethod(p.Cipher)] {
+		skip("shadowsocks", "clash: cipher "+p.Cipher+" not supported by sing-box")
+		return "", false
+	}
+	// Same for SIP003 plugins: sing-box registers only obfs-local and
+	// v2ray-plugin. mihomo-only plugins (shadow-tls, restls, gost-plugin, ...)
+	// would hit "plugin not found" at creation — skip with an explicit reason.
+	if p.Plugin != "" {
+		switch strings.ToLower(p.Plugin) {
+		case "obfs", "simple-obfs", "obfs-local", "xray-plugin", "v2ray-plugin":
+			// aliased/registered — handled by clashPluginParam + ShadowsocksSingbox
+		default:
+			skip("shadowsocks", "clash: plugin "+p.Plugin+" not supported by sing-box")
+			return "", false
+		}
+	}
 	// The SIP003 plugin was dropped here: an obfs / v2ray-plugin wrapped node was
 	// rebuilt as BARE shadowsocks. It parses, it builds, and then every packet is
 	// rejected by a server that expects the obfuscation layer — silent-fail with
@@ -377,8 +410,11 @@ func clashPluginParam(p *clashProxy) string {
 		return ""
 	}
 	name := p.Plugin
-	if name == "obfs" {
+	switch strings.ToLower(name) {
+	case "obfs", "simple-obfs":
 		name = "obfs-local" // SIP002 spells the simple-obfs client this way
+	case "xray-plugin":
+		name = "v2ray-plugin" // wire-compatible fork of v2ray-plugin
 	}
 	if len(p.PluginOpts) == 0 {
 		return name

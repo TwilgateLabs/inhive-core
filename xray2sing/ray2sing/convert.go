@@ -108,6 +108,18 @@ type OutEnd struct {
 	helper *T.Outbound
 }
 
+// safeIngest изолирует панику одного container-парсера: (result=вход, ok=false)
+// при панике, чтобы битый контейнер стоил только себя.
+func safeIngest(name string, input string, ingest func(string) (string, bool)) (result string, ok bool) {
+	defer func() {
+		if r := recover(); r != nil {
+			fmt.Fprintf(os.Stderr, "container ingest %s panicked: %v\n", name, r)
+			result, ok = input, false
+		}
+	}()
+	return ingest(input)
+}
+
 func processSingleConfig(config string, useXrayWhenPossible bool) (outend *OutEnd, err error) {
 	defer func() {
 		if r := recover(); r != nil {
@@ -115,7 +127,10 @@ func processSingleConfig(config string, useXrayWhenPossible bool) (outend *OutEn
 			stackTrace := make([]byte, 1024)
 			s := runtime.Stack(stackTrace, false)
 			stackStr := fmt.Sprint(string(stackTrace[:s]))
-			err = E.New("Error in Parsing:", r, "Stack trace:", stackStr)
+			// fmt.Sprintf: сырое r через format.ToString ре-паникует на
+			// не-примитивных panic-значениях — и per-line skip превращался бы
+			// в смерть всей подписки.
+			err = E.New("Error in Parsing: ", fmt.Sprintf("%v", r), " Stack trace: ", stackStr)
 		}
 	}()
 	// configDecoded := decodeUrlBase64IfNeeded(config)
@@ -190,13 +205,27 @@ func GenerateConfigLite(input string, useXrayWhenPossible bool) (*option.Options
 	// checked FIRST — cheapest sniff, and an import error there must surface
 	// verbatim (unsupported-protocol refusal), not degrade into the generic
 	// "No outbounds found". See amnezia_ingest.go.
-	if uris, ok, err := ingestAmneziaVPN(input); err != nil {
+	// Каждый container-ingest обёрнут своим recover'ом: паника на битом
+	// JSON/YAML контейнере деградирует в «контейнер не распознан» (и вход
+	// уходит дальше по цепочке/в line-splitter), а не валит весь
+	// Ray2SingboxOptions до внешнего recover'а.
+	if uris, ok, err := func() (u string, ok bool, err error) {
+		// recover→error (не safeIngest): явные ошибки Amnezia обязаны всплыть
+		// verbatim (unsupported-protocol refusal), но паника не должна валить
+		// весь Ray2SingboxOptions до внешнего recover'а.
+		defer func() {
+			if r := recover(); r != nil {
+				u, ok, err = "", false, E.New("amnezia ingest panicked: ", fmt.Sprintf("%v", r))
+			}
+		}()
+		return ingestAmneziaVPN(input)
+	}(); err != nil {
 		return nil, err
 	} else if ok {
 		input = uris
-	} else if uris, ok := ingestJSON(input); ok {
+	} else if uris, ok := safeIngest("json", input, ingestJSON); ok {
 		input = uris
-	} else if uris, ok := ingestClashYAML(input); ok {
+	} else if uris, ok := safeIngest("clash-yaml", input, ingestClashYAML); ok {
 		// Clash / Clash.Meta YAML (proxies:) — the other dominant container
 		// format. Same rebuild-to-URI contract as the JSON path.
 		input = uris
@@ -297,10 +326,12 @@ func GenerateConfigLite(input string, useXrayWhenPossible bool) (*option.Options
 
 func Ray2Singbox(ctx context.Context, configs string, useXrayWhenPossible bool) (out []byte, err error) {
 	convertedData, err := Ray2SingboxOptions(ctx, configs, useXrayWhenPossible)
-	// err = libbox.CheckConfigOptions(convertedData)
-	// if err != nil {
-	// 	return nil, err
-	// }
+	if err != nil {
+		// Раньше err затирался результатом MarshalJSONContext(nil) → FFI-вызовы
+		// получали строку "null" с err=nil, и любой тотальный фейл конвертации
+		// (включая диагностичные отказы) молча глотался.
+		return nil, err
+	}
 	return convertedData.MarshalJSONContext(ctx)
 }
 func Ray2SingboxOptions(ctx context.Context, configs string, useXrayWhenPossible bool) (out *option.Options, err error) {
@@ -310,7 +341,9 @@ func Ray2SingboxOptions(ctx context.Context, configs string, useXrayWhenPossible
 			stackTrace := make([]byte, 1024)
 			s := runtime.Stack(stackTrace, false)
 			stackStr := fmt.Sprint(string(stackTrace[:s]))
-			err = E.New("Error in Parsing", configs, r, "Stack trace:", stackStr)
+			// НЕ вкладывать configs: это полное тело подписки с кредами, а
+			// текст уезжает в ParseResponse/логи. fmt.Sprintf — panic-safe.
+			err = E.New("Error in Parsing (len=", len(configs), "): ", fmt.Sprintf("%v", r), " Stack trace: ", stackStr)
 
 		}
 	}()
@@ -347,7 +380,7 @@ func ConvertToShareLinks(content string) (out string, err error) {
 			out = ""
 			stackTrace := make([]byte, 1024)
 			s := runtime.Stack(stackTrace, false)
-			err = E.New("Error in ConvertToShareLinks", r, "Stack trace:", string(stackTrace[:s]))
+			err = E.New("Error in ConvertToShareLinks: ", fmt.Sprintf("%v", r), " Stack trace: ", string(stackTrace[:s]))
 		}
 	}()
 

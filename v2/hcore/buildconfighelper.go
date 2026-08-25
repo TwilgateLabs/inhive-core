@@ -4,6 +4,7 @@ package hcore
 import (
 	"context"
 	"encoding/json"
+	"fmt"
 	"os"
 	"sync"
 
@@ -16,6 +17,15 @@ import (
 	hcommon "github.com/twilgate/inhive-core/v2/hcommon"
 	hutils "github.com/twilgate/inhive-core/v2/hutils"
 )
+
+func init() {
+	// Салвейдж сохранённого профиля обязан быть наблюдаемым в вкладке «Логи».
+	config.SalvageLogf = func(format string, args ...any) {
+		msg := fmt.Sprintf(format, args...)
+		WriteSharedLogf("%s", msg)
+		Log(LogLevel_WARNING, LogType_CONFIG, msg)
+	}
+}
 
 func BuildConfigJson(ctx context.Context, in *StartRequest) (string, error) {
 	Log(LogLevel_DEBUG, LogType_CORE, "Stating Service ")

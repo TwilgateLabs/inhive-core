@@ -1,9 +1,30 @@
 package ray2sing
 
 import (
+	"strings"
+
 	C "github.com/sagernet/sing-box/constant"
 	T "github.com/sagernet/sing-box/option"
+	E "github.com/sagernet/sing/common/exceptions"
 )
+
+// normalizeSocksVersion maps foreign spellings of the socks version param onto
+// the exact lowercase {"4","4a","5"} that sing's socks.ParseVersion accepts
+// (case-sensitive switch; anything else kills the node at outbound creation).
+// Handles "4A" (curl/proxychains uppercase), full scheme names ("socks5",
+// "socks4a"), and the curl remote-DNS convention "5h"/"socks5h" (remote DNS is
+// SOCKS5 default behavior in sing-box, so it maps to plain "5"). Unknown values
+// return a diagnosable error instead of passing through.
+func normalizeSocksVersion(v string) (string, error) {
+	s := strings.TrimPrefix(strings.ToLower(strings.TrimSpace(v)), "socks")
+	switch s {
+	case "4", "4a", "5":
+		return s, nil
+	case "5h":
+		return "5", nil
+	}
+	return "", E.New("unknown socks version '" + v + "'")
+}
 
 func SocksSingbox(url string) (*T.Outbound, error) {
 	u, err := ParseUrl(url, 0)
@@ -20,8 +41,12 @@ func SocksSingbox(url string) (*T.Outbound, error) {
 		Tag:     u.Name,
 		Options: &opts,
 	}
-	if version, err := getOneOf(u.Params, "v", "ver", "version"); err == nil {
-		opts.Version = version
+	if version, err := getOneOf(u.Params, "v", "ver", "version"); err == nil && version != "" {
+		normalized, err := normalizeSocksVersion(version)
+		if err != nil {
+			return nil, err
+		}
+		opts.Version = normalized
 	} else {
 		// Derive version from the URL scheme when not given explicitly:
 		// socks4/socks4a -> "4", socks5/socks5h -> "5". Plain socks:// keeps the

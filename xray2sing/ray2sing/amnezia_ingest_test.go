@@ -83,7 +83,7 @@ func openvpnContainer(t *testing.T) string {
 const testAWGConf = `[Interface]
 Address = 10.8.1.2/32
 DNS = $PRIMARY_DNS, $SECONDARY_DNS
-PrivateKey = cFRQb2ludHM9MTAuOC4xLjIvMzIgUHJpdmF0ZUtleT0K
+PrivateKey = NGC+MSAeaf7aoO7ouZl/XHwpmf2v5ZMlPNZUr0361xQ=
 Jc = 4
 Jmin = 40
 Jmax = 70
@@ -92,12 +92,12 @@ S2 = 68
 H1 = 1234567890
 H2 = 987654321
 H3 = 1122334455
-H4 = 5544332211
+H4 = 2544332211
 MTU = 1376
 
 [Peer]
-PublicKey = c2VydmVyUHViS2V5QmFzZTY0RW5jb2RlZEhlcmUwMDAK
-PresharedKey = cHNrS2V5QmFzZTY0RW5jb2RlZFZhbHVlSGVyZTAwMDAK
+PublicKey = J6Cus/7pIy+K8iEfnuSRxbEL7LVWO/web5NCfsvI/ik=
+PresharedKey = hGflRtU+yOKhJXvbJWybPk+7SYFG73Awy/lTclLczq0=
 AllowedIPs = 0.0.0.0/0, ::/0
 Endpoint = 9.8.7.6:51820
 PersistentKeepalive = 25

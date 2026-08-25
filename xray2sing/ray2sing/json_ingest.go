@@ -609,7 +609,18 @@ func xrayVLESS(ob *xrayOutbound) (string, bool) {
 	q := url.Values{}
 	q.Set("encryption", orDefault(usr.Encryption, "none"))
 	if usr.Flow != "" {
-		q.Set("flow", usr.Flow)
+		// Route through the same vocabulary filter the vless:// parser uses so
+		// 'none'/'-udp443' variants come out clean; on error (legacy XTLS /
+		// unknown flow) keep the raw value — the downstream URI parser then
+		// surfaces the same diagnosable error instead of a cryptic creation
+		// failure.
+		if flow, err := normalizeVlessFlow(usr.Flow); err == nil {
+			if flow != "" {
+				q.Set("flow", flow)
+			}
+		} else {
+			q.Set("flow", usr.Flow)
+		}
 	}
 	applyStreamToQuery(q, ob.Stream)
 
@@ -1121,6 +1132,15 @@ func uriFromSIP008(raw json.RawMessage) (string, bool) {
 // ShadowsocksSingbox/ParseUrl decode. Plugin (already "name;opts") goes in the
 // query.
 func buildSSURI(method, password, host string, port int, name, plugin string) string {
+	// sing-shadowsocks2's method registry is an exact case-sensitive lookup and
+	// has no entry for Xray's equally-legal no-encryption alias "plain" (nor
+	// "dummy") — normalize here so both the Xray-JSON and SIP008 callers emit a
+	// method sing-box accepts. TODO: unify with a central normalization in
+	// ShadowsocksSingbox so raw pasted ss:// links get the same treatment.
+	method = strings.ToLower(strings.TrimSpace(method))
+	if method == "plain" || method == "dummy" {
+		method = "none"
+	}
 	userinfo := base64.RawURLEncoding.EncodeToString([]byte(method + ":" + password))
 	var b strings.Builder
 	b.WriteString("ss://")

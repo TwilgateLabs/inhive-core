@@ -84,7 +84,16 @@ func ParseUrl(inputURL string, defaultPort uint16) (*UrlSchema, error) {
 	// and many panels emit them non-url-safe. Re-read those from the raw query
 	// with PathUnescape (which decodes %XX but keeps '+' literal) so the public
 	// key/short id survive intact.
-	overrideRawQueryParams(data.Params, parsedURL.RawQuery, "pbk", "sid", "spx")
+	// Все base64-значные параметры, где '+' — часть алфавита И легитимных
+	// пробелов не бывает: url.Values мапит сырой '+' в пробел (form-семантика),
+	// а панели сплошь эмитят такие ключи без percent-encoding; пробел в wg/awg
+	// ключе = ошибка создания endpoint'а. hk/ech сюда НЕЛЬЗЯ: их значения несут
+	// legit-пробелы («ssh-ed25519 AAAA…», PEM-заголовок), которые compliant
+	// экспортёр кодирует как '+' — raw-override их бы искалечил; рукописный '+'
+	// в ech-блобе чинится репейром в getTLSOptions.
+	overrideRawQueryParams(data.Params, parsedURL.RawQuery, "pbk", "sid", "spx",
+		"publickey", "peerpublickey", "pub", "peerpub",
+		"presharedkey", "psk", "privatekey", "pk")
 
 	return data, nil
 }

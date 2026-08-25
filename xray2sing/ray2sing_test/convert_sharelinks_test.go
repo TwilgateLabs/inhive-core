@@ -74,8 +74,8 @@ func firstEndpoint(t *testing.T, config string) map[string]any {
 func TestConvert_WireGuardEndpoint_RoundTrip(t *testing.T) {
 	// Keys deliberately carry literal '+' and '/' (the base64 alphabet) to guard
 	// the classic query '+'→space trap: a WireGuard key must survive verbatim.
-	cfg := `{"endpoints":[{"type":"wireguard","tag":"wg-node","private_key":"kL9x+Yz3/AbC7dEf+GhI2jKl/MnOp4=","address":"10.13.13.2/32","mtu":1420,` +
-		`"peers":[{"address":"vpn.example.com","port":51820,"public_key":"Pub+Key/With+Slash2jKlMnOpQrStUv=","pre_shared_key":"pS+k/eY2==","allowed_ips":["0.0.0.0/0","::/0"],"persistent_keepalive_interval":25,"reserved":[1,2,3]}]}]}`
+	cfg := `{"endpoints":[{"type":"wireguard","tag":"wg-node","private_key":"NGC+MSAeaf7aoO7ouZl/XHwpmf2v5ZMlPNZUr0361xQ=","address":"10.13.13.2/32","mtu":1420,` +
+		`"peers":[{"address":"vpn.example.com","port":51820,"public_key":"J6Cus/7pIy+K8iEfnuSRxbEL7LVWO/web5NCfsvI/ik=","pre_shared_key":"hGflRtU+yOKhJXvbJWybPk+7SYFG73Awy/lTclLczq0=","allowed_ips":["0.0.0.0/0","::/0"],"persistent_keepalive_interval":25,"reserved":[1,2,3]}]}]}`
 
 	rec := oneRecord(t, cfg)
 	if !strings.HasPrefix(rec, "wireguard://") {
@@ -92,7 +92,7 @@ func TestConvert_WireGuardEndpoint_RoundTrip(t *testing.T) {
 	if ep["type"] != "wireguard" {
 		t.Fatalf("endpoint type = %v, want wireguard", ep["type"])
 	}
-	if ep["private_key"] != "kL9x+Yz3/AbC7dEf+GhI2jKl/MnOp4=" {
+	if ep["private_key"] != "NGC+MSAeaf7aoO7ouZl/XHwpmf2v5ZMlPNZUr0361xQ=" {
 		t.Errorf("private_key = %v (base64 with literal '+'/'/' must survive verbatim)", ep["private_key"])
 	}
 	if a := asStrings(ep["address"]); !eqStrings(a, []string{"10.13.13.2/32"}) {
@@ -106,10 +106,10 @@ func TestConvert_WireGuardEndpoint_RoundTrip(t *testing.T) {
 	if p["address"] != "vpn.example.com" || p["port"] != float64(51820) {
 		t.Errorf("peer endpoint = %v:%v, want vpn.example.com:51820", p["address"], p["port"])
 	}
-	if p["public_key"] != "Pub+Key/With+Slash2jKlMnOpQrStUv=" {
+	if p["public_key"] != "J6Cus/7pIy+K8iEfnuSRxbEL7LVWO/web5NCfsvI/ik=" {
 		t.Errorf("peer public_key = %v (base64 with '+'/'/' must survive)", p["public_key"])
 	}
-	if p["pre_shared_key"] != "pS+k/eY2==" {
+	if p["pre_shared_key"] != "hGflRtU+yOKhJXvbJWybPk+7SYFG73Awy/lTclLczq0=" {
 		t.Errorf("peer pre_shared_key = %v", p["pre_shared_key"])
 	}
 	if p["persistent_keepalive_interval"] != float64(25) {
@@ -125,9 +125,9 @@ func TestConvert_WireGuardEndpoint_RoundTrip(t *testing.T) {
 }
 
 func TestConvert_AWGEndpoint_RoundTrip(t *testing.T) {
-	cfg := `{"endpoints":[{"type":"awg","tag":"awg-node","private_key":"cHJpdmF0ZStrZXk=","address":"10.13.13.2/32",` +
+	cfg := `{"endpoints":[{"type":"awg","tag":"awg-node","private_key":"NGC+MSAeaf7aoO7ouZl/XHwpmf2v5ZMlPNZUr0361xQ=","address":"10.13.13.2/32",` +
 		`"jc":4,"jmin":8,"jmax":80,"s1":15,"s2":20,"h1":"1234567890","h2":"1234567891","h3":"1234567892","h4":"1234567893",` +
-		`"peers":[{"address":"1.2.3.4","port":51820,"public_key":"cGVlcitwdWI=","allowed_ips":["0.0.0.0/0"]}]}]}`
+		`"peers":[{"address":"1.2.3.4","port":51820,"public_key":"J6Cus/7pIy+K8iEfnuSRxbEL7LVWO/web5NCfsvI/ik=","allowed_ips":["0.0.0.0/0"]}]}]}`
 
 	rec := oneRecord(t, cfg)
 	if !strings.HasPrefix(rec, "awg://") {

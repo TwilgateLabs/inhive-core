@@ -49,11 +49,17 @@ func SSHSingbox(sshURL string) (*T.Outbound, error) {
 			ServerOptions:        u.GetServerOption(),
 			User:                 u.Username,
 			Password:             u.Password,
-			PrivateKey:           privkeys,
-			PrivateKeyPassphrase: decoded["pk_passphrase"],
+			PrivateKey: privkeys,
+			// ParseUrl stores query keys through normalizeStr ('_'/'-' -> ' '),
+			// so a direct decoded["pk_passphrase"] lookup can NEVER match (the
+			// key is stored as "pk passphrase") — passphrase-protected keys
+			// always failed at creation. getOneOfN normalizes the lookup key,
+			// matching every other parser in this package. Same dead lookup
+			// existed for client_version. (Plain keys pk/hk/hka are unaffected.)
+			PrivateKeyPassphrase: getOneOfN(decoded, "", "pk_passphrase"),
 			HostKey:              hostkeys,
 			HostKeyAlgorithms:    hostKeyAlgorithms,
-			ClientVersion:        decoded["client_version"],
+			ClientVersion:        getOneOfN(decoded, "", "client_version"),
 			UDPOverTCP: &T.UDPOverTCPOptions{
 				Enabled: true,
 			},
