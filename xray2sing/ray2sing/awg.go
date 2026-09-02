@@ -187,6 +187,71 @@ func parseAddrOrPrefix(s string) (netip.Prefix, error) {
 	return netip.PrefixFrom(addr, addr.BitLen()), nil
 }
 
+// canonicalWgKey — wg(8) key_match() сравнивает ключи strncasecmp'ом
+// (регистронезависимо); приводим к каноничному написанию, чтобы case-метки
+// парсера оставались читаемыми. Неизвестный регистр-вариант → как есть
+// (упадёт в default = skip, как и раньше).
+func canonicalWgKey(key string) string {
+	switch strings.ToLower(key) {
+	case "privatekey":
+		return "PrivateKey"
+	case "publickey":
+		return "PublicKey"
+	case "presharedkey":
+		return "PresharedKey"
+	case "address":
+		return "Address"
+	case "allowedips":
+		return "AllowedIPs"
+	case "endpoint":
+		return "Endpoint"
+	case "mtu":
+		return "MTU"
+	case "dns":
+		return "DNS"
+	case "persistentkeepalive":
+		return "PersistentKeepalive"
+	case "reserved":
+		return "Reserved"
+	case "jc":
+		return "Jc"
+	case "jmin":
+		return "Jmin"
+	case "jmax":
+		return "Jmax"
+	case "s1":
+		return "S1"
+	case "s2":
+		return "S2"
+	case "s3":
+		return "S3"
+	case "s4":
+		return "S4"
+	case "h1":
+		return "H1"
+	case "h2":
+		return "H2"
+	case "h3":
+		return "H3"
+	case "h4":
+		return "H4"
+	case "i1":
+		return "I1"
+	case "i2":
+		return "I2"
+	case "i3":
+		return "I3"
+	case "i4":
+		return "I4"
+	case "i5":
+		return "I5"
+	case "itime":
+		return "Itime"
+	default:
+		return key
+	}
+}
+
 func AWGSingboxTxt(content string) (*T.Endpoint, error) {
 
 	var (
@@ -238,10 +303,19 @@ func AWGSingboxTxt(content string) (*T.Endpoint, error) {
 		}
 		key := strings.TrimSpace(parts[0])
 		val := strings.TrimSpace(parts[1])
+		// wg(8) config.c режет строку на ПЕРВОМ '#' где бы он ни стоял —
+		// хвостовые комментарии («Endpoint = ip:port # primary») легальны.
+		// Безопасно: '#' не встречается в base64/IP/портах/H/I-значениях.
+		if i := strings.IndexByte(val, '#'); i >= 0 {
+			val = strings.TrimSpace(val[:i])
+		}
 
 		switch section {
 		case "interface":
-			switch key {
+			// wg(8) key_match() = strncasecmp: ключи регистронезависимы
+			// («privatekey =» из скриптов легален). Канонизируем через
+			// таблицу, чтобы case-метки ниже остались каноничными.
+			switch canonicalWgKey(key) {
 			case "PrivateKey":
 				privateKey = val
 
@@ -303,7 +377,7 @@ func AWGSingboxTxt(content string) (*T.Endpoint, error) {
 
 		case "peer":
 			havePeer = true
-			switch key {
+			switch canonicalWgKey(key) {
 			case "PublicKey":
 				peer.PublicKey = val
 			case "PresharedKey":
@@ -527,13 +601,12 @@ func AWGSingbox(raw string) (*T.Endpoint, error) {
 		var out []netip.Prefix
 		for _, s := range strings.Split(raw, ",") {
 			if s != "" {
-				p, err := netip.ParsePrefix(strings.TrimSpace(s))
+				// Голый IP = host-префикс (/32 v4, /128 v6) — wg-семантика,
+				// как и в INI-пути. Старый фолбэк "+/24" МОЛЧА превращал
+				// 172.16.0.2 в подсеть /24 (sibling полевого WARP-бага).
+				p, err := parseAddrOrPrefix(strings.TrimSpace(s))
 				if err != nil {
-					p2, err2 := netip.ParsePrefix(strings.TrimSpace(s) + "/24")
-					if err2 != nil {
-						return nil, fmt.Errorf("invalid %s: %w", raw, err)
-					}
-					p = p2
+					return nil, fmt.Errorf("invalid %s: %w", raw, err)
 				}
 				out = append(out, p)
 			}

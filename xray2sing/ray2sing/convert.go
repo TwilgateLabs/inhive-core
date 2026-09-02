@@ -134,6 +134,19 @@ func processSingleConfig(config string, useXrayWhenPossible bool) (outend *OutEn
 		}
 	}()
 	// configDecoded := decodeUrlBase64IfNeeded(config)
+	// Схема URI регистронезависима (RFC 3986 §3.1): iOS-клавиатура/QR-декодеры
+	// эмитят «VLESS://…», а dispatch-мапы ниже — lowercase-ключи.
+	if i := strings.Index(config, "://"); i > 0 && i <= 16 {
+		config = strings.ToLower(config[:i]) + config[i:]
+	}
+	// wg(8) strcasecmp: заголовок секции «[interface]» легален в любом
+	// регистре, а endpointParsers ключ — точный «[Interface]».
+	if len(config) > 0 && config[0] == '[' {
+		lower := strings.ToLower(config)
+		if strings.HasPrefix(lower, "[interface]") {
+			config = "[Interface]" + config[len("[Interface]"):]
+		}
+	}
 	outend = &OutEnd{}
 	if false && (useXrayWhenPossible || strings.Contains(config, "&core=xray")) {
 		for k, v := range xrayConfigTypes {
@@ -348,6 +361,8 @@ func Ray2SingboxOptions(ctx context.Context, configs string, useXrayWhenPossible
 		}
 	}()
 
+	// BOM от Windows-сейвов файла подписки — до любого декода.
+	configs = strings.TrimPrefix(configs, "\uFEFF")
 	configs, _ = decodeBase64IfNeeded(configs)
 
 	convertedData, err := GenerateConfigLite(configs, useXrayWhenPossible)

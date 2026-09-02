@@ -11,6 +11,32 @@ shipped standalone).
 
 ### Fixed
 
+- **Dialect-tolerance sweep 2026-09-02: real-world generator output no longer
+  gets rejected or silently mangled** (5-agent sweep, 41 confirmed findings,
+  every one reproduced by a failing test first; ~100 new regression guards in
+  `dialect_sweep_*_test.go`). Envelope: uppercase schemes (RFC 3986 / iOS
+  autocapitalize), UTF-8 BOM from Windows saves, MIME line-wrapped base64
+  (failure was flaky by line width), indented/tab-separated lines, per-scheme
+  port defaults (socks 1080, http 80, https 443). WireGuard/AWG: trailing `#`
+  comments, case-insensitive keys and section headers (wg(8) grammar), bare-IP
+  `address=` in wg:// URIs silently became /24 instead of /32. vmess:
+  Shadowrocket URI form and v2fly VMessAEAD plain URI (both lost the node
+  entirely), `tls` as bool/string, `alpn` arrays, capitalized JSON keys,
+  trailing commas, id whitespace. trojan: minimal links without `security=`
+  built plaintext trojan (silent handshake death — now defaults to TLS),
+  Shadowrocket `peer=` SNI alias. Shadowsocks: legacy full-base64 form with
+  special-character passwords (rebuilt URI now percent-encodes userinfo),
+  explicit empty password no longer becomes the method name, ssconf validates
+  the cipher and detects SIP008 list bodies instead of emitting a garbage
+  node. hysteria2: official multi-port hopping syntax (`host:443,8443`,
+  ranges+lists) lost the node, single-port `mport=` built a dead node,
+  `insecure=true` word forms were ignored, bandwidth units ("100 mbps") were
+  dropped, `pinSHA256` without insecure now fails with a readable reason
+  (sing-box has no cert-hash pinning). hysteria v1: non-udp `protocol=` now
+  errors instead of a forever-dead UDP node. tuic: `disable_sni` honored,
+  legacy v4 token links rejected readably. socks: v2rayN base64-userinfo
+  credentials decoded.
+
 - **WireGuard/AWG `.conf` with bare IPs in `Address`/`AllowedIPs` imports again.**
   wg-quick (and the Cloudflare WARP generator) writes addresses without a CIDR
   suffix ("Address = 172.16.0.2, 2606:…"), meaning /32 and /128; the INI parser

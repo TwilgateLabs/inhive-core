@@ -6,7 +6,9 @@ import (
 )
 
 func HttpSingbox(url string) (*T.Outbound, error) {
-	u, err := ParseUrl(url, 0)
+	// Порт по умолчанию для схемы (proxy-списки без порта); 0 давал мёртвую
+	// ноду server_port:0 без единой ошибки.
+	u, err := ParseUrl(url, 80)
 	if err != nil {
 		return nil, err
 	}
@@ -44,7 +46,7 @@ func HttpSingbox(url string) (*T.Outbound, error) {
 }
 
 func HttpsSingbox(url string) (*T.Outbound, error) {
-	u, err := ParseUrl(url, 0)
+	u, err := ParseUrl(url, 443)
 	if err != nil {
 		return nil, err
 	}

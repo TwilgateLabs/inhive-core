@@ -12,6 +12,14 @@ func TrojanSingbox(trojanURL string) (*T.Outbound, error) {
 	}
 	decoded := u.Params
 
+	// Trojan — TLS по определению протокола: минимальные линки
+	// (trojan-gfw/Igniter: «trojan://pass@host:443#name») security= не несут
+	// вовсе, Xray/v2rayN его дефолтят. Без дефолта строился plaintext-trojan,
+	// молча умирающий на хендшейке (sweep 2026-09-02).
+	if decoded["security"] == "" && decoded["tls"] == "" {
+		decoded["security"] = "tls"
+	}
+
 	// XTLS-Vision flow has NO field in sing-box's TrojanOutboundOptions (unlike VLESS).
 	// Silently dropping it builds a plain Trojan-TLS node that dies in the handshake
 	// against a Vision server. Surface a diagnosable error instead, mirroring the VLESS

@@ -28,7 +28,18 @@ func looksLikeBase64(s string) bool {
 // If none succeed it returns an error containing the debug attempts.
 func decodeBase64FaultTolerant(raw string) (string, error) {
 
-	raw = strings.TrimSpace(raw)
+	raw = strings.TrimSpace(strings.TrimPrefix(raw, "\uFEFF"))
+	// MIME-wrapped base64 (76-кол. переносы у coreutils/почтовых пайплайнов):
+	// сам Go-декодер внутренние \r\n не терпит в Strict, а НАША падding-математика
+	// ниже считала БАЙТЫ переносов → лишние '=' → декод падал, и тело подписки
+	// шредилось построчно. Убираем весь ASCII-whitespace до расчёта.
+	raw = strings.Map(func(r rune) rune {
+		switch r {
+		case ' ', '\t', '\r', '\n':
+			return -1
+		}
+		return r
+	}, raw)
 	if m := len(raw) % 4; m != 0 {
 		raw += strings.Repeat("=", 4-m)
 	}

@@ -1,6 +1,7 @@
 package ray2sing
 
 import (
+	"fmt"
 	"strconv"
 	"strings"
 	"time"
@@ -22,7 +23,7 @@ func HysteriaSingbox(hysteriaURL string) (*T.Outbound, error) {
 				Enabled:    true,
 				DisableSNI: isIPOnly(SNI),
 				ServerName: SNI,
-				Insecure:   u.Params["insecure"] == "1",
+				Insecure:   toBool(u.Params["insecure"], false),
 			},
 		},
 	}
@@ -54,8 +55,15 @@ func HysteriaSingbox(hysteriaURL string) (*T.Outbound, error) {
 
 	// port hopping (mport/ports) — sing-box hysteria v1 supports server_ports
 	if mp := getOneOfN(u.Params, "", "mport", "ports"); mp != "" {
-		opts.ServerPorts = badoption.Listable[string]{strings.ReplaceAll(mp, "-", ":")}
+		entries, _ := normalizeHopPorts(mp)
+		opts.ServerPorts = badoption.Listable[string](entries)
 		opts.HopInterval = badoption.Duration(30 * time.Second)
+	}
+	// Официальный v1-словарь protocol=udp|wechat-video|faketcp: у sing-box
+	// hysteria только UDP-транспорт — не-udp значение строило вечно-мёртвую
+	// UDP-ноду молча. Честная ошибка.
+	if proto := strings.ToLower(getOneOfN(u.Params, "", "protocol")); proto != "" && proto != "udp" {
+		return nil, fmt.Errorf("hysteria protocol %q is not supported by the sing-box core (udp only)", proto)
 	}
 	// opts.TurnRelay, err = u.GetRelayOptions()
 	if err != nil {

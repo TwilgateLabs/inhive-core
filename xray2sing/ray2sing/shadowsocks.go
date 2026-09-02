@@ -1,6 +1,7 @@
 package ray2sing
 
 import (
+	"net/url"
 	"encoding/base64"
 	"fmt"
 	"strings"
@@ -43,6 +44,24 @@ var ssSupportedMethods = map[string]bool{
 // handshake); it surfaces via the ssSupportedMethods check instead. Note: bare
 // "chacha20" is deliberately NOT aliased to chacha20-ietf — different nonce
 // size, not the same cipher.
+
+// rawUserinfoHasColon — есть ли ':' в сырой userinfo-части authority
+// (до последнего '@' перед path/query/fragment).
+func rawUserinfoHasColon(rawURL string) bool {
+	rest := rawURL
+	if i := strings.Index(rest, "://"); i >= 0 {
+		rest = rest[i+3:]
+	}
+	if i := strings.IndexAny(rest, "/?#"); i >= 0 {
+		rest = rest[:i]
+	}
+	at := strings.LastIndex(rest, "@")
+	if at < 0 {
+		return false
+	}
+	return strings.Contains(rest[:at], ":")
+}
+
 func normalizeSSMethod(v string) string {
 	m := strings.ToLower(strings.TrimSpace(v))
 	switch m {
@@ -105,8 +124,15 @@ func ShadowsocksSingbox(shadowsocksUrl string) (*T.Outbound, error) {
 	defaultMethod := u.Username
 	pass := u.Password
 	if u.Password == "" {
-		pass = u.Username
-		defaultMethod = "none"
+		// «user:@host» (явный пустой пароль, легален при method=none по SIP002)
+		// отличаем от «user@host» (userinfo без двоеточия = только пароль):
+		// ParseUrl теряет признак двоеточия — смотрим в сырую authority.
+		if rawUserinfoHasColon(shadowsocksUrl) {
+			// method задан, пароль явно пуст — не подменять его именем метода.
+		} else {
+			pass = u.Username
+			defaultMethod = "none"
+		}
 	}
 
 	// SIP003 plugin: "name;opt1=v1;opt2=v2" — split name from options on first ';'.
@@ -230,5 +256,12 @@ func normalizeLegacyShadowsocks(raw string) (string, bool) {
 		return raw, false
 	}
 
-	return prefix + decodedBody + tail, true
+	// Legacy-форма существует ИМЕННО ради «неудобных» паролей: склейка
+	// plaintext-userinfo без percent-encoding ломала url.Parse на '/', '?',
+	// '#', '%', пробелах и unicode (пароль резался или нода терялась молча).
+	// Кодируем userinfo штатным url.UserPassword; host:port — как есть.
+	at := strings.LastIndex(decodedBody, "@")
+	userinfo, hostport := decodedBody[:at], decodedBody[at+1:]
+	method, pass, _ := strings.Cut(userinfo, ":")
+	return prefix + url.UserPassword(method, pass).String() + "@" + hostport + tail, true
 }

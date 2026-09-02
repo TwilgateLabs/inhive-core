@@ -1,6 +1,7 @@
 package ray2sing
 
 import (
+	"fmt"
 	"encoding/json"
 	"io"
 	"net/http"
@@ -79,6 +80,18 @@ func BeepassSingbox(beepassUrl string) (*T.Outbound, error) {
 		return ShadowsocksSingbox(strings.TrimSpace(string(body)))
 		// return nil, err
 	}
+	// SIP008-список ({"version":1,"servers":[…]}) анмаршалится в beepassData
+	// БЕЗ ошибки — все поля пустые → раньше выходил мусорный узел
+	// server="" method="". Честная ошибка вместо тихого мусора.
+	if decoded.Server == "" || decoded.Method == "" {
+		return nil, fmt.Errorf("ssconf: body is not a single-server Outline config (server/method missing; SIP008 lists are not supported via ssconf://)")
+	}
+	// Тот же цензор шифров, что в ShadowsocksSingbox: невалидный метод должен
+	// падать читаемо здесь, а не hinvalid-заглушкой на создании аутбаунда.
+	method := normalizeSSMethod(decoded.Method)
+	if !ssSupportedMethods[method] {
+		return nil, fmt.Errorf("ssconf: shadowsocks cipher %q is not supported by the sing-box core", decoded.Method)
+	}
 	if decoded.Name == "" {
 		decoded.Name = parsedURL.Fragment
 	}
@@ -90,7 +103,7 @@ func BeepassSingbox(beepassUrl string) (*T.Outbound, error) {
 				Server:     decoded.Server,
 				ServerPort: toUInt16(decoded.ServerPort.String(), 443),
 			},
-			Method:   normalizeSSMethod(decoded.Method),
+			Method:   method,
 			Password: decoded.Password,
 		},
 	}

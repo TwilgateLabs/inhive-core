@@ -1,6 +1,7 @@
 package ray2sing
 
 import (
+	"fmt"
 	T "github.com/sagernet/sing-box/option"
 	"github.com/sagernet/sing/common/json/badoption"
 
@@ -8,6 +9,27 @@ import (
 	"strings"
 	"time"
 )
+
+
+// looksLikeUUID — грубая форма-проверка v5-идентификатора (8-4-4-4-12 hex).
+func looksLikeUUID(s string) bool {
+	if len(s) != 36 {
+		return false
+	}
+	for i, r := range s {
+		switch i {
+		case 8, 13, 18, 23:
+			if r != '-' {
+				return false
+			}
+		default:
+			if !(r >= '0' && r <= '9' || r >= 'a' && r <= 'f' || r >= 'A' && r <= 'F') {
+				return false
+			}
+		}
+	}
+	return true
+}
 
 func TuicSingbox(tuicUrl string) (*T.Outbound, error) {
 	u, err := ParseUrl(tuicUrl, 443)
@@ -73,6 +95,15 @@ func TuicSingbox(tuicUrl string) (*T.Outbound, error) {
 	if sni == "" {
 		sni = u.Hostname
 	}
+	// disable_sni=1 из ссылки (sing-box/NekoBox словарь): раньше параметр не
+	// читался вовсе и мы ОТПРАВЛЯЛИ SNI, который ссылка просила не слать.
+	disableSNI := toBool(getOneOfN(decoded, "", "disable_sni", "disablesni"), false) || isIPOnly(sni)
+
+	// Легаси tuic v4 (tuic://TOKEN@host?version=4): у v5-ядра sing-box токен
+	// не UUID — нода молча умирала на uuid.FromString при создании.
+	if getOneOfN(decoded, "", "version") == "4" || !looksLikeUUID(u.Username) {
+		return nil, fmt.Errorf("tuic v4 token links are not supported by the sing-box core (v5 uuid:password required)")
+	}
 
 	result := T.Outbound{
 		Type: "tuic",
@@ -89,13 +120,13 @@ func TuicSingbox(tuicUrl string) (*T.Outbound, error) {
 			OutboundTLSOptionsContainer: T.OutboundTLSOptionsContainer{
 				TLS: &T.OutboundTLSOptions{
 					Enabled:    true,
-					DisableSNI: isIPOnly(sni),
+					DisableSNI: disableSNI,
 					ServerName: sni,
 					// getOneOfN normalizes both the lookup key and the variants, so the
 					// underscore form allow_insecure (which normalizeStr turns into the
 					// key "allow insecure") is matched too — a direct map["allowinsecure"]
 					// lookup silently missed it and dropped the insecure flag. (Audit 2026-06-23.)
-					Insecure: getOneOfN(decoded, "", "insecure", "allowinsecure", "allow_insecure") == "1",
+					Insecure: toBool(getOneOfN(decoded, "", "insecure", "allowinsecure", "allow_insecure"), false),
 					ALPN:     alpnList,
 					ECH:      ECHOpts,
 				},

@@ -38,6 +38,10 @@ func getTLSOptions(decoded map[string]string) T.OutboundTLSOptionsContainer {
 
 	serverName := decoded["sni"]
 	if serverName == "" {
+		// Shadowrocket пишет SNI как peer= (trojan/vmess экспорт).
+		serverName = decoded["peer"]
+	}
+	if serverName == "" {
 		// vless/trojan URIs have no "add" key; their CDN/front host lives in
 		// "host". Prefer host over add so TLS SNI matches the front domain
 		// (CDN / nginx-stream SNI routing) instead of the raw IP. Fall back to

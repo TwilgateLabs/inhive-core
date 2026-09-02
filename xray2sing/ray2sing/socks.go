@@ -27,9 +27,21 @@ func normalizeSocksVersion(v string) (string, error) {
 }
 
 func SocksSingbox(url string) (*T.Outbound, error) {
-	u, err := ParseUrl(url, 0)
+	// curl-конвенция: socks5://host без порта = 1080 (free-proxy списки).
+	// Дефолт 0 давал «распарсилось» с server_port:0 — мёртвая нода без ошибки.
+	u, err := ParseUrl(url, 1080)
 	if err != nil {
 		return nil, err
+	}
+	// v2rayN/NekoBox экспортируют креды как socks://BASE64(user:pass)@host —
+	// decode-then-validate (как у ss://): без декода юзернеймом становился
+	// сам блоб и авторизация молча не сходилась никогда.
+	if u.Password == "" && u.Username != "" && looksLikeBase64(u.Username) {
+		if dec, err := decodeBase64IfNeeded(u.Username); err == nil {
+			if user, pass, ok := strings.Cut(dec, ":"); ok && isPrintableText(dec) {
+				u.Username, u.Password = user, pass
+			}
+		}
 	}
 	opts := T.SOCKSOutboundOptions{
 		ServerOptions: u.GetServerOption(),

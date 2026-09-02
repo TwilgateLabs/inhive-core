@@ -39,7 +39,10 @@ func buildRegex() *regexp.Regexp {
 	})
 
 	// pattern := `(` + strings.Join(prefixes, "|") + `)`
-	pattern := `(?m)^(?:` + strings.Join(prefixes, "|") + `)`
+	// (?i): схемы URI регистронезависимы (RFC 3986 §3.1), iOS-клавиатура
+	// капитализирует вставленное — «VLESS://…» в списке иначе молча
+	// приклеивался к хвосту предыдущей ноды и терялся.
+	pattern := `(?mi)^(?:` + strings.Join(prefixes, "|") + `)`
 
 	return regexp.MustCompile(pattern)
 }
@@ -89,11 +92,19 @@ func expandDecodedConfig(configs string) []string {
 
 	configs2 := []string{}
 	for _, config := range strings.Split(configs, "\n") {
+		// BOM (Notepad/PowerShell UTF-8-BOM сейвы) ломал base64-декод и
+		// ^scheme-якорь сплиттера — первая нода терялась молча.
+		config = strings.TrimPrefix(config, "\uFEFF")
 		configDecoded, err := decodeBase64IfNeeded(config)
 		if err != nil {
 			configDecoded = config
 		}
-		configs2 = append(configs2, strings.Split(strings.ReplaceAll(configDecoded, "\r", "\n"), "\n")...)
+		// \t → разделитель (паста из Excel/Sheets кладёт ссылки через таб);
+		// отступы строк (паста из чатов/markdown) срезаем, иначе ^-якорь
+		// сплиттера строку не видит и она клеится к предыдущей ноде.
+		for _, line := range strings.Split(strings.NewReplacer("\r", "\n", "\t", "\n").Replace(configDecoded), "\n") {
+			configs2 = append(configs2, strings.TrimSpace(strings.TrimPrefix(line, "\uFEFF")))
+		}
 	}
 
 	newConfigs := splitByPrefix(strings.Join(configs2, "\n"))
