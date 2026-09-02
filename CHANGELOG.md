@@ -9,6 +9,8 @@ shipped standalone).
 
 ## [Unreleased]
 
+## [4.8.5] - 2026-09-02
+
 ### Fixed
 
 - **Dialect-tolerance sweep 2026-09-02: real-world generator output no longer
