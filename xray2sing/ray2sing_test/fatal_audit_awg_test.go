@@ -12,6 +12,7 @@ import (
 	"strings"
 	"testing"
 
+	"github.com/sagernet/sing-box/experimental/libbox"
 	T "github.com/sagernet/sing-box/option"
 
 	"github.com/twilgate/xray2sing/ray2sing"
@@ -245,5 +246,38 @@ func TestWARP_ProfileKeyValidated(t *testing.T) {
 	_, err := ray2sing.WarpSingbox("warp://user@engage.cloudflareclient.com:2408?privatekey=aGVsbG8%3D")
 	if err == nil || !strings.Contains(err.Error(), "privatekey") {
 		t.Fatalf("warp with 5-byte privatekey: want error naming privatekey, got %v", err)
+	}
+}
+
+// WARP-генератор Cloudflare пишет Address/AllowedIPs голыми IP без CIDR
+// (wg-quick семантика: /32 v4, /128 v6). Требование префикса роняло весь
+// .conf «invalid Address: no '/'» (полевой репорт 2026-09-02, WARPw*.conf).
+func TestAWGConfBareAddressWARPShape(t *testing.T) {
+	conf := `[Interface]
+PrivateKey = NGC+MSAeaf7aoO7ouZl/XHwpmf2v5ZMlPNZUr0361xQ=
+Address = 172.16.0.2, 2606:4700:110:80a2:37e2:42f8:de05:885d
+DNS = 1.1.1.1
+MTU = 1280
+S1 = 0
+S2 = 0
+Jc = 4
+Jmin = 40
+Jmax = 70
+H1 = 1
+H2 = 2
+H3 = 3
+H4 = 4
+
+[Peer]
+PublicKey = J6Cus/7pIy+K8iEfnuSRxbEL7LVWO/web5NCfsvI/ik=
+AllowedIPs = 0.0.0.0/0, ::/0
+Endpoint = 162.159.195.1:500
+`
+	opts, err := ray2sing.Ray2SingboxOptions(libbox.BaseContext(nil), conf, false)
+	if err != nil {
+		t.Fatalf("bare-address WARP conf must convert: %v", err)
+	}
+	if len(opts.Endpoints) != 1 {
+		t.Fatalf("expected 1 endpoint, got %d", len(opts.Endpoints))
 	}
 }

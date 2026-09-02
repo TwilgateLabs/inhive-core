@@ -11,6 +11,12 @@ shipped standalone).
 
 ### Fixed
 
+- **WireGuard/AWG `.conf` with bare IPs in `Address`/`AllowedIPs` imports again.**
+  wg-quick (and the Cloudflare WARP generator) writes addresses without a CIDR
+  suffix ("Address = 172.16.0.2, 2606:…"), meaning /32 and /128; the INI parser
+  demanded a prefix and failed the whole file with "invalid Address: no '/'"
+  (field report 2026-09-02).
+
 - **Headless profile replay (Android tile / service resurrection) no longer dies
   in the legacy config translator.** `loadLastStartRequestIfNeeded` restored the
   saved profile without `EnableRawConfig` (the flag is not persisted), so the

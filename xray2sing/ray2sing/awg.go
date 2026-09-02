@@ -172,6 +172,21 @@ func parseReservedList(raw string) ([]uint8, error) {
 	return out, nil
 }
 
+// parseAddrOrPrefix — wg-quick разрешает голый IP без CIDR в Address/AllowedIPs
+// (значит /32 для v4, /128 для v6) — ровно так пишет генератор Cloudflare WARP
+// («Address = 172.16.0.2, 2606:…»). Требование префикса роняло весь .conf с
+// «invalid Address: no '/'» (полевой репорт Никиты 2026-09-02).
+func parseAddrOrPrefix(s string) (netip.Prefix, error) {
+	if pfx, err := netip.ParsePrefix(s); err == nil {
+		return pfx, nil
+	}
+	addr, err := netip.ParseAddr(s)
+	if err != nil {
+		return netip.Prefix{}, fmt.Errorf("netip.ParsePrefix(%q): not an IP or CIDR", s)
+	}
+	return netip.PrefixFrom(addr, addr.BitLen()), nil
+}
+
 func AWGSingboxTxt(content string) (*T.Endpoint, error) {
 
 	var (
@@ -232,7 +247,7 @@ func AWGSingboxTxt(content string) (*T.Endpoint, error) {
 
 			case "Address":
 				for _, add := range strings.Split(val, ",") {
-					pfx, err := netip.ParsePrefix(strings.TrimSpace(add))
+					pfx, err := parseAddrOrPrefix(strings.TrimSpace(add))
 					if err != nil {
 						return nil, fmt.Errorf("invalid Address: %w", err)
 					}
@@ -318,7 +333,7 @@ func AWGSingboxTxt(content string) (*T.Endpoint, error) {
 					if part == "" {
 						continue
 					}
-					pfx, err := netip.ParsePrefix(part)
+					pfx, err := parseAddrOrPrefix(part)
 					if err != nil {
 						return nil, fmt.Errorf("invalid AllowedIPs: %w", err)
 					}
