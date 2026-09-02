@@ -123,6 +123,13 @@ func loadLastStartRequestIfNeeded(in *StartRequest) (*StartRequest, error) {
 		ConfigPath:    lastPath.Value.(string),
 		ConfigContent: lastContent.Value.(string),
 		ConfigName:    lastName.Value.(string),
+		// EnableRawConfig в БД не персистится, а сохранённый content ВСЕГДА
+		// записан raw-путём (все hot-path writers шлют EnableRawConfig=true —
+		// см. S3.2.A.ASSERT в buildconfighelper). Без форса реплей уходил в
+		// deprecated InhiveOptions-транслятор и падал FATAL «unknown load
+		// balance strategy» — Android QS-плитка/воскрешение сервиса «горит и
+		// сама гаснет» (полевой репорт Никиты 2026-09-02).
+		EnableRawConfig: true,
 	}, nil
 }
 

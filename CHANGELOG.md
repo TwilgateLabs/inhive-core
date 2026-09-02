@@ -11,6 +11,15 @@ shipped standalone).
 
 ### Fixed
 
+- **Headless profile replay (Android tile / service resurrection) no longer dies
+  in the legacy config translator.** `loadLastStartRequestIfNeeded` restored the
+  saved profile without `EnableRawConfig` (the flag is not persisted), so the
+  replayed start fell back to the deprecated InhiveOptions builder and hit
+  `FATAL manager start outbound/balancer[balance]: unknown load balance
+  strategy` — the tile lit up and the tunnel died seconds later (field report
+  2026-09-02). The restored request now forces raw config: the saved content is
+  always written by raw-path writers.
+
 - **Fatal-audit 2026-08-25: one bad link can no longer kill a profile, and foreign
   share-link vocabulary is translated instead of passed through.** Full sweep of the
   `packetEncoding=none` bug class (multi-agent audit, 61 verified findings, all
