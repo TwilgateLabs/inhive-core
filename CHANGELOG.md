@@ -9,6 +9,12 @@ shipped standalone).
 
 ## [Unreleased]
 
+### Fixed
+- iOS: wake() no longer tears down the network. The July gate ("paused ≥30 s → ResetNetwork") fired on every screen unlock or notification screen-on (iOS calls NE sleep/wake every 20–50 s), killing live connections 33 times out of 34 in a 41-minute device dump; a Telegram video on iPhone never finished while the same server on Windows loaded instantly. Wake now measures real process freeze (wall clock minus monotonic; Go's monotonic clock stops during SoC sleep on Darwin) and, only after ≥2 min frozen, PINGs each pooled xhttp HTTP/2 connection with the standard 15 s timeout and closes only the ones that do not answer; DNS transports get an idle-only reset; QUIC is left to its own keepalive. Windows resume path and real interface changes still do a full ResetNetwork.
+
+### Added
+- `adapter.SleepProber` (vless/vmess/trojan → xhttp `ProbeAfterSleep`), `v2rayhttp.ProbeTransport`, `XmuxManager.Probe`; wake logs at WARN with paused/frozen durations and probe results (visible in the app "Logs" tab).
+
 ## [4.8.5] - 2026-09-02
 
 ### Fixed

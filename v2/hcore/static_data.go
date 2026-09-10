@@ -39,12 +39,12 @@ type InhiveInstance struct {
 	// resetPauseState() — из Stop()/StopAndAlert() (gRPC-поток).
 	endPauseTimer *time.Timer
 	pauseMu       sync.Mutex
-	// pausedAtNano — UnixNano момента последнего Pause() (sleep девайса), 0 когда
-	// не в паузе. Пишется в Pause(), читается+сбрасывается в Wake() для гейта
-	// wake-reset'а (см. pause.go wakeResetMinPause) и чистится при остановке
-	// бокса (resetPauseState). Atomic: Pause/Wake приходят последовательно с
-	// NE-очереди, но wake-reset читает из горутины, а сброс — из Stop().
-	pausedAtNano atomic.Int64
+	// pausedAt — момент последнего Pause() (sleep девайса), zero когда не в
+	// паузе. Хранится как time.Time С monotonic-компонентой: гейт пробы после сна
+	// (pause.go frozenSince) сравнивает wall-часы и monotonic, чтобы отличить
+	// «процесс был заморожен» от «экран погас, а ядро работало». Доступ под
+	// pauseMu (Pause/Wake — NE-поток, resetPauseState — gRPC-поток Stop()).
+	pausedAt time.Time
 
 	logLevel LogLevel
 
