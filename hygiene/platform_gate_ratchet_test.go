@@ -406,8 +406,13 @@ func isPlatformBuildTag(constraint string) bool {
 }
 
 func shouldSkipPath(rel string) bool {
+	// skipPathSuffixes записаны через "/", а filepath.Rel на Windows отдаёт "\":
+	// без нормализации ни один префикс не совпадал, и на Win-сборщике сканер
+	// заходил в replace/* (tailscale, x-net, sing…) — 34 → 332 «гейтов»,
+	// которых на маке не видно. Сравниваем в slash-форме на всех ОС.
+	rel = filepath.ToSlash(rel)
 	for _, suf := range skipPathSuffixes {
-		if rel == suf || strings.HasPrefix(rel, suf+string(filepath.Separator)) {
+		if rel == suf || strings.HasPrefix(rel, suf+"/") {
 			return true
 		}
 	}
