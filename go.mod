@@ -15,7 +15,6 @@ require (
 	github.com/miekg/dns v1.1.72
 	github.com/sagernet/gomobile v0.1.12
 	github.com/sagernet/sing v0.8.11
-	github.com/sagernet/sing-dns v0.3.0
 	github.com/spf13/cobra v1.10.2
 	golang.org/x/sys v0.46.0
 	google.golang.org/genproto/googleapis/rpc v0.0.0-20260523011958-0a33c5d7ca68 // indirect
@@ -264,8 +263,6 @@ require (
 	gopkg.in/yaml.v3 v3.0.1
 	www.bamsoftware.com/git/dnstt.git v1.20260501.0
 )
-
-replace github.com/sagernet/sing-dns => github.com/shtorm-7/sing-dns v0.4.6-extended-1.0.0
 
 replace github.com/ameshkov/dnscrypt/v2 => github.com/shtorm-7/dnscrypt/v2 v2.4.0-extended-1.0.0
 

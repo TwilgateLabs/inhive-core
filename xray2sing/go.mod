@@ -238,8 +238,6 @@ replace github.com/sagernet/sing-box => ../sing-box
 
 replace github.com/sagernet/wireguard-go => ../sing-box/replace/wireguard-go
 
-replace github.com/sagernet/sing-dns => github.com/shtorm-7/sing-dns v0.4.6-extended-1.0.0
-
 replace github.com/ameshkov/dnscrypt/v2 => github.com/shtorm-7/dnscrypt/v2 v2.4.0-extended-1.0.0
 
 replace github.com/Psiphon-Labs/quic-go => ../sing-box/replace/psiphon-quic-go

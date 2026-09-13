@@ -8,7 +8,7 @@ import (
 	"strings"
 
 	"github.com/sagernet/sing-box/option"
-	dns "github.com/sagernet/sing-dns"
+	C "github.com/sagernet/sing-box/constant"
 )
 
 type InhiveOptions struct {
@@ -117,9 +117,9 @@ func DefaultInhiveOptions() *InhiveOptions {
 		EnableNTP: true,
 		DNSOptions: DNSOptions{
 			RemoteDnsAddress:        "1.1.1.1",
-			RemoteDnsDomainStrategy: option.DomainStrategy(dns.DomainStrategyAsIS),
+			RemoteDnsDomainStrategy: option.DomainStrategy(C.DomainStrategyAsIS),
 			DirectDnsAddress:        "1.1.1.1",
-			DirectDnsDomainStrategy: option.DomainStrategy(dns.DomainStrategyAsIS),
+			DirectDnsDomainStrategy: option.DomainStrategy(C.DomainStrategyAsIS),
 			IndependentDNSCache:     false,
 			EnableFakeDNS:           false,
 			// EnableDNSRouting:        false,
@@ -142,7 +142,7 @@ func DefaultInhiveOptions() *InhiveOptions {
 		},
 		RouteOptions: RouteOptions{
 			ResolveDestination:     false,
-			IPv6Mode:               option.DomainStrategy(dns.DomainStrategyAsIS),
+			IPv6Mode:               option.DomainStrategy(C.DomainStrategyAsIS),
 			BypassLAN:              false,
 			AllowConnectionFromLAN: false,
 		},

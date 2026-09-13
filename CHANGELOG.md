@@ -9,6 +9,9 @@ shipped standalone).
 
 ## [Unreleased]
 
+### Removed
+- Dropped the dead `shtorm-7/sing-dns` fork (last upstream commit May 2025, no sing-0.9 line). Upstream sing-box stopped using sing-dns in 1.12 and our fork never imported it; the only remaining user was three `DomainStrategyAsIS` defaults in `inhive_option.go`, which now come from `sing-box/constant`. One less anchor pinning the core to the sing 0.8 API.
+
 ### Fixed
 - iOS: wake() no longer tears down the network. The July gate ("paused ≥30 s → ResetNetwork") fired on every screen unlock or notification screen-on (iOS calls NE sleep/wake every 20–50 s), killing live connections 33 times out of 34 in a 41-minute device dump; a Telegram video on iPhone never finished while the same server on Windows loaded instantly. Wake now measures real process freeze (wall clock minus monotonic; Go's monotonic clock stops during SoC sleep on Darwin) and, only after ≥2 min frozen, PINGs each pooled xhttp HTTP/2 connection with the standard 15 s timeout and closes only the ones that do not answer; DNS transports get an idle-only reset; QUIC is left to its own keepalive. Windows resume path and real interface changes still do a full ResetNetwork.
 
