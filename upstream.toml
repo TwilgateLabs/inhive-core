@@ -311,14 +311,20 @@ divergences = [
 
 [[entry]]
 id = "sing"
-kind = "module"
-gomod = "go.mod"
-module = "github.com/sagernet/sing"
+kind = "tree"
+path = "sing-box/replace/sing"
 upstream = "https://github.com/SagerNet/sing"
+ref = "v0.8.11"
+ref_commit = "c7c09c5f3f58410965b0a97cbc82d4d4e8323b9b"
 tag_filter = '^v\d+\.\d+\.\d+$'
+verified = "2026-09-13"
+verified_how = """Дерево = побайтная копия module cache sing@v0.8.11 (`diff -rq` против $GOMODCACHE/github.com/sagernet/sing@v0.8.11 — пусто ДО наложения патча) + ровно один апстримный коммит поверх: ef37987fa0bee9702bd086f6ca728c3d61d26eac «Fix windows error» (2 файла: common/exceptions/error.go, error_windows.go), наложен `git apply` без правок. Тег v0.8.11 = c7c09c5f по `git ls-remote`."""
 owner = "core"
 max_lag = 2
-divergences = ["Держим 0.8.x осознанно: форк sing-box сидит на ветке sing-v0.8.4-compat."]
+divergences = [
+  "Бэкпорт ef37987 (2026-09-10, main, вошёл только в линию 0.9): на Windows winsock-коды WSAECONNRESET/WSAECONNABORTED/WSAENOTCONN не матчатся через syscall.ECONNRESET (фиктивная константа, Errno.Is не маппит) → IsClosed() принимал каждый RST локального приложения за ошибку → ERROR-спам в box.log/core.log/LogListener и 16–25% CPU (2026-09-13, qBittorrent через TUN). Гард: v2/hcore/closed_errno_windows_test.go (падает на чистом v0.8.11).",
+  "ПОЧЕМУ не бамп, а форк: история sing линейна (v0.8.14 21.08 → v0.9.0 02.09), ветки 0.8 у апстрима нет, фикс появится только в 0.9.x. sing 0.9 = линия sing-box 1.14 (0.9.0-beta.4 в 1.14.0) и тянет sing-tun/sing-quic/sing-mux 0.9/0.7; пробная сборка на sing 0.9.3 ломает sing-tun@0.8.11 (freelru.NewSharded, common.Must1) ещё до sing-box. Переезд на 1.14 = 407 коммитов/300+ файлов поверх hiddify-истории (rebase невозможен, см. feedback_build_singbox_merge) — отдельный проект. Снять replace и удалить дерево при переезде.",
+]
 
 [[entry]]
 id = "sing-tun"

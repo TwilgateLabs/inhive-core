@@ -270,6 +270,14 @@ replace github.com/twilgate/xray2sing => ./xray2sing
 
 replace github.com/sagernet/sing-box => ./sing-box
 
+// inhive fork of sing v0.8.11 (in-tree, см. upstream.toml id="sing"): бэкпорт
+// апстримного ef37987 «Fix windows error» — на Windows winsock-коды
+// WSAECONNRESET/WSAECONNABORTED/WSAENOTCONN не ловятся через syscall.ECONNRESET
+// (фиктивная константа), и IsClosed() считал каждый RST локального приложения
+// ошибкой → ERROR-спам в 3 стока и CPU. Фикс есть только в sing ≥0.9.4-line,
+// а 0.9 = sing-box 1.14. Снять replace при переезде на 1.14.
+replace github.com/sagernet/sing => ./sing-box/replace/sing
+
 replace github.com/sagernet/wireguard-go => ./sing-box/replace/wireguard-go
 
 replace github.com/sagernet/tailscale => ./sing-box/replace/tailscale
