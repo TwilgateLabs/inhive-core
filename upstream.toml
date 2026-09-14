@@ -141,23 +141,25 @@ divergences = [
 # ---------------------------------------------------------------------------
 [[entry]]
 id = "wireguard-go"
-kind = "commit"
+kind = "tree"
 path = "sing-box/replace/wireguard-go"
 upstream = "https://github.com/SagerNet/wireguard-go"
-ref = "inhive-patches@ae2a6abb"
-ref_commit = "ae2a6abbdb3c6b592f6fcb70dfd92f5bd14c3997"
-verified = "2026-09-14"
-verified_how = "go list -m даёт псевдоверсию с коммитом 506b7631853c; `git ls-remote HEAD` апстрима = тот же 506b7631853c."
+ref = "v0.0.6"
+ref_commit = "abd9348cd717a65b3cacbe136db71bd0aa62fdec"
+tag_filter = '^v\d+\.\d+\.\d{1,4}$'  # последняя группа <=4 цифр: отсекает легаси-теги-даты (v0.0.20201121)
+verified = "2026-09-15"
+verified_how = """\nСабмодуль пересобран от тега v0.0.6: `git ls-remote` апстрима refs/tags/v0.0.6 = \nabd9348cd717, локально тот же sha; поверх — 4 cherry-pick'нутых патча, gitlink \nf397dcdcb. Прежняя запись («псевдоверсия 506b7631853c == HEAD апстрима») \nописывала ПИН, а не дерево: в дереве лежала ветка с 5 патчами, которых в том \nкоммите нет."""
 owner = "core"
 max_lag = 0
 divergences = [
-  "СТРУКТУРА: git-submodule (twilgate/inhive-wireguard-go), ветка `inhive-patches`, gitlink ae2a6abbdb3c. Это ФОРК С ПЕРЕПИСАННОЙ ИСТОРИЕЙ (sagernet/wireguard-go + hiddify + наши коммиты), тегов апстрима в нём нет — поэтому ref тут ветка+коммит, а не тег, и `kind` сверять по тегам бессмысленно.",
-  "ЗАПИСЬ ИСПРАВЛЕНА 2026-09-14: прежняя утверждала «расхождений с пином не зафиксировано» и помечала себя TODO. Построчная сверка против записанного пина дала 6 изменённых файлов + целый лишний пакет. Ниже — что там на самом деле живёт.",
-  "warpobf/options.go — пакет Noise/WARP (переименован из hiddify-пакета коммитом ae2a6abb, dehiddification). Импортируется sing-box/option/wireguard.go; ради него дерево и вендорится.",
-  "conn/conn.go + conn/bind_std.go + conn/bind_windows.go + device/{device,peer,send}.go — GFW-knocker: интерфейс SendWithoutModify (парный к патчу 788aa623e в форке tailscale), Peer.SendBuffersWithoutModify, customSend с рандомизированным префиксом, HNoise/stopCh в Device.",
-  "🪟 Wave 14L, Windows, ЖИВОЙ ФИКС: (1) conn/bind_windows.go — WinRIO принудительно отключён, всегда NewStdNetBind: на винде WSASendMsg отдавал invalid pointer на handshake initiation; (2) conn/bind_std.go — пустой (len==0, но не nil) OOB-буфер заменяется на nil, иначе WSASendMsg падает с WSAEFAULT. Без этих двух правок WireGuard/AmneziaWG на Windows не поднимается. НЕ ТЕРЯТЬ при бампе.",
-  "Апстрим sagernet/wireguard-go ушёл на v0.0.6 (sing-box 1.13.21 требует v0.0.4). Бамп = мерж апстрима в ветку inhive-patches в САБМОДУЛЬНОМ репо + пуш + бамп gitlink; go.mod-пин при этом роли не играет (replace => ./replace/wireguard-go). Отдельная задача.",
+  "СТРУКТУРА: git-submodule (twilgate/inhive-wireguard-go), ветка `inhive-patches-v006`, gitlink f397dcdcb. ref/ref_commit = апстримный тег, на котором стоит патч-серия.",
+  "БАМП 2026-09-15: ветка ПЕРЕСОБРАНА от тега v0.0.6 вместо мержа — старая несла 54 коммита, из которых ~49 апстримные коммиты sagernet, переписанные у них же; мерж дал бы кашу конфликтов. Перенесены только 4 реально наших/hiddify коммита. Старая ветка сохранена (origin/inhive-patches + локальный inhive-patches-pre-v006-backup).",
+  "СПИСАН ПРИ БАМПЕ: коммит 16510ac «Fix input packet» — апстрим пришёл к тому же смещению буфера и сверх того добавил maxQueuedInputPackets (бэклог инжектируемых пакетов). Наша версия была бы шагом назад.",
+  "warpobf/options.go — пакет Noise/WARP, импортируется sing-box/option/wireguard.go. Ради него дерево и вендорится.",
+  "GFW-knocker: SendWithoutModify в conn/conn.go + оба bind'а, Peer.SendBuffersWithoutModify, customSend/sendNoise, HNoise/stopCh в Device. При бампе sendNoise() поставлен ПЕРЕД апстримным выбором пути отправки handshake (endpoint racing по candidates) — шум обязан уходить до реального initiation.",
+  "🪟 Wave 14L, Windows, ЖИВОЙ ФИКС (перенесён и проверен grep'ом после бампа): (1) conn/bind_windows.go — WinRIO принудительно выключен, всегда NewStdNetBind (WSASendMsg отдавал invalid pointer на handshake initiation); (2) conn/bind_std.go — пустой OOB-буфер заменяется на nil (иначе WSAEFAULT). Апстрим v0.0.6 ни того, ни другого не содержит. Без них WireGuard/AmneziaWG на Windows не поднимается. НЕ ТЕРЯТЬ.",
 ]
+
 
 # ---------------------------------------------------------------------------
 #  4. sagernet/tailscale
@@ -167,18 +169,19 @@ id = "tailscale"
 kind = "tree"
 path = "sing-box/replace/tailscale"
 upstream = "https://github.com/SagerNet/tailscale"
-ref = "v1.92.4-sing-box-1.13-mod.6"
+ref = "v1.92.4-sing-box-1.13-mod.10"
+ref_commit = "16a84311170d6413827342d48ed052dbb0e8dc0f"
 tag_filter = '^v\d+\.\d+\.\d+-sing-box-1\.13-mod\.\d+$'
-verified = "2026-09-14"
-verified_how = "go list -m => v1.92.4-sing-box-1.13-mod.7; это же значение — старший тег апстрима на дату сверки."
+verified = "2026-09-15"
+verified_how = """\nСабмодуль пересобран от тега mod.10: `git ls-remote` апстрима = 16a843111706, \nлокально `git rev-parse v1.92.4-sing-box-1.13-mod.10^{commit}` даёт тот же sha, \n`git describe` ветки = v1.92.4-sing-box-1.13-mod.10-1-gc86e731f2 (ровно один наш \nкоммит сверху). Прежняя запись (mod.7 «по go list -m») была НЕВЕРНА: go list \nпоказывает пин из go.mod, а дерево берётся через replace из сабмодуля, и там \nбыл mod.6. Версию сабмодуля доказывает git describe, а не go list."""
 owner = "core"
 max_lag = 1
 divergences = [
-  "СТРУКТУРА: это git-submodule (twilgate/inhive-tailscale), а НЕ развёрнутое дерево. Версия = gitlink-коммит 788aa623e в sing-box/.gitmodules, и меняется он только бампом сабмодуля.",
-  "ЭТАЛОН ИСПРАВЛЕН 2026-09-14: в реестре стоял mod.7, доказано mod.6. `git describe` в сабмодуле = v1.92.4-sing-box-1.13-mod.6-1-g788aa623e; тег mod.6 = a8153dda2d93 и это ровно то, что отдаёт `git ls-remote` апстрима. Прежняя запись была сделана без построчной сверки (сама себя помечала TODO) и три месяца врала на один тег.",
-  "Единственный коммит поверх базы — 788aa623e «fix: interface diff» (автор hiddify, 4 строки в wgengine/magicsock/magicsock.go): метод Conn.SendWithoutModify, парный к интерфейсу SendWithoutModify в форке wireguard-go (GFW-knocker/WARP-обфускация). Это НЕ наш патч, унаследован.",
-  "ЦЕНА ОТСТАВАНИЯ (следствие, найдено 2026-09-14): в mod.7+ у апстрима появился netns.SetControlFunc, у нас на mod.6 его нет — именно поэтому sing-box/protocol/tailscale не компилируется и вместе с ним из go vet исключается service/derp (его единственный импортёр). То есть два пакета висят в EXCL не по нашему решению, а из-за незамеченного отставания сабмодуля. Апстрим сейчас mod.10 (16a843111706); бамп, вероятно, снимает оба исключения — отдельная задача.",
+  "СТРУКТУРА: git-submodule (twilgate/inhive-tailscale), ветка `inhive-patches`, gitlink c86e731f2. Версия меняется бампом сабмодуля, НЕ пином в go.mod (go list покажет пин и соврёт — так и случилось).",
+  "БАМП 2026-09-15: mod.6 -> mod.10. Ветка пересобрана от тега mod.10 + cherry-pick единственного унаследованного коммита hiddify «fix: interface diff» (Conn.SendWithoutModify, 4 строки в wgengine/magicsock/magicsock.go — пара к GFW-knocker в форке wireguard-go; апстрим его по-прежнему не содержит, проверено grep'ом по mod.10).",
+  "🟢 ЗАКРЫТО ЭТИМ БАМПОМ: sing-box/protocol/tailscale и его импортёр service/derp СНОВА КОМПИЛИРУЮТСЯ и вернулись под go vet. Отставание на mod.6 лишало нас netns.SetControlFunc, а после мержа 1.13.21 ещё и tsnet.PeerDNSQueryHandler. Исключения убраны из CLAUDE.md, .github/workflows/build.yml и govulncheck.yml — если эти пакеты снова упадут, это РЕГРЕССИЯ, а не известная поломка.",
 ]
+
 
 # ---------------------------------------------------------------------------
 #  5. Psiphon-Labs/quic-go

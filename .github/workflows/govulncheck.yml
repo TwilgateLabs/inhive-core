@@ -80,7 +80,7 @@ jobs:
           MODULES='./... github.com/sagernet/sing-box/... github.com/twilgate/xray2sing/...'
           EXCL='(inhive-core/cmd/bydll|inhive-core/platform/desktop|inhive-core/v2/profile/test)'
           EXCL="$EXCL|(sing-box/cmd/sing-box|sing-box/cmd/internal/app_store_connect|sing-box/cmd/internal/update_apple_version|sing-box/common/geoip|sing-box/protocol/psiphon)"
-          EXCL="$EXCL|(sing-box/protocol/tailscale|sing-box/service/derp)"
+          # (tailscale/derp больше не исключены — сабмодули бампнуты 2026-09-15)
 
           PKGS=$(go list -e -tags "$TAGS" -f '{{if and .GoFiles (not (or .Error .DepsErrors))}}{{.ImportPath}}{{end}}' \
             $MODULES 2>/dev/null | grep -v -E "$EXCL")

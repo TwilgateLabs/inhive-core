@@ -145,25 +145,11 @@ jobs:
           #   protocol/psiphon                   — psiphon-tunnel-core, не в тегах
           EXCL="$EXCL|(sing-box/cmd/sing-box|sing-box/cmd/internal/app_store_connect|sing-box/cmd/internal/update_apple_version|sing-box/common/geoip|sing-box/protocol/psiphon)"
 
-          # ⚠️ ИЗВЕСТНАЯ ПОЛОМКА, НЕ инфраструктурная — sing-box/protocol/tailscale
-          # и его единственный импортёр sing-box/service/derp (DERP-релей, мы его
-          # не поставляем). Исключать надо ОБА: пакет тянется транзитивно, и
-          # выкидывание только tailscale из списка не спасает — derp утащит его
-          # в сборку снова.
-          #
-          # Суть: protocol/tailscale/endpoint.go:349,351,487 зовёт
-          # netns.SetControlFunc, которого нет в нашем вендоренном форке
-          # (sing-box/replace/tailscale/net/netns — там есть SetAndroidProtectFunc,
-          # SetControlFunc отсутствует). Это version skew вендоренного
-          # github.com/sagernet/tailscale относительно кода sing-box 1.13.x.
-          # Файл гейтится //go:build with_gvisor, а with_gvisor у нас включён,
-          # поэтому пакет попадает в сборку. На АРТЕФАКТЫ не влияет: проверено,
-          # что ни tailscale, ни derp не входят в дерево зависимостей
-          # ./platform/desktop (with_tailscale в BASE_TAGS нет, никто их не
-          # импортирует). Исключены ЯВНО и по именам, чтобы не прятать проблему
-          # за автофильтром: чинится бампом вендоренного форка, владелец —
-          # реестр core/upstream.toml. Убрать эту строку сразу после починки.
-          EXCL="$EXCL|(sing-box/protocol/tailscale|sing-box/service/derp)"
+          # 2026-09-15: sing-box/protocol/tailscale и sing-box/service/derp БОЛЬШЕ НЕ
+          # исключаются. Они не собирались из-за отставшего сабмодуля
+          # replace/tailscale (сидел на mod.6, где нет netns.SetControlFunc), а не
+          # по замыслу. Сабмодули бампнуты: tailscale mod.10, wireguard-go v0.0.6.
+          # Если vet снова упадёт на них — это РЕГРЕССИЯ, чинить, а не исключать.
 
           # -e обязателен: без него `go list` САМ падает на исключённых выше
           # пакетах (нерезолвящийся импорт — фатальная ошибка) ещё до того, как

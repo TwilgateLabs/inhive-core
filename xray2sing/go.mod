@@ -12,7 +12,7 @@ go 1.26.5
 require (
 	github.com/sagernet/sing v0.8.14
 	github.com/sagernet/sing-box v1.13.0
-	github.com/sagernet/wireguard-go v0.0.4
+	github.com/sagernet/wireguard-go v0.0.6
 	github.com/spf13/cobra v1.10.2
 	gopkg.in/yaml.v3 v3.0.1
 // github.com/xtls/xray-core v0.0.0-00010101000000-000000000000
@@ -60,7 +60,6 @@ require (
 	github.com/go-chi/chi/v5 v5.2.5 // indirect
 	github.com/go-chi/render v1.0.3 // indirect
 	github.com/go-jose/go-jose/v3 v3.0.5 // indirect
-	github.com/go-json-experiment/json v0.0.0-20250813024750-ebf49471dced // indirect
 	github.com/go-logr/logr v1.4.3 // indirect
 	github.com/go-logr/stdr v1.2.2 // indirect
 	github.com/go-ole/go-ole v1.3.0 // indirect
