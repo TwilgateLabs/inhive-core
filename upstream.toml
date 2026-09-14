@@ -81,8 +81,8 @@ id = "sing-box"
 kind = "tree"
 path = "sing-box"
 upstream = "https://github.com/SagerNet/sing-box"
-ref = "v1.13.14"
-ref_commit = "25a600db24f7680ad9806ce5427bd0ab8afe1114"
+ref = "v1.13.21"
+ref_commit = "628cb31ffa79cffffd34c2f9cde6cae044e4fc12"
 tag_filter = '^v\d+\.\d+\.\d+$'
 verified = "2026-09-14"
 verified_how = """\n`git ls-remote https://github.com/SagerNet/sing-box refs/tags/v1.13.14` = \n25a600db24f7680ad9806ce5427bd0ab8afe1114, и это РОВНО второй родитель нашего \nmerge-коммита «merge: v1.13.14 into main» (2026-09-14; предыдущая база v1.13.8 = \nd5adb54b была вторым родителем 5c0f50a3). База доказана коммитом, а не записью \nв CHANGELOG. Мерж разруливался по группам конфликтов с независимой верификацией \n(потеря апстрима / потеря нашего патча / поведение), итог — в CHANGELOG."""
@@ -105,7 +105,10 @@ divergences = [
   "fatal-audit 2026-08-25 (пакет расхождений, детали в CHANGELOG [Unreleased]): adapter/outbound/manager.go — recover вокруг CreateOutbound (паника конструктора → invalid-стаб, не смерть box.New); adapter/endpoint/manager.go + protocol/invalid/endpoint.go — invalid-фоллбек для endpoint'ов (у апстрима его нет вовсе); box.go — линт member/default тегов selector/urltest до создания аутбаундов; common/tls/reality_client.go — пре-чек длины short_id ДО hex.Decode (sid ≥18 hex паниковал index-out-of-range; баг есть и в апстриме — кандидат в PR); common/tls/{std,utls}_client.go — string(certificate) в E.New (сырой []byte паникует в format.ToString; апстримный баг, кандидат в PR); protocol/ssh/outbound.go — E.Cause(err, hostKey) вместо E.New(nil-key); transport/wireguard/endpoint.go — ipcConf (private_key hex) убран из текста ошибки IpcSet; protocol/mieru/common.go — case OFF/MULTIPLEXING_OFF (официальное mieru-значение, апстрим его теряет); include/registry.go — psiphon-стаб на option.PsiphonOutboundOptions вместо StubOptions (строгий unmarshal валил весь конфиг); common/monitoring/outbound_monitoring.go + route/conn.go — fmt.Sprint(r) в recover-путях (сырое r ре-паникует в format.ToString).",
   "protocol/vless/outbound.go (2026-08-24): деref *options.PacketEncoding в E.New — апстрим передаёт указатель, format.ToString на нём паникует (panic \"unknown value\") и прячет само кривое значение. Косметика диагностики, поведение не меняется; кандидат в upstream PR.",
   "Полный перечень — core/CHANGELOG.md; форк-wide, построчно тут не разворачиваем.",
+  "МЕРЖ 1.13.21 (2026-09-14, второй за день): hiddify-реверт 30fa26b7e «Revert 'Remove varbin usages'» СНЯТ во всех шести файлах, которых касается апстримный security-фикс f260e771e (adapter/experimental.go, common/geosite/{reader,writer}.go, common/srs/{binary,ip_cidr,ip_set}.go, experimental/libbox/profile_import.go): reflective varbin-чтение длин из недоверенного потока заменено на явные bounded-циклы + проверки длины + maxLogicalRuleDepth. Читатель И писатель взяты у апстрима побайтно, чтобы формат не разъехался. Для универсального клиента это прямо по профилю: .srs/geosite приезжают по ссылкам из чужих подписок.",
+  "log/observable.go (2026-09-14): апстримная буферизация до Start() (9d8d4b879) принята, но флаг started взводится досрочно ТОЛЬКО при filePath=='' (фабрика hcore/CoreLogFactory, у которой Start() не зовут никогда — иначе вкладка «Логи» молчит, а pendingEntries растёт в NE). Инвариант «платформенный путь не гейтится» держится доставкой в platformWriter прямо из буферизующей ветки Log, слив pendingEntries идёт через outputWith(deliverPlatform=false). Гард: log/platform_writer_level_test.go, тест TestPlatformWriterReceivesBeforeStart.",
 ]
+
 
 # ---------------------------------------------------------------------------
 #  2. golang.org/x/net — форк ради одной правки в http2
@@ -141,15 +144,19 @@ id = "wireguard-go"
 kind = "commit"
 path = "sing-box/replace/wireguard-go"
 upstream = "https://github.com/SagerNet/wireguard-go"
-ref = "v0.0.2-beta.1.0.20260224074747-506b7631853c"
-ref_commit = "506b7631853c"
-verified = "2026-07-19"
+ref = "inhive-patches@ae2a6abb"
+ref_commit = "ae2a6abbdb3c6b592f6fcb70dfd92f5bd14c3997"
+verified = "2026-09-14"
 verified_how = "go list -m даёт псевдоверсию с коммитом 506b7631853c; `git ls-remote HEAD` апстрима = тот же 506b7631853c."
 owner = "core"
 max_lag = 0
 divergences = [
-  "На момент сверки расхождений с пином не зафиксировано; дерево вендорится ради warpobf (Noise/WARP), который импортит option/wireguard.go.",
-  "НЕ ПРОВЕРЕНО построчным диффом против апстрим-коммита — только по пину. TODO.",
+  "СТРУКТУРА: git-submodule (twilgate/inhive-wireguard-go), ветка `inhive-patches`, gitlink ae2a6abbdb3c. Это ФОРК С ПЕРЕПИСАННОЙ ИСТОРИЕЙ (sagernet/wireguard-go + hiddify + наши коммиты), тегов апстрима в нём нет — поэтому ref тут ветка+коммит, а не тег, и `kind` сверять по тегам бессмысленно.",
+  "ЗАПИСЬ ИСПРАВЛЕНА 2026-09-14: прежняя утверждала «расхождений с пином не зафиксировано» и помечала себя TODO. Построчная сверка против записанного пина дала 6 изменённых файлов + целый лишний пакет. Ниже — что там на самом деле живёт.",
+  "warpobf/options.go — пакет Noise/WARP (переименован из hiddify-пакета коммитом ae2a6abb, dehiddification). Импортируется sing-box/option/wireguard.go; ради него дерево и вендорится.",
+  "conn/conn.go + conn/bind_std.go + conn/bind_windows.go + device/{device,peer,send}.go — GFW-knocker: интерфейс SendWithoutModify (парный к патчу 788aa623e в форке tailscale), Peer.SendBuffersWithoutModify, customSend с рандомизированным префиксом, HNoise/stopCh в Device.",
+  "🪟 Wave 14L, Windows, ЖИВОЙ ФИКС: (1) conn/bind_windows.go — WinRIO принудительно отключён, всегда NewStdNetBind: на винде WSASendMsg отдавал invalid pointer на handshake initiation; (2) conn/bind_std.go — пустой (len==0, но не nil) OOB-буфер заменяется на nil, иначе WSASendMsg падает с WSAEFAULT. Без этих двух правок WireGuard/AmneziaWG на Windows не поднимается. НЕ ТЕРЯТЬ при бампе.",
+  "Апстрим sagernet/wireguard-go ушёл на v0.0.6 (sing-box 1.13.21 требует v0.0.4). Бамп = мерж апстрима в ветку inhive-patches в САБМОДУЛЬНОМ репо + пуш + бамп gitlink; go.mod-пин при этом роли не играет (replace => ./replace/wireguard-go). Отдельная задача.",
 ]
 
 # ---------------------------------------------------------------------------
@@ -160,15 +167,17 @@ id = "tailscale"
 kind = "tree"
 path = "sing-box/replace/tailscale"
 upstream = "https://github.com/SagerNet/tailscale"
-ref = "v1.92.4-sing-box-1.13-mod.7"
+ref = "v1.92.4-sing-box-1.13-mod.6"
 tag_filter = '^v\d+\.\d+\.\d+-sing-box-1\.13-mod\.\d+$'
-verified = "2026-07-19"
+verified = "2026-09-14"
 verified_how = "go list -m => v1.92.4-sing-box-1.13-mod.7; это же значение — старший тег апстрима на дату сверки."
 owner = "core"
 max_lag = 1
 divergences = [
-  "Расхождений не заявлено — дерево лежит локально только чтобы зафиксировать версию форка SagerNet.",
-  "НЕ ПРОВЕРЕНО построчным диффом. TODO.",
+  "СТРУКТУРА: это git-submodule (twilgate/inhive-tailscale), а НЕ развёрнутое дерево. Версия = gitlink-коммит 788aa623e в sing-box/.gitmodules, и меняется он только бампом сабмодуля.",
+  "ЭТАЛОН ИСПРАВЛЕН 2026-09-14: в реестре стоял mod.7, доказано mod.6. `git describe` в сабмодуле = v1.92.4-sing-box-1.13-mod.6-1-g788aa623e; тег mod.6 = a8153dda2d93 и это ровно то, что отдаёт `git ls-remote` апстрима. Прежняя запись была сделана без построчной сверки (сама себя помечала TODO) и три месяца врала на один тег.",
+  "Единственный коммит поверх базы — 788aa623e «fix: interface diff» (автор hiddify, 4 строки в wgengine/magicsock/magicsock.go): метод Conn.SendWithoutModify, парный к интерфейсу SendWithoutModify в форке wireguard-go (GFW-knocker/WARP-обфускация). Это НЕ наш патч, унаследован.",
+  "ЦЕНА ОТСТАВАНИЯ (следствие, найдено 2026-09-14): в mod.7+ у апстрима появился netns.SetControlFunc, у нас на mod.6 его нет — именно поэтому sing-box/protocol/tailscale не компилируется и вместе с ним из go vet исключается service/derp (его единственный импортёр). То есть два пакета висят в EXCL не по нашему решению, а из-за незамеченного отставания сабмодуля. Апстрим сейчас mod.10 (16a843111706); бамп, вероятно, снимает оба исключения — отдельная задача.",
 ]
 
 # ---------------------------------------------------------------------------
@@ -312,10 +321,10 @@ id = "sing"
 kind = "tree"
 path = "sing-box/replace/sing"
 upstream = "https://github.com/SagerNet/sing"
-ref = "v0.8.11"
-ref_commit = "c7c09c5f3f58410965b0a97cbc82d4d4e8323b9b"
+ref = "v0.8.14"
+ref_commit = "87773cc9c5b2a4e4fc05cbd2db304ba23ca13515"
 tag_filter = '^v\d+\.\d+\.\d+$'
-verified = "2026-09-13"
+verified = "2026-09-14"
 verified_how = """Дерево = побайтная копия module cache sing@v0.8.11 (`diff -rq` против $GOMODCACHE/github.com/sagernet/sing@v0.8.11 — пусто ДО наложения патча) + ровно один апстримный коммит поверх: ef37987fa0bee9702bd086f6ca728c3d61d26eac «Fix windows error» (2 файла: common/exceptions/error.go, error_windows.go), наложен `git apply` без правок. Тег v0.8.11 = c7c09c5f по `git ls-remote`."""
 owner = "core"
 max_lag = 2
