@@ -81,19 +81,16 @@ id = "sing-box"
 kind = "tree"
 path = "sing-box"
 upstream = "https://github.com/SagerNet/sing-box"
-ref = "v1.13.8"
-ref_commit = "d5adb54bc6c6b2c21ab6f748276c4ec62d9bb650"
+ref = "v1.13.14"
+ref_commit = "25a600db24f7680ad9806ce5427bd0ab8afe1114"
 tag_filter = '^v\d+\.\d+\.\d+$'
-verified = "2026-07-19"
-verified_how = """\
-`git ls-remote https://github.com/SagerNet/sing-box refs/tags/v1.13.8` = \
-d5adb54bc6c6b2c21ab6f748276c4ec62d9bb650, и это РОВНО второй родитель нашего \
-merge-коммита 5c0f50a3 («merge: v1.13.8 into sing-v0.8.4-compat»). То есть база \
-доказана коммитом, а не записью в CHANGELOG."""
+verified = "2026-09-14"
+verified_how = """\n`git ls-remote https://github.com/SagerNet/sing-box refs/tags/v1.13.14` = \n25a600db24f7680ad9806ce5427bd0ab8afe1114, и это РОВНО второй родитель нашего \nmerge-коммита «merge: v1.13.14 into main» (2026-09-14; предыдущая база v1.13.8 = \nd5adb54b была вторым родителем 5c0f50a3). База доказана коммитом, а не записью \nв CHANGELOG. Мерж разруливался по группам конфликтов с независимой верификацией \n(потеря апстрима / потеря нашего патча / поведение), итог — в CHANGELOG."""
 owner = "core"
 max_lag = 2
 divergences = [
-  "Ветка sing-v0.8.4-compat: держим sing v0.8.x, апстрим уехал вперёд по sing.",
+  "Ветка main (single-main). sing — вендоренный форк v0.8.11 в sing-box/replace/sing (запись id=sing ниже): линия 1.13 = sing 0.8; переезд на 1.14 / sing 0.9 — отдельный проект (перефорк патч-серией, не мерж).",
+  "protocol/tun/inbound.go + option/tun.go (2026-09-14): восстановлено апстримное auto_redirect_iproute2_fallback_rule_index — hiddify-реверт b2308e523 держался ради пина sing-tun 0.8.0-beta.14, а с sing-tun 0.8.11 поле реально потребляется (tun_linux.go: приоритет fallback ip-rule); ноль давал rule с приоритетом 0 впереди main на Linux non-Android. Литерал tun.Options теперь побайтно апстримный, наш комментарий про ICMPTimeout вынесен над ним.",
   "transport/v2rayxhttp/ — собственный порт Xray splithttp (отдельная запись ниже).",
   "common/xray/ — порт buf/pipe/signal/stat из Xray (отдельная запись ниже).",
   "option/v2ray_transport.go — XHTTP/gRPC/HTTPUpgrade поля сверх апстрима (Xray parity).",
