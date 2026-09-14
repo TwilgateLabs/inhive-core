@@ -90,6 +90,7 @@ owner = "core"
 max_lag = 2
 divergences = [
   "Ветка main (single-main). sing — вендоренный форк v0.8.11 в sing-box/replace/sing (запись id=sing ниже): линия 1.13 = sing 0.8; переезд на 1.14 / sing 0.9 — отдельный проект (перефорк патч-серией, не мерж).",
+  "experimental/cachefile (2026-09-14): hiddify-реверт b8e0e224a апстримного c45ea8dfa «Recover from bbolt panics on corrupted database» СНЯТ — view/batch/update с recover + resetDB (порченый cache.db удаляется и пересоздаётся, а не роняет процесс) снова как у апстрима. Наше сверху: storeWARPConfig + StoreWARPConfig/LoadBinary/SaveBinary (кеш WARP-конфига в bucketRuleSet) — через те же view/batch.",
   "protocol/tun/inbound.go + option/tun.go (2026-09-14): восстановлено апстримное auto_redirect_iproute2_fallback_rule_index — hiddify-реверт b2308e523 держался ради пина sing-tun 0.8.0-beta.14, а с sing-tun 0.8.11 поле реально потребляется (tun_linux.go: приоритет fallback ip-rule); ноль давал rule с приоритетом 0 впереди main на Linux non-Android. Литерал tun.Options теперь побайтно апстримный, наш комментарий про ICMPTimeout вынесен над ним.",
   "transport/v2rayxhttp/ — собственный порт Xray splithttp (отдельная запись ниже).",
   "common/xray/ — порт buf/pipe/signal/stat из Xray (отдельная запись ниже).",
