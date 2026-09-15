@@ -118,23 +118,21 @@ id = "x-net"
 kind = "tree"
 path = "sing-box/replace/x-net"
 upstream = "https://github.com/golang/net"
-ref = "v0.55.0"
-ref_commit = "7770ec48d03fec35e378665337b4faca93c38423"
+ref = "v0.59.0"
+ref_commit = "540d04cfe5028e2655754591a4d3e08c586809f2"
 tag_filter = '^v\d+\.\d+\.\d+$'
-verified = "2026-07-19"
-verified_how = """\
-Полный рекурсивный diff нашего дерева против чистого клона тега v0.55.0: \
-РОВНО ОДИН расходящийся файл (http2/transport.go), остальные байт-в-байт. \
-База доказана диффом, а не require-строкой в go.mod (которая при локальном \
-replace ничего не гарантирует)."""
+verified = "2026-09-15"
+verified_how = """\nДерево заменено на чистый v0.59.0 из module cache и патч наложен заново; \n`diff -rq --strip-trailing-cr` против того же кэша даёт РОВНО ОДИН \nрасходящийся файл — http2/transport.go. Тег v0.59.0 = 540d04cfe5028e2655754591a4d3e08c586809f2 \nпо `git ls-remote`."""
 owner = "core"
 max_lag = 2
 divergences = [
-  "http2/transport.go: frameScratchBufferLen — кап scratch-буфера 512KB -> 64KB, НО ТОЛЬКО на iOS (runtime.GOOS == \"ios\").",
+  "http2/transport.go: frameScratchBufferLen — кап scratch-буфера 512KB -> 64KB, НО ТОЛЬКО на iOS (runtime.GOOS == 'ios'). Это ЕДИНСТВЕННЫЙ расходящийся файл; остальное дерево побайтно равно чистому v0.59.0 (проверено `diff -rq --strip-trailing-cr` против module cache).",
   "Причина: буфер держится всю жизнь стрима; ~60 соединений x 512KB ~= 30MB = 68% от 50MB бюджета iOS NE -> jetsam (device-профиль 2026-07-18).",
-  "Гейт по платформе добавлен 2026-07-19: на Windows замер дал avg 339KB / max 976KB на тело, кап 64KB там дробил запись на ~8 проходов под cc.wmu.Lock() — накладные расходы без выгоды.",
-  "ВНИМАНИЕ: в задачах/памяти эта правка иногда описана как безусловная «512KB->64KB» — это УСТАРЕВШЕЕ описание, правка платформенная.",
+  "Гейт по платформе (2026-07-19): на Windows замер дал avg 339KB / max 976KB на тело, кап 64KB там дробил запись на ~8 проходов под cc.wmu.Lock() — накладные расходы без выгоды.",
+  "БАМП 2026-09-15: v0.55.0 -> v0.59.0. Дерево заменено на чистый апстрим, патч наложен заново (место правки в апстриме не изменилось: `const max = 512 << 10` там же). Потянул за собой x/crypto v0.52.0 -> v0.57.0, x/sys -> v0.48.0, x/text -> v0.42.0 во всех трёх модулях — x/net v0.59.0 их требует.",
+  "ВНИМАНИЕ: в старых задачах/памяти правка иногда описана как безусловная «512KB->64KB» — это УСТАРЕВШЕЕ описание, правка платформенная.",
 ]
+
 
 # ---------------------------------------------------------------------------
 #  3. sagernet/wireguard-go
@@ -191,9 +189,9 @@ id = "psiphon-quic-go"
 kind = "commit"
 path = "sing-box/replace/psiphon-quic-go"
 upstream = "https://github.com/Psiphon-Labs/quic-go"
-ref = "v0.0.0-20240424181006-45545f5e1536"
-ref_commit = "45545f5e1536"
-verified = "2026-07-19"
+ref = "upstream-HEAD+2"
+ref_commit = "79fe45fb83b1cbcf9e9aa4b50419c7ad836ee786"
+verified = "2026-09-15"
 verified_how = """\
 В go.mod НЕТ require — только replace; версия вытащена из графа модулей \
 (`go list -m`), куда попадает транзитивно через Psiphon-Labs/psiphon-tunnel-core \
@@ -202,9 +200,11 @@ v2.0.28+incompatible. У апстрима НЕТ ТЕГОВ вообще, поэ
 owner = "core"
 max_lag = 0
 divergences = [
-  "Расхождений не заявлено.",
-  "СЛАБОЕ МЕСТО: пин от 2024-04-24 (45545f5e1536), апстрим ушёл на 79fe45fb83b1. Тегов нет — «на сколько релизов отстали» неизмеримо в принципе, нужен ручной обзор коммитов.",
+  "СТРУКТУРА: git-submodule (twilgate/inhive-psiphon-*), detached HEAD на gitlink. Версия — это КОММИТ САБМОДУЛЯ, а не псевдоверсия из go.mod.",
+  "ЗАПИСЬ ИСПРАВЛЕНА 2026-09-15: прежняя объявляла «СЛАБОЕ МЕСТО: пин от 2024-04-24, апстрим ушёл на 79fe45fb». НЕВЕРНО — она описывала псевдоверсию из графа модулей, а дерево сабмодуля СТОИТ НА 79fe45fb, то есть ровно на HEAD апстрима, плюс два коммита сверху. Отставания нет и не было. Та же ошибка, что была у tailscale/wireguard-go: `go list -m` показывает пин, а код приходит через replace из сабмодуля.",
+  "Поверх апстрима два унаследованных коммита hiddify: 2164d165 «fix: golang compatiblity» (http3/client.go, http3/conn.go) и 47042a7c «disable workflow».",
 ]
+
 
 # ---------------------------------------------------------------------------
 #  6. Psiphon-Labs/psiphon-tls
@@ -214,9 +214,9 @@ id = "psiphon-tls"
 kind = "commit"
 path = "sing-box/replace/psiphon-tls"
 upstream = "https://github.com/Psiphon-Labs/psiphon-tls"
-ref = "v0.0.0-20240424193802-52b2602ec60c"
-ref_commit = "52b2602ec60c"
-verified = "2026-07-19"
+ref = "upstream-HEAD+1"
+ref_commit = "2a2fae2db378acefb9615182dccc85f04917f88b"
+verified = "2026-09-15"
 verified_how = """\
 Версия из графа модулей (`go list -m`), т.к. в go.mod есть только replace без \
 require. Апстрим жив: `git ls-remote HEAD` = 2a2fae2db378 (трижды подряд, \
@@ -225,9 +225,13 @@ require. Апстрим жив: `git ls-remote HEAD` = 2a2fae2db378 (трижд�
 owner = "core"
 max_lag = 0
 divergences = [
-  "Расхождений не заявлено.",
-  "СЛАБОЕ МЕСТО: пин от 2024-04-24 (52b2602ec60c), апстрим ушёл на 2a2fae2db378. Тегов нет — «на сколько релизов отстали» неизмеримо в принципе, нужен ручной обзор коммитов.",
+  "СТРУКТУРА: git-submodule (twilgate/inhive-psiphon-*), detached HEAD на gitlink. Версия — это КОММИТ САБМОДУЛЯ, а не псевдоверсия из go.mod.",
+  "ЗАПИСЬ ИСПРАВЛЕНА 2026-09-15: прежняя объявляла отставание от 2024-04-24 до 2a2fae2db378. НЕВЕРНО — дерево сабмодуля СТОИТ НА 2a2fae2db378 (HEAD апстрима) плюс один коммит сверху. См. пояснение в записи psiphon-quic-go.",
+  "Поверх апстрима один унаследованный коммит hiddify: 4af85c2 «add support for go 1.24» (common.go, conn.go).",
+  "🔴 СТАТУС ПРОТОКОЛА: psiphon ОТКЛЮЧЁН — include/registry.go не регистрирует outbound (коммит e4f44bbde, «breaks Go 1.26 TLS»), остался только стаб, чтобы конфиг с type:psiphon не ронял парсинг целиком. Сабмодули при этом обязаны жить: на них стоят replace в core/go.mod, без них граф модулей не резолвится.",
+  "🔬 ПОЧЕМУ ВОЗВРАТ НЕ СДЕЛАН (проверено сборкой 2026-09-15, а не рассуждением): дело НЕ в наших форках — они свежие. protocol/psiphon тянет psiphon-tunnel-core v2.0.28, а тот — Psiphon-Labs/utls v1.1.0, который импортирует github.com/refraction-networking/utls/cpu; в современном refraction-networking/utls (v1.8.2) такого пакета больше НЕТ. Цепочка мёртвая, и чинится она бампом самого psiphon-tunnel-core, а не наших двух форков. Отдельная задача с неясной ценой.",
 ]
+
 
 # ---------------------------------------------------------------------------
 #  7. XHTTP (splithttp) — ручной порт из Xray
