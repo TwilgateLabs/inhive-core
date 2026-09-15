@@ -99,7 +99,6 @@ divergences = [
   "fresh-probe (2026-07-22): adapter/probe.go (ProbeFreshDialer + ProbeConn) — новый файл. urltest.URLTest + clashapi getProxyDelay читают fresh-флаг из ctx (query fresh=1) и дайлят пробу мимо переиспользуемого пула. DialProbeFresh реализуют hysteria2/tuic (транзиентный QUIC-клиент), vless/vmess/trojan/shadowsocks (обход mux). Зачем: пулящийся протокол после смены сети отвечает зелёным с протухшей живой сессии — ложный вердикт достижимости для НЕ-несущих резидентных серверов iOS. Без fresh-флага поведение бит-в-бит апстримное.",
   "fresh-probe xhttp/xmux (2026-07-23, продолжение): vless/vmess/trojan хранят transportOptions и в DialProbeFresh при наличии V2Ray-транспорта поднимают ТРАНЗИЕНТНЫЙ транспорт через тот же публичный v2ray.NewClientTransport (свой xmux h2/h3-пул, дефолты идентичны боевому), дайлят хендшейк через shallow-клон Outbound с подменённым только transport и закрывают транзиент вместе с probe-conn (Client.Close → xmuxManager.Reset). splithttp-порт (transport/v2rayxhttp, эталон Xray v26.7.11) НЕ трогался — работа на уровне v2ray.NewClientTransport. Закрывает xmux-слой лжи (xhttp пулит независимо от sing-mux и переживает смену сети без InterfaceUpdated); бонусом покрывает grpc/http/quic-v2ray транспорты тем же кодом. shadowsocks V2Ray-транспорт не несёт (sip003) — не затронут.",
   "log/platform_writer_level_test.go — наш инвариант-тест: platformWriter получает все уровни в обход уровня фабрики (на этом стоит вкладка «Логи»), SetLevel живьём гейтит файловый writer (box.log).",
-  "common/tls/reality_client.go (2026-08-03): версия клиента в ClientHello SessionId[0:3] = 26.7.11 вместо апстримного 1.8.1. Сервер сверяет её с minClientVer/maxClientVer (XTLS/REALITY tls.go), Xray шлёт свою реальную core-версию — с застывшим 1.8.1 нас молча отвергали сервера, пускавшие Xray/Happ (замер: 1.8.1 → VERIFIED=false, 26.7.11 → true, 3/3). Значение держать РАВНЫМ ref записи `xhttp` ниже и двигать вместе с бампом эталона.",
   "wake-probe iOS (2026-09-08): adapter/v2ray.go — интерфейс SleepProber; protocol/{vless,vmess,trojan}/outbound.go — ProbeAfterSleep делегирует транспорту; transport/v2rayhttp/force_close.go — ProbeTransport (h2 PING по каждому ClientConn приватного пула через тот же go:linkname, закрывает только не ответивших за timeout); transport/v2rayxhttp/{dialer,mux,client}.go — ProbeConns/Probe/ProbeAfterSleep. Зовётся из core/v2/hcore/pause.go на wake только при реальной заморозке процесса (wall−monotonic ≥2 мин) вместо прежнего ResetNetwork (рвал живые стримы: device-дамп 2026-09-07, 33/34). У апстрима 1.15 (a8849d22f6) — CloseIdleConnections при сне ≥2 мин; для xhttp packet-up он бесполезен (download-GET держит conn busy), поэтому PING. go:linkname на connPool сломается на go1.27 (файлы под !(go1.27 && !http2legacy)) — вместе с ResetTransport.",
   "common/xray/uuid/uuid.go (2026-08-25): урезан до New()+String()+Bytes() — единственное живое использование это xmux session id в transport/v2rayxhttp/client.go. Выпилены мёртвые ParseString (panic slice-out-of-range на неканонических дефисах) и ParseBytes (E.New с []byte → panic format.ToString). Понадобится парсинг — портировать из эталона Xray заново С фиксом границ.",
   "fatal-audit 2026-08-25 (пакет расхождений, детали в CHANGELOG [Unreleased]): adapter/outbound/manager.go — recover вокруг CreateOutbound (паника конструктора → invalid-стаб, не смерть box.New); adapter/endpoint/manager.go + protocol/invalid/endpoint.go — invalid-фоллбек для endpoint'ов (у апстрима его нет вовсе); box.go — линт member/default тегов selector/urltest до создания аутбаундов; common/tls/reality_client.go — пре-чек длины short_id ДО hex.Decode (sid ≥18 hex паниковал index-out-of-range; баг есть и в апстриме — кандидат в PR); common/tls/{std,utls}_client.go — string(certificate) в E.New (сырой []byte паникует в format.ToString; апстримный баг, кандидат в PR); protocol/ssh/outbound.go — E.Cause(err, hostKey) вместо E.New(nil-key); transport/wireguard/endpoint.go — ipcConf (private_key hex) убран из текста ошибки IpcSet; protocol/mieru/common.go — case OFF/MULTIPLEXING_OFF (официальное mieru-значение, апстрим его теряет); include/registry.go — psiphon-стаб на option.PsiphonOutboundOptions вместо StubOptions (строгий unmarshal валил весь конфиг); common/monitoring/outbound_monitoring.go + route/conn.go — fmt.Sprint(r) в recover-путях (сырое r ре-паникует в format.ToString).",
@@ -107,6 +106,8 @@ divergences = [
   "Полный перечень — core/CHANGELOG.md; форк-wide, построчно тут не разворачиваем.",
   "МЕРЖ 1.13.21 (2026-09-14, второй за день): hiddify-реверт 30fa26b7e «Revert 'Remove varbin usages'» СНЯТ во всех шести файлах, которых касается апстримный security-фикс f260e771e (adapter/experimental.go, common/geosite/{reader,writer}.go, common/srs/{binary,ip_cidr,ip_set}.go, experimental/libbox/profile_import.go): reflective varbin-чтение длин из недоверенного потока заменено на явные bounded-циклы + проверки длины + maxLogicalRuleDepth. Читатель И писатель взяты у апстрима побайтно, чтобы формат не разъехался. Для универсального клиента это прямо по профилю: .srs/geosite приезжают по ссылкам из чужих подписок.",
   "log/observable.go (2026-09-14): апстримная буферизация до Start() (9d8d4b879) принята, но флаг started взводится досрочно ТОЛЬКО при filePath=='' (фабрика hcore/CoreLogFactory, у которой Start() не зовут никогда — иначе вкладка «Логи» молчит, а pendingEntries растёт в NE). Инвариант «платформенный путь не гейтится» держится доставкой в platformWriter прямо из буферизующей ветки Log, слив pendingEntries идёт через outputWith(deliverPlatform=false). Гард: log/platform_writer_level_test.go, тест TestPlatformWriterReceivesBeforeStart.",
+  "🔴 common/tls/reality_client.go (2026-09-15): УДАЛЁН апстримный блок, вырезавший X25519MLKEM768 из SupportedCurves и KeyShare ClientHello. XTLS/REALITY 8cdf7bf9 (2026-09-08, в Xray >= 26.9.8) переключил сервер на ОБРАТНОЕ правило: ClientHello без MLKEM отвергается (tls.go: peerPub2 == nil -> break -> fallback на target-сайт). Проверено чтением обеих версий tls.go: старый сервер предпочитает X25519 и наличие MLKEM рядом игнорирует, новый требует MLKEM и терпит X25519 как опциональный — значит слать ОБА совместимо с обоими, а обрезанный ClientHello работал только со старыми. Исходная причина вырезания (uTLS кладёт X25519-половину в MlkemEcdhe, Ecdhe пуст -> «nil ecdheKey») закрыта нашей же веткой от 2026-08-03, которая теперь стала основным путём. ⚠️ При каждом merge апстрим вернёт этот блок — удалять снова.",
+  "common/tls/reality_client.go: версия клиента в SessionId[0:3] = 26.9.9 (двигается ВМЕСТЕ с ref записей xhttp/xray-common/xray2sing). Сервер сверяет её с minClientVer/maxClientVer; застывшее значение молча отбрасывалось серверами, пускавшими настоящий Xray.",
 ]
 
 
@@ -242,9 +243,10 @@ kind = "tree"
 path = "sing-box/transport/v2rayxhttp"
 extra_paths = ["sing-box/option/v2ray_transport.go"]
 upstream = "https://github.com/XTLS/Xray-core"
-ref = "v26.7.11"
+ref = "v26.9.9"
+ref_commit = "52a412d9e2f5c2a5142b1b4e2ab3771dacb8b120"
 tag_filter = '^v\d+\.\d+\.\d+$'
-verified = "2026-07-19"
+verified = "2026-09-15"
 verified_how = """\
 Сверено вручную против клона тега v26.7.11 в ходе разбора 2026-07-19 (коммит \
 sing-box 84fe2bc9 «parity with upstream Xray 26.7.11»). Маркеры версии \
@@ -254,7 +256,7 @@ owner = "core"
 max_lag = 1
 divergences = [
   "Порт живёт в sing-box, а не в Xray: транспорт переписан под sing-box adapter/dialer, поэтому побайтового соответствия нет by design.",
-  "xmux-дефолты приведены к 26.7.11 (maxConnections 6..6). ДО 2026-07-19 стояло 26.1.13-поведение (maxConcurrency 1..1) — ПРОТИВОПОЛОЖНАЯ стратегия; это и есть цена протухшего эталона.",
+  "xmux-дефолты приведены к 26.9.9: maxConnections 3..3 (было 6..6 по 26.7.11). Апстрим снизил их коммитом 18e28390 ЯВНО против TSPU — то есть против того самого DPI, под которым живут наши пользователи. hMaxRequestTimes/hMaxReusableSecs не менялись. Дефолт подставляется ТОЛЬКО когда весь блок xmux пуст (правило апстрима, у нас такое же). История значения: 26.1.13 maxConcurrency 1..1 -> 26.7.11 maxConnections 6..6 -> 26.9.9 3..3; гарда на значение в тестах нет, поэтому оно и дрейфует — кандидат на table-тест.",
   "tokenish-padding: длина считается по ХАФФМАН-оценке, а не по числу сырых символов (сервер валидирует сжатую длину в [98,1002]).",
   "randStringFromCharset: добавлен rejection sampling — «%62» перекашивал первые 8 символов алфавита, т.е. давал статистический признак в поле, существующем РАДИ маскировки.",
   "Логирование отказов upload восстановлено («failed to send upload») — при первом портировании потеряли, из-за чего upload-половина была слепа.",
@@ -275,9 +277,10 @@ id = "xray-common"
 kind = "tree"
 path = "sing-box/common/xray"
 upstream = "https://github.com/XTLS/Xray-core"
-ref = "v26.7.11"
+ref = "v26.9.9"
+ref_commit = "52a412d9e2f5c2a5142b1b4e2ab3771dacb8b120"
 tag_filter = '^v\d+\.\d+\.\d+$'
-verified = "2026-07-19"
+verified = "2026-09-15"
 verified_how = """\
 Нормализованный diff (переписаны import-пути xtls/xray-core -> sing-box/common/xray) \
 против клона тега v26.7.11: pipe/{impl,pipe,reader,writer}.go расходятся на \
@@ -301,9 +304,10 @@ id = "xray2sing"
 kind = "tree"
 path = "xray2sing"
 upstream = "https://github.com/XTLS/Xray-core"
-ref = "v26.7.11"
+ref = "v26.9.9"
+ref_commit = "52a412d9e2f5c2a5142b1b4e2ab3771dacb8b120"
 tag_filter = '^v\d+\.\d+\.\d+$'
-verified = "2026-07-19"
+verified = "2026-09-15"
 verified_how = """\
 Собственный код (module github.com/twilgate/xray2sing), апстрим-копии не имеет. \
 Xray указан как СЕМАНТИЧЕСКИЙ эталон: набор полей URI/JSON, которые парсер обязан \
