@@ -46,10 +46,10 @@ func SSHSingbox(sshURL string) (*T.Outbound, error) {
 		Type: "ssh",
 		Tag:  u.Name,
 		Options: &T.SSHOutboundOptions{
-			ServerOptions:        u.GetServerOption(),
-			User:                 u.Username,
-			Password:             u.Password,
-			PrivateKey: privkeys,
+			ServerOptions: u.GetServerOption(),
+			User:          u.Username,
+			Password:      u.Password,
+			PrivateKey:    privkeys,
 			// ParseUrl stores query keys through normalizeStr ('_'/'-' -> ' '),
 			// so a direct decoded["pk_passphrase"] lookup can NEVER match (the
 			// key is stored as "pk passphrase") — passphrase-protected keys

@@ -135,13 +135,13 @@ func vmessSecurityOf(t *testing.T, scy string) string {
 
 func TestVmessSecurityNormalization(t *testing.T) {
 	cases := map[string]string{
-		"":                        "auto",
-		"AES-128-GCM":             "aes-128-gcm",
-		"Auto":                    "auto",
-		"chacha20-ietf-poly1305":  "chacha20-poly1305",
-		"aes-256-gcm":             "auto", // unknown to sing-vmess -> auto (Xray parity)
-		"zero":                    "zero",
-		"none":                    "none",
+		"":                       "auto",
+		"AES-128-GCM":            "aes-128-gcm",
+		"Auto":                   "auto",
+		"chacha20-ietf-poly1305": "chacha20-poly1305",
+		"aes-256-gcm":            "auto", // unknown to sing-vmess -> auto (Xray parity)
+		"zero":                   "zero",
+		"none":                   "none",
 	}
 	for in, want := range cases {
 		if got := vmessSecurityOf(t, in); got != want {

@@ -10,7 +10,6 @@ import (
 	"time"
 )
 
-
 // looksLikeUUID — грубая форма-проверка v5-идентификатора (8-4-4-4-12 hex).
 func looksLikeUUID(s string) bool {
 	if len(s) != 36 {

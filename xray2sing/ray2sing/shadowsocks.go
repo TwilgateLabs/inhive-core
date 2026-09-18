@@ -1,9 +1,9 @@
 package ray2sing
 
 import (
-	"net/url"
 	"encoding/base64"
 	"fmt"
+	"net/url"
 	"strings"
 
 	T "github.com/sagernet/sing-box/option"

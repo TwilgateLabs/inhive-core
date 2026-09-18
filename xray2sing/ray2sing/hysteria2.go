@@ -61,7 +61,6 @@ func extractHostPortRange(rawURL string) (rewritten, portRange string, ok bool) 
 	return rewritten, spec, true
 }
 
-
 // parseMbpsHint терпит юниты официального hy2-формата («100 mbps», «2 gbps»):
 // голый Atoi молча ронял подсказку и Brutal не включался.
 func parseMbpsHint(v string) int {

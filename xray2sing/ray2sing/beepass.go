@@ -1,8 +1,8 @@
 package ray2sing
 
 import (
-	"fmt"
 	"encoding/json"
+	"fmt"
 	"io"
 	"net/http"
 	"net/url"
