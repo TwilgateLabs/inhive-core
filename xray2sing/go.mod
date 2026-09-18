@@ -1,13 +1,13 @@
 module github.com/twilgate/xray2sing
 
-// Держать синхронно с ../go.mod (2026-07-19: 1.26.4 -> 1.26.5).
+// Держать синхронно с ../go.mod (2026-07-19: 1.26.4 -> 1.26.5; 2026-09-18: -> 1.26.8).
 // Это ОТДЕЛЬНЫЙ модуль, и OSV-Scanner сканирует его go.mod как самостоятельный
 // lockfile — бампа только в корневом go.mod недостаточно: сканер продолжит
 // репортить stdlib-уязвимости (GO-2026-5856 ECH privacy leak в crypto/tls,
 // GO-2026-4970 symlink root escape в os) из ЭТОЙ строки, и CI останется
 // красным. Проверено osv-scanner v2.3.8 — той же версией, что пинится в
 // .github/workflows/osv-scanner.yml.
-go 1.26.5
+go 1.26.8
 
 require (
 	github.com/sagernet/sing v0.8.14

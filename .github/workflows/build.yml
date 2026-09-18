@@ -27,7 +27,9 @@ jobs:
           # crypto/tls — reachable from our code) + GO-2026-4970 (symlink root
           # escape in os). Держать в одной версии с go.mod: разъезд означает,
           # что CI проверяет не тот тулчейн, которым собирают артефакт.
-          go-version: '1.26.5'
+          # 1.26.5→1.26.8 (2026-09-18): clear GO-2026-6218 (net/url) + GO-2026-6091
+          # (html/template), both reachable per govulncheck.
+          go-version: '1.26.8'
 
       # gofmt-гейт — ТОЛЬКО наш код. Проверка = `make fmt-check`: и список
       # каталогов (FMT_DIRS), и фильтр *.pb.go живут в Makefile ОДИН раз —
@@ -265,7 +267,7 @@ jobs:
         uses: actions/setup-go@40f1582b2485089dde7abd97c1529aa768e1baff  # v5.6.0
         with:
           # Держать в одной версии с основным job'ом и go.mod (см. комментарий там).
-          go-version: '1.26.5'
+          go-version: '1.26.8'
 
       - name: Run naive liveness gate
         run: |

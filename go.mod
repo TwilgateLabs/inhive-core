@@ -8,7 +8,11 @@ module github.com/twilgate/inhive-core
 // Обе исправлены ровно в 1.26.5. Патч-версия указана намеренно: OSV-Scanner
 // читает эту строку как заявленную версию stdlib, поэтому без бампа ИМЕННО
 // здесь он продолжит репортить их, даже если тулчейн в CI новее.
-go 1.26.5
+// 1.26.5 -> 1.26.8 (2026-09-18): закрывает GO-2026-6218 (net/url, достижима
+// из ContentFromURL и через bbolt.Open) и GO-2026-6091 (html/template,
+// достижима через h2c в v2rayhttp) — обе исправлены в 1.26.6, берём
+// текущий патч. Синхронно: xray2sing/go.mod, build.yml, govulncheck.yml.
+go 1.26.8
 
 require (
 	github.com/bepass-org/warp-plus v1.2.4
@@ -17,8 +21,8 @@ require (
 	github.com/sagernet/sing v0.8.14
 	github.com/spf13/cobra v1.10.2
 	golang.org/x/sys v0.48.0
-	google.golang.org/genproto/googleapis/rpc v0.0.0-20260523011958-0a33c5d7ca68 // indirect
-	google.golang.org/grpc v1.81.1
+	google.golang.org/genproto/googleapis/rpc v0.0.0-20260526163538-3dc84a4a5aaa // indirect
+	google.golang.org/grpc v1.83.2
 	google.golang.org/protobuf v1.36.11
 )
 
@@ -106,7 +110,7 @@ require (
 	github.com/openai/openai-go/v3 v3.26.0 // indirect
 	github.com/openlibrecommunity/olcrtc v0.0.3-inhive // indirect
 	github.com/pion/datachannel v1.6.0 // indirect
-	github.com/pion/dtls/v3 v3.1.2 // indirect
+	github.com/pion/dtls/v3 v3.1.4 // indirect
 	github.com/pion/ice/v4 v4.2.5 // indirect
 	github.com/pion/interceptor v0.1.45 // indirect
 	github.com/pion/logging v0.2.4 // indirect
@@ -117,8 +121,8 @@ require (
 	github.com/pion/sctp v1.10.0 // indirect
 	github.com/pion/sdp/v3 v3.0.18 // indirect
 	github.com/pion/srtp/v3 v3.0.10 // indirect
-	github.com/pion/stun/v3 v3.1.2 // indirect
-	github.com/pion/transport/v4 v4.0.1 // indirect
+	github.com/pion/stun/v3 v3.1.5 // indirect
+	github.com/pion/transport/v4 v4.0.2 // indirect
 	github.com/pion/turn/v5 v5.0.4 // indirect
 	github.com/pion/webrtc/v4 v4.2.13 // indirect
 	github.com/pkg/errors v0.9.1 // indirect
@@ -179,7 +183,7 @@ require (
 	github.com/zarazaex69/j v0.0.1-inhive // indirect
 	github.com/zeebo/xxh3 v1.1.0 // indirect
 	go.etcd.io/bbolt v1.3.11 // indirect
-	go.opentelemetry.io/otel v1.43.0 // indirect
+	go.opentelemetry.io/otel v1.44.0 // indirect
 	go.uber.org/atomic v1.11.0 // indirect
 	go.uber.org/zap/exp v0.3.0 // indirect
 	go.yaml.in/yaml/v3 v3.0.4 // indirect
@@ -189,7 +193,7 @@ require (
 	golang.zx2c4.com/wintun v0.0.0-20230126152724-0fa3db229ce2 // indirect
 	golang.zx2c4.com/wireguard/wgctrl v0.0.0-20241231184526-a9ab2273dd10 // indirect
 	golang.zx2c4.com/wireguard/windows v0.5.3 // indirect
-	google.golang.org/genproto/googleapis/api v0.0.0-20260523011958-0a33c5d7ca68 // indirect
+	google.golang.org/genproto/googleapis/api v0.0.0-20260526163538-3dc84a4a5aaa // indirect
 	gvisor.dev/gvisor v0.0.0-20250606233247-e3c4c4cad86f // indirect
 )
 

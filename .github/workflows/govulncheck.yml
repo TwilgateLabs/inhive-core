@@ -47,7 +47,9 @@ jobs:
           # (2026-07-19) закрывает GO-2026-5856 (ECH privacy leak в crypto/tls,
           # была ДОСТИЖИМА — 8 трасс) и GO-2026-4970 (symlink root escape в os).
           # Именно на них джоба краснела на каждый push.
-          go-version: '1.26.5'
+          # 1.26.5→1.26.8 (2026-09-18): GO-2026-6218 (net/url) + GO-2026-6091
+          # (html/template).
+          go-version: '1.26.8'
 
       - name: Install govulncheck
         run: go install golang.org/x/vuln/cmd/govulncheck@v1.1.4
