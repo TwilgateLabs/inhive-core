@@ -143,9 +143,11 @@ jobs:
           #                                        (мы поставляем DLL + свой cmd/)
           #   cmd/internal/app_store_connect     — релизная обвязка Apple
           #   cmd/internal/update_apple_version  — то же
+          #   cmd/internal/merge_apple_xcframework — то же (пришёл с 1.13.14,
+          #                                        тянет howett.net/plist)
           #   common/geoip                       — maxminddb, geoip-БД не используем
           #   protocol/psiphon                   — psiphon-tunnel-core, не в тегах
-          EXCL="$EXCL|(sing-box/cmd/sing-box|sing-box/cmd/internal/app_store_connect|sing-box/cmd/internal/update_apple_version|sing-box/common/geoip|sing-box/protocol/psiphon)"
+          EXCL="$EXCL|(sing-box/cmd/sing-box|sing-box/cmd/internal/app_store_connect|sing-box/cmd/internal/update_apple_version|sing-box/cmd/internal/merge_apple_xcframework|sing-box/common/geoip|sing-box/protocol/psiphon)"
 
           # 2026-09-15: sing-box/protocol/tailscale и sing-box/service/derp БОЛЬШЕ НЕ
           # исключаются. Они не собирались из-за отставшего сабмодуля

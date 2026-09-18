@@ -81,7 +81,7 @@ jobs:
           fi
           MODULES='./... github.com/sagernet/sing-box/... github.com/twilgate/xray2sing/...'
           EXCL='(inhive-core/cmd/bydll|inhive-core/platform/desktop|inhive-core/v2/profile/test)'
-          EXCL="$EXCL|(sing-box/cmd/sing-box|sing-box/cmd/internal/app_store_connect|sing-box/cmd/internal/update_apple_version|sing-box/common/geoip|sing-box/protocol/psiphon)"
+          EXCL="$EXCL|(sing-box/cmd/sing-box|sing-box/cmd/internal/app_store_connect|sing-box/cmd/internal/update_apple_version|sing-box/cmd/internal/merge_apple_xcframework|sing-box/common/geoip|sing-box/protocol/psiphon)"
           # (tailscale/derp больше не исключены — сабмодули бампнуты 2026-09-15)
 
           PKGS=$(go list -e -tags "$TAGS" -f '{{if and .GoFiles (not (or .Error .DepsErrors))}}{{.ImportPath}}{{end}}' \
