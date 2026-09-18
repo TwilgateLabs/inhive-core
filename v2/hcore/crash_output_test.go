@@ -3,6 +3,7 @@ package hcore
 import (
 	"os"
 	"path/filepath"
+	"runtime/debug"
 	"testing"
 )
 
@@ -14,6 +15,16 @@ func TestInitCrashOutput(t *testing.T) {
 	dir := t.TempDir()
 	path := filepath.Join(dir, "crash.log")
 
+	// debug.SetCrashOutput дублирует дескриптор, и рантайм держит его до конца
+	// процесса. В проде ротация происходит на старте НОВОГО процесса, когда
+	// старый мёртв и хэндла нет. Тест зовёт initCrashOutput дважды в одном
+	// процессе, поэтому между вызовами отвязываем crash output — это и есть
+	// честная имитация «старый процесс умер». Без этого на Windows os.Rename
+	// открытого файла падал, crash.log.old не появлялся, а t.TempDir() не мог
+	// подчистить за собой (2026-09-15).
+	releaseCrashOutput := func() { _ = debug.SetCrashOutput(nil, debug.CrashOptions{}) }
+	t.Cleanup(releaseCrashOutput)
+
 	initCrashOutput(dir)
 	if _, err := os.Stat(path); err != nil {
 		t.Fatalf("crash.log not created: %v", err)
@@ -23,6 +34,7 @@ func TestInitCrashOutput(t *testing.T) {
 	if err := os.WriteFile(path, []byte("panic: boom\n"), 0o600); err != nil {
 		t.Fatal(err)
 	}
+	releaseCrashOutput() // «предыдущий процесс» завершился
 	initCrashOutput(dir)
 	old, err := os.ReadFile(path + ".old")
 	if err != nil {

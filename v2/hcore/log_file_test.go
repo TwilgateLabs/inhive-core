@@ -10,8 +10,17 @@ import (
 // resetCoreLog возвращает синглтон в исходное состояние и восстанавливает его
 // после теста (тесты пакета делят процесс). Поля копируются поимённо — сам
 // coreLogWriter содержит мьютекс, копировать структуру целиком нельзя.
-func resetCoreLog(t *testing.T) {
+// resetCoreLog изолирует глобальный coreLog для теста и ВОЗВРАЩАЕТ временный
+// каталог для него. Каталог создаётся ЗДЕСЬ, а не в тесте, намеренно: t.Cleanup
+// исполняется в обратном порядке регистрации, и когда тест звал t.TempDir()
+// ПОСЛЕ resetCoreLog, RemoveAll каталога бежал раньше, чем наш cleanup закрывал
+// core.log. На Unix удалить открытый файл можно, на Windows — нет, и все четыре
+// TestCoreLog_* краснели на Win-сборщике «file is being used by another
+// process» (2026-09-15, см. memory/debug_win_crash_output_tests_always_red).
+// Регистрируя TempDir первым, получаем: сначала закрыть файл, потом удалить.
+func resetCoreLog(t *testing.T) string {
 	t.Helper()
+	dir := t.TempDir()
 	coreLog.mu.Lock()
 	prevFile, prevSize, prevPath, prevBacklog :=
 		coreLog.file, coreLog.size, coreLog.path, coreLog.backlog
@@ -31,14 +40,14 @@ func resetCoreLog(t *testing.T) {
 		coreLog.mu.Unlock()
 		coreLogMaxBytes = prevMax
 	})
+	return dir
 }
 
 // Пункт 3 волны логов 2026-07-21: события hcore.Log обязаны переживать смерть
 // процесса — раньше жили только в gRPC-стриме. Строки до initCoreLog (ранний
 // Setup) копятся в backlog и выливаются в файл при инициализации.
 func TestCoreLog_BacklogFlushedOnInit(t *testing.T) {
-	resetCoreLog(t)
-	dir := t.TempDir()
+	dir := resetCoreLog(t)
 
 	coreLogAppend(LogLevel_WARNING, LogType_CORE, "early line before setup")
 	initCoreLog(dir)
@@ -66,10 +75,9 @@ func TestCoreLog_BacklogFlushedOnInit(t *testing.T) {
 // Гейт уровня — тот же, что у стрима: что не прошло static.logLevel, того нет
 // и в файле (иначе warn-режим писал бы на диск каждый trace движка).
 func TestCoreLog_RespectsStreamLevelGate(t *testing.T) {
-	resetCoreLog(t)
+	dir := resetCoreLog(t)
 	prevLevel := static.logLevel
 	defer func() { static.logLevel = prevLevel }()
-	dir := t.TempDir()
 	initCoreLog(dir)
 
 	static.logLevel = LogLevel_WARNING
@@ -92,9 +100,8 @@ func TestCoreLog_RespectsStreamLevelGate(t *testing.T) {
 // нуля — на диске не больше двух капов (иначе многочасовая trace-сессия
 // раздула бы файл бесконечно).
 func TestCoreLog_RotatesAtCap(t *testing.T) {
-	resetCoreLog(t)
+	dir := resetCoreLog(t)
 	coreLogMaxBytes = 256
-	dir := t.TempDir()
 	initCoreLog(dir)
 
 	for i := 0; i < 20; i++ {
@@ -116,9 +123,8 @@ func TestCoreLog_RotatesAtCap(t *testing.T) {
 // Переросший с прошлого запуска файл ротируется при initCoreLog (иначе
 // кап действовал бы только внутри одной сессии).
 func TestCoreLog_RotatesOversizedOnInit(t *testing.T) {
-	resetCoreLog(t)
+	dir := resetCoreLog(t)
 	coreLogMaxBytes = 64
-	dir := t.TempDir()
 	path := filepath.Join(dir, "core.log")
 	if err := os.WriteFile(path, []byte(strings.Repeat("x", 200)), 0o644); err != nil {
 		t.Fatal(err)
