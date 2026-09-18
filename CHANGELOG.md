@@ -9,6 +9,8 @@ shipped standalone).
 
 ## [Unreleased]
 
+## [4.8.6] - 2026-09-18
+
 ### Changed
 - Toolchain and dependency security bumps: Go 1.26.8 (closes reachable stdlib issues in net/url and html/template), gRPC 1.83.2 (closes a server panic on missing authority headers and an HTTP/2 memory-exhaustion issue, both reachable through the app-to-core channel), pion/dtls 3.1.4 and pion/stun 3.1.5 (used by the olcrtc path), plus chi 5.3.0, cel-go 0.30.0, klauspost/compress 1.18.7 and the July dhcp snapshot for the lockfile scanner. govulncheck reports no reachable vulnerabilities after this.
 - REALITY: the client now announces version 26.9.9, matching the Xray reference it is pinned to. Servers compare that number against their configured minimum, and a frozen value was being silently turned away by servers that accept a real Xray client.
