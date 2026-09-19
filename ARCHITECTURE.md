@@ -20,10 +20,8 @@ core/
                        RegisterCoreServer (:178 / :286).
   v2/config/           sing-box config builder from InhiveOptions: builder_*.go, outbound.go
                        (patchOutbound :108, patchEndpoint :98), parser.go (patchConfigOptions :229), warp.go
-  v2/inhiveoptions/    DEAD (audit 2026-09-19 §5.1, confirmed by two refuters): duplicate of config.InhiveOptions
-                       (v2/config/inhive_option.go:14 is the live one); removed in phase 3 — do not build on it
-  v2/profile/          DEAD (audit 2026-09-19 §5.1): 0 importers, RegisterProfileServiceServer never called;
-                       removed in phase 3 together with v2/config/core*.pb.go + config_server.go
+                       InhiveOptions itself is a hand-written Go struct (inhive_option.go:14), not generated
+                       from a .proto — there is exactly one definition of it.
   v2/hcommon/          common.proto (Empty/Response), shared helpers
   v2/db/, v2/hutils/, v2/service_manager/
   xray2sing/           separate Go module: share links / subscription text → sing-box options
@@ -40,7 +38,7 @@ core/
 Dependency direction (arrows = may import):
 
 ```
-platform/, cmd/  →  v2/hcore  →  v2/config  →  v2/inhiveoptions, v2/hcommon, v2/profile
+platform/, cmd/  →  v2/hcore  →  v2/config  →  v2/hcommon, v2/db
                                     ↓
                                  xray2sing (module, via go.mod replace)
                                     ↓
@@ -117,8 +115,8 @@ hysteria, hysteria2/hy2, psiphon, dnstt; endpoints: wg/wireguard/awg/warp/`[Inte
 
 ### 3.3 A setting that reaches the core
 
-Field in `v2/inhiveoptions/inhive_options.proto` → regenerate → read it in the `v2/config/builder_*.go`
-that owns the section → mirror on the app side (`SettingsState` + fingerprint domain, `../app/ARCHITECTURE.md`
+Field in the `InhiveOptions` struct (`v2/config/inhive_option.go:14`, hand-written — no codegen) → read it
+in the `v2/config/builder_*.go` that owns the section → mirror on the app side (`SettingsState` + fingerprint domain, `../app/ARCHITECTURE.md`
 §3.2). Test: builder unit test on the produced `option.Options`.
 
 ## 4. Fitness tests and gates
@@ -127,7 +125,8 @@ that owns the section → mirror on the app side (`SettingsState` + fingerprint 
   “why these OSes” comment; baseline only goes down. Twin of the app's test.
 * Planned (`hygiene/`): `rpc_surface_test`, `file_size_ratchet` (warm_probe 869, commands 591…),
   `build_tags_single_source` (a second tag list in ps1/CI is red), `no_root_build_scripts`
-  (`build-aar*.ps1` ×8 at the root are the anti-pattern), unit tests for `v2/db`.
+  (the 8 untracked `build-aar*.ps1` copies at the root were deleted 2026-09-20; only the canonical
+  `build-aar6.ps1` is left, and it still belongs in `scripts/`), unit tests for `v2/db`.
 * `scripts/check-upstream-drift.py` — resolves every `upstream.toml` entry on the network and checks the
   recorded tag still points at the recorded commit. Weekly non-blocking run: workflow `upstream-drift`.
 * `go vet` per module with `BASE_TAGS` (command in `../CLAUDE.md` “Build & Test Hygiene”); CI does the same

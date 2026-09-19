@@ -9,6 +9,9 @@ shipped standalone).
 
 ## [Unreleased]
 
+### Removed
+- Dropped 4336 lines of dead hiddify-era code: the `v2/profile` package (profile entity, parser, repository, ProfileService gRPC surface, its `.proto` files and its test — 1991 lines), `v2/inhiveoptions` (1734 lines) and `v2/config/{core.pb.go,core_grpc.pb.go,config_server.go}` (611 lines). Nothing imported `v2/profile` outside itself, `RegisterProfileServiceServer` was never called (the server registers only `RegisterCoreServer`), and there is no Dart profile proto on the app side. `v2/inhiveoptions` was a second, generated declaration of `InhiveOptions` whose only importer was `v2/profile`; the live one is the hand-written struct in `v2/config/inhive_option.go`. The three `config` files were generated from an `hcore.proto` that does not exist in this repo, by a protoc four major versions behind the rest, and `config.StartGRPCServer` had no callers. The `String()` helper died with `config_server.go` (used only there); `DeferPanicToError` lives in `debug.go` and is untouched.
+
 ## [4.8.6] - 2026-09-18
 
 ### Changed
