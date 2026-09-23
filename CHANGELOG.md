@@ -9,6 +9,20 @@ shipped standalone).
 
 ## [Unreleased]
 
+### Fixed
+- Every started engine instance leaked five goroutines and a 256-slot event buffer, because the service wrapper was stopped but never closed. That happened on every connect and disconnect and, on Windows and Android, on every cold server ping, so a long session piled up hundreds of idle goroutines. The wrapper is now closed on every stop path, including failed and timed-out ping bring-ups. A test runs five ping instances and checks that the goroutine count does not grow.
+- Removing a server that came with a helper connection (the utproto pair) now removes the helper too, as long as nothing else uses it. Before, every add and remove left one live helper behind.
+- `box.log` now checks its size on every write and rotates at 5 MB. It used to check only when the engine started, so a session that stayed up for days could grow the file without limit.
+- Picking DEBUG or TRACE in the Logs tab no longer gets saved in the core's settings. It still applies right away, but the next start comes up at the last level you actually set, not at DEBUG. On iOS the extension restarts on every connect, so this was the path by which a debug level stuck around.
+- Calling setup again no longer leaks the previous logger and its goroutine.
+- The xhttp diagnostic lines were written twice every 10 seconds and pushed older lines out of the Logs tab. They are now written once. They never reached `box.log`, and the code comment that said they did has been corrected.
+
+### Added
+- Network resets are now logged at WARN: `network reset #N reason=... closed=K since_last=...`. The reason is the interface change (`iface(wlan0->none)`), memory pressure (`oom(...)`), sleep or resume (`power(...)`), the clash API or the platform. Every reset drops all connections, so a string of them is a likely cause of "it gets slower over time". The "updated default interface" line moves from INFO to WARN when a reset follows it. The first detection at engine start stays at INFO, so ping probes do not add a WARN line each.
+- The once-a-minute `mem:` line now also carries `gc_cpu=%` (share of CPU spent on garbage collection over the last minute), `outbounds=`, `endpoints=`, `conns=in/out`, `resets=`, `dials_inflight=` and `dns_inflight=`.
+- A WARN line `log levels: static=... box=... persisted=...` when the tunnel starts, so a log level stuck on DEBUG shows up in the logs.
+- The `gRPC listener ready on ...` line is back, this time on the path the app actually uses. It was on a start path the app never called, so it never showed up. Together with "first GetSystemInfo received" it separates "the core's listener never came up" from "the app could not reach it".
+
 ### Removed
 - Dropped 4336 lines of dead hiddify-era code: the `v2/profile` package (profile entity, parser, repository, ProfileService gRPC surface, its `.proto` files and its test — 1991 lines), `v2/inhiveoptions` (1734 lines) and `v2/config/{core.pb.go,core_grpc.pb.go,config_server.go}` (611 lines). Nothing imported `v2/profile` outside itself, `RegisterProfileServiceServer` was never called (the server registers only `RegisterCoreServer`), and there is no Dart profile proto on the app side. `v2/inhiveoptions` was a second, generated declaration of `InhiveOptions` whose only importer was `v2/profile`; the live one is the hand-written struct in `v2/config/inhive_option.go`. The three `config` files were generated from an `hcore.proto` that does not exist in this repo, by a protoc four major versions behind the rest, and `config.StartGRPCServer` had no callers. The `String()` helper died with `config_server.go` (used only there); `DeferPanicToError` lives in `debug.go` and is untouched.
 - Removed the core CLI (`cmd/`, `InhiveCli`, `cmd/bydll`, the desktop `parseCli` export). It was never built into a release or shipped; the app talks to the core over gRPC and FFI only.

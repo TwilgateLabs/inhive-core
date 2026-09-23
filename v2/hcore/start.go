@@ -233,6 +233,7 @@ func StartService(ctx context.Context, in *StartRequest) (coreResponse *CoreInfo
 	}
 	WriteSharedLog("StartService: NewService done — engine ready")
 	static.StartedService = instance
+	Log(LogLevel_WARNING, LogType_CORE, logLevelsLine())
 	if static.debug {
 		dumpGoroutinesToFile(fmt.Sprint(sWorkingPath, "/data/goroutine-start.log"))
 	}

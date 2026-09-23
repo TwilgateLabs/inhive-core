@@ -158,6 +158,20 @@ func ChangeInhiveSettings(in *ChangeInhiveSettingsRequest, insert bool) (*CoreIn
 	if static.InhiveOptions != nil {
 		*opts = *static.InhiveOptions
 	}
+	if persistedLogLevel() == "" {
+		setPersistedLogLevel(opts.LogLevel)
+	}
+
+	// Какие ключи пришли: partial {"log-level":X} — это фильтр вкладки «Логи»
+	// (bridge.dart applyLogLevel), а не настройка. См. персист ниже.
+	levelInRequest, logLevelOnly := false, false
+	if in.InhiveSettingsJson != "" {
+		var keys map[string]json.RawMessage
+		if json.Unmarshal([]byte(in.InhiveSettingsJson), &keys) == nil {
+			_, levelInRequest = keys["log-level"]
+			logLevelOnly = levelInRequest && len(keys) == 1
+		}
+	}
 
 	if in.InhiveSettingsJson != "" {
 		if err := json.Unmarshal([]byte(in.InhiveSettingsJson), opts); err != nil {
@@ -199,8 +213,27 @@ func ChangeInhiveSettings(in *ChangeInhiveSettingsRequest, insert bool) (*CoreIn
 	// в box.log. No-op когда туннеля нет. См. log_level.go.
 	applyLogLevelToLiveBox(opts.LogLevel)
 
-	if insert && in.InhiveSettingsJson != "" {
-		full, err := json.Marshal(opts)
+	if !insert {
+		// Setup: опции пришли из БД (или дефолт) — это и есть персистентное.
+		setPersistedLogLevel(opts.LogLevel)
+	}
+
+	// DEBUG/TRACE с вкладки «Логи» живёт только в памяти процесса. До
+	// 2026-09-23 он уходил в БД ядра (insert=true), и каждый следующий Setup —
+	// на iOS это КАЖДЫЙ старт NE, включая шторку и On-Demand без приложения —
+	// поднимал движок на debug/trace (класс trace-шторма 2026-07-14,
+	// longrun-аудит §3.9). Персистится только уровень, пришедший явной
+	// настройкой: полный JSON с log-level, либо НЕ-verbose фильтр (warn/info
+	// заодно лечит ранее отравленную БД). Остальные поля пишутся как раньше —
+	// с последним персистентным уровнем, а не с текущим in-memory.
+	verboseFilter := logLevelOnly && (opts.LogLevel == "debug" || opts.LogLevel == "trace")
+	if insert && in.InhiveSettingsJson != "" && !verboseFilter {
+		if levelInRequest {
+			setPersistedLogLevel(opts.LogLevel)
+		}
+		toStore := *opts
+		toStore.LogLevel = persistedLogLevel()
+		full, err := json.Marshal(&toStore)
 		if err != nil {
 			return nil, err
 		}

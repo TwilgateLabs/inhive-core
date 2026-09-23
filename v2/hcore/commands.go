@@ -7,6 +7,8 @@ import (
 	"fmt"
 	"os"
 	"runtime"
+	"slices"
+	"strings"
 	"sync/atomic"
 	"time"
 
@@ -129,11 +131,10 @@ func (h *InhiveInstance) readStatus(prev *SystemInfo) *SystemInfo {
 // diagFirstRPCLogged — one-shot гейт для TEMPORARY-диагностики бага «ядро не
 // отвечает 10с» (2026-07-22). GetSystemInfo — первый RPC, которым app проверяет
 // готовность ядра (bridge.dart _ensureCoreReady поллит его). Логируем ПЕРВЫЙ
-// вызов на WARNING (в core.log). Задумывалась пара к «gRPC listener ready», но та
-// строка стояла в StartGrpcServer — пути, которым app никогда не поднимал сервер
-// (боевой — StartGrpcServerByMode); функция снесена 2026-09-23 как мёртвая, так
-// что пары в core.log не было и нет. atomic-once, чтобы не спамить (poll идёт
-// каждые 200мс). Снять, когда баг пойман.
+// вызов на WARNING (в core.log). Пара к «gRPC listener ready» из
+// StartGrpcServerByMode (grpc_server.go; до 2026-09-23 та строка жила в мёртвом
+// StartGrpcServer и в поле не появлялась). atomic-once, чтобы не спамить (poll
+// идёт каждые 200мс). Снять вместе с парной строкой, когда баг пойман.
 var diagFirstRPCLogged atomic.Bool
 
 func (s *CoreService) GetSystemInfo(ctx context.Context, req *hcommon.Empty) (resp *SystemInfo, err error) {
@@ -336,6 +337,17 @@ func (h *InhiveInstance) RemoveOutbound(in *RemoveOutboundRequest) (*hcommon.Res
 	if box == nil {
 		return nil, E.New("remove outbound: core not started")
 	}
+	// Helper'ы detour-пары (utproto), которые AddOutbound создал под этот main:
+	// тег деривуется как mainTag + " · " + type (см. AddOutbound). Собираем ДО
+	// удаления main — после него Dependencies уже не у кого спросить.
+	var helpers []string
+	if main, found := box.Outbound().Outbound(in.OutboundTag); found {
+		for _, dep := range main.Dependencies() {
+			if strings.HasPrefix(dep, in.OutboundTag+" · ") {
+				helpers = append(helpers, dep)
+			}
+		}
+	}
 	// Порядок обязателен: сперва членство во ВСЕХ селекторах (RemoveMember
 	// переводит selected на default/первый и interrupt'ит соединения), потом
 	// manager.Remove — иначе selected селектора держит закрытый outbound.
@@ -358,7 +370,39 @@ func (h *InhiveInstance) RemoveOutbound(in *RemoveOutboundRequest) (*hcommon.Res
 		}, removeErr
 	}
 	Log(LogLevel_INFO, LogType_CORE, "hot-remove outbound: ", in.OutboundTag)
+	// Снимаем осиротевшие helper'ы. До 2026-09-23 hot-remove их не трогал:
+	// каждый add/remove utproto-резидента оставлял в боксе живой helper-outbound
+	// (longrun-аудит §3.5). Helper, на который ещё кто-то ссылается (detour
+	// другого outbound'а/endpoint'а), не трогаем: апстримный Manager.Remove на
+	// зависимом теге сначала вынимает его из карты и лишь потом возвращает
+	// «is depended by» — оставил бы бокс в полуразобранном состоянии.
+	for _, helper := range helpers {
+		if outboundTagReferenced(box.Outbound().Outbounds(), box.Endpoint().Endpoints(), helper) {
+			continue
+		}
+		if err := box.Outbound().Remove(helper); err != nil {
+			Log(LogLevel_WARNING, LogType_CORE, "hot-remove helper outbound ", helper, ": ", err.Error())
+			continue
+		}
+		Log(LogLevel_INFO, LogType_CORE, "hot-remove helper outbound: ", helper)
+	}
 	return &hcommon.Response{Code: hcommon.ResponseCode_OK}, nil
+}
+
+// outboundTagReferenced — есть ли в живом боксе outbound/endpoint, чей
+// Dependencies() (detour и пр.) содержит tag.
+func outboundTagReferenced(outbounds []adapter.Outbound, endpoints []adapter.Endpoint, tag string) bool {
+	for _, ob := range outbounds {
+		if ob.Tag() != tag && slices.Contains(ob.Dependencies(), tag) {
+			return true
+		}
+	}
+	for _, ep := range endpoints {
+		if ep.Tag() != tag && slices.Contains(ep.Dependencies(), tag) {
+			return true
+		}
+	}
+	return false
 }
 
 func (s *CoreService) UrlTest(ctx context.Context, in *UrlTestRequest) (resp *hcommon.Response, err error) {

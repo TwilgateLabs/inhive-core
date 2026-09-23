@@ -19,6 +19,7 @@ func StopAndAlert(msgType MessageType, message string) {
 
 	if ss := static.StartedService; ss != nil {
 		ss.CloseService()
+		ss.Close() // observer-горутины daemon'а — см. stop.go
 		static.StartedService = nil
 	}
 }

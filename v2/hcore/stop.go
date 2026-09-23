@@ -47,12 +47,17 @@ func Stop() (coreResponse *CoreInfoResponse, err error) {
 		return SetCoreStatus(CoreStates_STOPPED, MessageType_ALREADY_STOPPED, ""), nil
 	}
 
-	if err := ss.CloseService(); err != nil {
-		static.StartedService = nil
+	err = ss.CloseService()
+	// Close ПОСЛЕ CloseService и на обоих исходах: без него 5 observer-горутин
+	// daemon'а + буфер канала событий соединений (256) текли на каждый
+	// старт/стоп (longrun-аудит 2026-09-23 §3.1). Close идемпотентен и не
+	// блокирует — повторный вызов из StopAndAlert (через errorWrapper) безопасен.
+	ss.Close()
+	static.StartedService = nil
+	if err != nil {
 		dumpGoroutinesToFile(fmt.Sprint(sWorkingPath, "/data/goroutine-stop.log"))
 		return errorWrapper(MessageType_UNEXPECTED_ERROR, err)
 	}
-	static.StartedService = nil
 
 	return SetCoreStatus(CoreStates_STOPPED, MessageType_EMPTY, ""), nil
 }

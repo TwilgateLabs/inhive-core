@@ -26,6 +26,7 @@ import (
 	"time"
 
 	"github.com/sagernet/sing-box/experimental/libbox"
+	"github.com/sagernet/sing-box/route"
 	xhttp "github.com/sagernet/sing-box/transport/v2rayxhttp"
 	"github.com/twilgate/inhive-core/v2/config"
 )
@@ -140,6 +141,8 @@ func stopMemSampler() {
 //
 //	mem: phys_footprint=NN.NMB heap=NN.NMB sys=NN.NMB goroutines=NN gc=NN
 //
+// раз в минуту (WARN-тик) к ней добавляется engineLoadFields (gc_cpu, conns, ...).
+//
 // phys_footprint печатается только там где доступен (darwin+cgo); на остальных
 // платформах поле опускается.
 func runMemSampler(ctx context.Context) {
@@ -153,7 +156,12 @@ func runMemSampler(ctx context.Context) {
 		{Name: "/memory/classes/heap/objects:bytes"}, // живые heap-объекты (~HeapInuse)
 		{Name: "/memory/classes/total:bytes"},        // вся память от ОС (~Sys)
 		{Name: "/gc/cycles/total:gc-cycles"},         // завершённых GC-циклов (~NumGC)
+		{Name: "/cpu/classes/gc/total:cpu-seconds"},  // CPU, съеденный GC (оценка рантайма)
+		{Name: "/cpu/classes/total:cpu-seconds"},     // весь доступный CPU (GOMAXPROCS × wall)
 	}
+	// Точка отсчёта для gc_cpu — момент старта сэмплера, а не старта процесса.
+	metrics.Read(samples)
+	lastGCCPU, lastTotalCPU := cpuSeconds(samples[3]), cpuSeconds(samples[4])
 
 	ticker := time.NewTicker(memSamplerInterval)
 	defer ticker.Stop()
@@ -190,6 +198,14 @@ func runMemSampler(ctx context.Context) {
 					" sys=" + formatMB(sys) +
 					" goroutines=" + strconv.Itoa(goroutines) +
 					" gc=" + strconv.FormatUint(gc, 10)
+			}
+			// Минутная (WARN) строка несёт ещё и нагрузку движка — longrun-аудит
+			// 2026-09-23 §5: без этих чисел «со временем хуже» не отличить от
+			// GC-давления, каскада сбросов сети или забитых семафоров.
+			if tick%6 == 0 {
+				gcCPU, totalCPU := cpuSeconds(samples[3]), cpuSeconds(samples[4])
+				line += " " + engineLoadFields(gcCPU-lastGCCPU, totalCPU-lastTotalCPU)
+				lastGCCPU, lastTotalCPU = gcCPU, totalCPU
 			}
 			// Раз в минуту строка идёт на WARN, остальные — на INFO.
 			//
@@ -228,21 +244,15 @@ func runMemSampler(ctx context.Context) {
 					// (см. chunkhist.go recordUploadError).
 					xhttp.UploadErrorState(),
 				}
+				// Один канал: Log() пишет и в gRPC-поток вкладки «Логи», и в файл
+				// data/core.log (coreLogAppend, log_file.go) — файлом его и забирают
+				// с машины. До 2026-09-23 строки дублировались ещё через
+				// static.CoreLogFactory «в box.log»: у той фабрики нет файла, её
+				// PlatformWriter = LogInterface → тот же Log(), так что каждая строка
+				// просто уходила во вкладку и core.log дважды (6 WARN вместо 3 каждые
+				// 10 с, вытесняли кольцо «Логов»). В box.log они не попадали никогда.
 				for _, l := range lines {
 					Log(LogLevel_WARNING, LogType_CORE, l)
-				}
-				// InHive 2026-07-19: дублируем в sing-box-логгер, т.е. в data/box.log.
-				//
-				// Зачем: Log() выше публикует ТОЛЬКО в gRPC-поток (logproto.go —
-				// static.logObserver.Publish), который виден во вкладке «Логи» в UI и
-				// никогда не попадает в файл. Из-за этого снять динамику можно было
-				// лишь скриншотами с устройства. box.log забирается с машины файлом,
-				// поэтому диагностику нужно иметь в обоих местах.
-				if f := static.CoreLogFactory; f != nil {
-					xl := f.NewLogger("xhttp-diag")
-					for _, l := range lines {
-						xl.Warn(l)
-					}
 				}
 			}
 
@@ -278,4 +288,48 @@ func runMemSampler(ctx context.Context) {
 func formatMB(b uint64) string {
 	mb := float64(b) / (1024 * 1024)
 	return strconv.FormatFloat(mb, 'f', 1, 64) + "MB"
+}
+
+// cpuSeconds читает float-метрику runtime/metrics; 0, если рантайм её не знает
+// (KindBad) — Value.Float64() на чужом типе паникует.
+func cpuSeconds(s metrics.Sample) float64 {
+	if s.Value.Kind() != metrics.KindFloat64 {
+		return 0
+	}
+	return s.Value.Float64()
+}
+
+// engineLoadFields — хвост минутной строки mem:
+//
+//	gc_cpu=N.N% outbounds=N endpoints=N conns=in/out resets=N dials_inflight=N dns_inflight=N
+//
+// gc_cpu — доля доступного CPU (GOMAXPROCS × wall), ушедшая на GC за интервал
+// (та же база, что у GODEBUG=gctrace). conns: in — трекер clash-api (соединения
+// с метаданными, «-» если clash-api выключен), out — ConnectionManager (реальные
+// проксируемые сокеты). resets — route.NetworkResetCount за жизнь процесса.
+// Все чтения lock-free или под коротким локом менеджера; раз в минуту.
+func engineLoadFields(gcCPUDelta, totalCPUDelta float64) string {
+	gcPct := 0.0
+	if totalCPUDelta > 0 {
+		gcPct = gcCPUDelta / totalCPUDelta * 100
+	}
+	outbounds, endpoints := "-", "-"
+	connsIn, connsOut := "-", "-"
+	if b := static.Box(); b != nil {
+		outbounds = strconv.Itoa(len(b.Outbound().Outbounds()))
+		endpoints = strconv.Itoa(len(b.Endpoint().Endpoints()))
+	}
+	if tm := static.TrafficManager(); tm != nil {
+		connsIn = strconv.Itoa(tm.ConnectionsLen())
+	}
+	if cm := static.ConnectionManager(); cm != nil {
+		connsOut = strconv.Itoa(cm.Count())
+	}
+	return "gc_cpu=" + strconv.FormatFloat(gcPct, 'f', 1, 64) + "%" +
+		" outbounds=" + outbounds +
+		" endpoints=" + endpoints +
+		" conns=" + connsIn + "/" + connsOut +
+		" resets=" + strconv.FormatUint(route.NetworkResetCount(), 10) +
+		" dials_inflight=" + strconv.Itoa(route.DialsInflight()) +
+		" dns_inflight=" + strconv.Itoa(route.DNSExchangesInflight())
 }

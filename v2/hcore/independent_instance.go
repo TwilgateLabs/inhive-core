@@ -266,6 +266,7 @@ func runInstanceCoreBlocking(serviceCtx, bringUpCtx context.Context, inhiveSetti
 		NoPlatformLogWriter: true,
 	})
 	if err := svc.StartOrReloadServiceOptions(*finalConfigs); err != nil {
+		svc.Close() // observer-горутины daemon'а — см. closeSideService
 		return nil, err
 	}
 	instance := svc
@@ -277,7 +278,7 @@ func runInstanceCoreBlocking(serviceCtx, bringUpCtx context.Context, inhiveSetti
 	select {
 	case <-time.After(250 * time.Millisecond):
 	case <-bringUpCtx.Done():
-		_ = instance.CloseService()
+		_ = closeSideService(instance)
 		return nil, bringUpCtx.Err()
 	}
 	return &InhiveInstance{
@@ -315,6 +316,7 @@ func startRawSideInstance(serviceCtx, bringUpCtx context.Context, opts *option.O
 		NoPlatformLogWriter: true,
 	})
 	if err := svc.StartOrReloadServiceOptions(*opts); err != nil {
+		svc.Close() // observer-горутины daemon'а — см. closeSideService
 		return nil, err
 	}
 	instance := svc
@@ -324,7 +326,7 @@ func startRawSideInstance(serviceCtx, bringUpCtx context.Context, opts *option.O
 	select {
 	case <-time.After(250 * time.Millisecond):
 	case <-bringUpCtx.Done():
-		_ = instance.CloseService()
+		_ = closeSideService(instance)
 		return nil, bringUpCtx.Err()
 	}
 	return &InhiveInstance{
@@ -402,7 +404,21 @@ func sanitizeSideInstance(opts *option.Options) (uint16, error) {
 // dialer, err := s.libbox.GetInstance().Router().Dialer(context.Background())
 
 func (s *InhiveInstance) Close() error {
-	return s.StartedService.CloseService()
+	return closeSideService(s.StartedService)
+}
+
+// closeSideService гасит side-instance целиком: CloseService (box) и затем
+// Close (5 observer-горутин daemon.StartedService + их каналы). До 2026-09-23
+// второго шага не было нигде в hcore — каждый холодный пинг (UrlTestConfig →
+// RunInstanceRaw) оставлял +5 горутин навсегда (longrun-аудит §3.1). Close
+// идемпотентен и не блокирует. Гард: TestSideInstanceCycles_NoGoroutineLeak.
+func closeSideService(svc *daemon.StartedService) error {
+	if svc == nil {
+		return nil
+	}
+	err := svc.CloseService()
+	svc.Close()
+	return err
 }
 
 // noopPlatformHandler implements daemon.PlatformHandler with no-ops.

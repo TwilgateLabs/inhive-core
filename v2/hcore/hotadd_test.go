@@ -167,3 +167,41 @@ func TestHotAdd_WireguardEndpointJSON(t *testing.T) {
 		t.Fatalf("selector members %v still contain removed endpoint", members)
 	}
 }
+
+// TestHotAdd_RemoveDropsDetourHelper — гард longrun-аудита 2026-09-23 §3.5:
+// hot-remove main'а detour-пары (utproto: main → helper из одной ссылки) обязан
+// снять и helper `mainTag · type`, если на него больше никто не ссылается. До
+// фикса helper оставался в боксе навсегда — +1 живой outbound на каждый
+// add/remove резидента.
+func TestHotAdd_RemoveDropsDetourHelper(t *testing.T) {
+	inst := startHotAddTestInstance(t)
+
+	content := `{"outbounds":[` +
+		`{"type":"socks","tag":"main","server":"127.0.0.1","server_port":1,"detour":"helper"},` +
+		`{"type":"http","tag":"helper","server":"127.0.0.1","server_port":2}]}`
+	resp, err := inst.AddOutbound(&AddOutboundRequest{
+		Content:      content,
+		SelectorTags: []string{"select"},
+		TagOverride:  "Pair",
+	})
+	if err != nil {
+		t.Fatalf("AddOutbound(detour pair) failed: %v", err)
+	}
+	if resp.OutboundTag != "Pair" {
+		t.Fatalf("OutboundTag: got %q, want Pair", resp.OutboundTag)
+	}
+	const helperTag = "Pair · http"
+	if _, loaded := inst.Box().Outbound().Outbound(helperTag); !loaded {
+		t.Fatalf("helper %q not created by AddOutbound — pair derivation changed?", helperTag)
+	}
+
+	if _, err := inst.RemoveOutbound(&RemoveOutboundRequest{OutboundTag: "Pair"}); err != nil {
+		t.Fatalf("RemoveOutbound failed: %v", err)
+	}
+	if _, loaded := inst.Box().Outbound().Outbound("Pair"); loaded {
+		t.Fatal("main still in live box after remove")
+	}
+	if _, loaded := inst.Box().Outbound().Outbound(helperTag); loaded {
+		t.Fatalf("orphaned helper %q left in live box after removing its main", helperTag)
+	}
+}

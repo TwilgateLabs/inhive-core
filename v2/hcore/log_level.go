@@ -12,6 +12,8 @@
 package hcore
 
 import (
+	"sync/atomic"
+
 	"github.com/sagernet/sing-box/log"
 )
 
@@ -51,4 +53,36 @@ func applyLogLevelToLiveBox(levelStr string) {
 	}
 	f.SetLevel(lvl)
 	Log(LogLevel_INFO, LogType_CORE, "log level of running engine set to ", levelStr)
+}
+
+// persistedLogLevelValue — уровень лога, который лежит (или ляжет) в БД ядра
+// вместе с InHiveSettingsJson. Отличается от in-memory static.logLevel, когда
+// вкладка «Логи» временно включила DEBUG/TRACE (buildconfighelper.go
+// ChangeInhiveSettings не персистит такой фильтр). atomic: пишется под
+// changeSettingsMu, читается lock-free из StartService для строки уровней.
+var persistedLogLevelValue atomic.Value // string
+
+func persistedLogLevel() string {
+	s, _ := persistedLogLevelValue.Load().(string)
+	return s
+}
+
+func setPersistedLogLevel(level string) {
+	persistedLogLevelValue.Store(level)
+}
+
+// logLevelsLine — WARN-строка при старте туннеля: три уровня, которые могут
+// разойтись (longrun-аудит 2026-09-23 §5). static — гейт gRPC-стрима/core.log,
+// box — фабрика работающего движка (box.log), persisted — что поднимет
+// следующий Setup из БД. Без неё «уровень застрял на DEBUG» по логам не видно.
+func logLevelsLine() string {
+	box := "none"
+	if f := liveBoxLogFactory(); f != nil {
+		box = log.FormatLevel(f.Level())
+	}
+	persisted := persistedLogLevel()
+	if persisted == "" {
+		persisted = "unset"
+	}
+	return "log levels: static=" + static.logLevel.String() + " box=" + box + " persisted=" + persisted
 }

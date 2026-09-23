@@ -128,11 +128,20 @@ func Setup(params *SetupRequest, platformInterface libbox.PlatformInterface) err
 			Observable:     true,
 			PlatformWriter: &LogInterface{},
 		})
-	static.CoreLogFactory = factory
-
 	if err != nil {
 		return E.Cause(err, "create logger")
 	}
+	// Повторный Setup (Android reconnect, iOS NE) раньше просто перетирал
+	// указатель: observer-горутина старой фабрики (Observable: true) и её канал
+	// на 128 жили до смерти процесса — +1 горутина на каждый Setup (longrun-аудит
+	// 2026-09-23 §3.4). Close старой безопасен для её ещё живых логгеров
+	// (hot-add outbound'ы, commands.go): файла у неё нет, Emit в закрытый
+	// subscriber — no-op, доставка в PlatformWriter (вкладка «Логи») идёт мимо
+	// subscriber'а и продолжает работать.
+	if old := static.CoreLogFactory; old != nil {
+		_ = old.Close()
+	}
+	static.CoreLogFactory = factory
 	Log(LogLevel_DEBUG, LogType_CORE, fmt.Sprintf("StartGrpcServerByMode %s %d\n", params.Listen, params.Mode))
 	switch params.Mode {
 	case SetupMode_OLD:
@@ -253,6 +262,13 @@ func StartGrpcServerByMode(listenAddressG string, mode SetupMode) (*grpc.Server,
 	}
 	Log(LogLevel_DEBUG, LogType_CORE, fmt.Sprintf("grpcServer started on %s\n", listenAddressG))
 	log.Info("Server listening on %s", listenAddressG)
+	// Диагностика бага «ядро не отвечает 10с» (iOS NE, 2026-07-22): фиксирует В
+	// core.log момент, когда listener РЕАЛЬНО слушает (log.Info выше идёт в
+	// sing-box logger и в core.log не попадает). Пара — «first GetSystemInfo
+	// received» в commands.go: вместе отделяют «listener не встал» от «app не
+	// достучался / RPC завис». До 2026-09-23 строка стояла в StartGrpcServer —
+	// пути, которым app не пользовался, — и в поле её не было никогда.
+	Log(LogLevel_WARNING, LogType_CORE, "gRPC listener ready on "+listenAddressG+" (mode "+mode.String()+", diag: awaiting first app RPC)")
 
 	// Run the server in a goroutine
 	go func() {

@@ -50,6 +50,10 @@ func NewService(ctx context.Context, options option.Options) (*daemon.StartedSer
 	WriteSharedLog("NewService: StartOrReloadServiceOptions begin (sing-box engine startup, builds outbounds + TUN inbound → openTun callback)")
 	if err := instance.StartOrReloadServiceOptions(options); err != nil {
 		WriteSharedLogf("NewService: StartOrReloadServiceOptions FAILED: %v", err)
+		// Сервис наружу не отдаётся — его observer-горутины закрываем здесь
+		// (CloseService на FATAL-статусе вернёт ErrInvalid, это ожидаемо).
+		_ = instance.CloseService()
+		instance.Close()
 		return nil, err
 	}
 	WriteSharedLog("NewService: StartOrReloadServiceOptions done")

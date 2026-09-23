@@ -3,12 +3,15 @@ package hcore
 import (
 	"bytes"
 	"context"
+	"encoding/json"
 	"testing"
 	"time"
 
 	"github.com/sagernet/sing-box/log"
 	"github.com/sagernet/sing-box/option"
 	"github.com/twilgate/inhive-core/v2/config"
+	"github.com/twilgate/inhive-core/v2/db"
+	hcommon "github.com/twilgate/inhive-core/v2/hcommon"
 )
 
 // Регрессия 4.7.30 (iOS): partial JSON ({"log-level":"warn"}) сбрасывал ВСЕ
@@ -176,5 +179,66 @@ func TestChangeInhiveSettings_EmptyJsonDefaults(t *testing.T) {
 	def := config.DefaultInhiveOptions()
 	if static.InhiveOptions.LogLevel != def.LogLevel {
 		t.Errorf("LogLevel = %q, want default %q", static.InhiveOptions.LogLevel, def.LogLevel)
+	}
+}
+
+// Longrun-аудит 2026-09-23 §3.9: DEBUG/TRACE, выбранный фильтром вкладки «Логи»
+// (partial {"log-level":X}, insert=true), живёт только в памяти — в БД ядра не
+// уходит, иначе каждый следующий Setup (iOS: каждый старт NE) поднимает движок
+// на debug/trace. Свойство: при ЛЮБОЙ последовательности «verbose-фильтр →
+// другая настройка» персистентный уровень остаётся последним явным.
+func TestChangeInhiveSettings_VerboseLogFilterNotPersisted(t *testing.T) {
+	t.Chdir(t.TempDir()) // БД ядра — относительный ./data
+	prev := static.InhiveOptions
+	prevLevel := static.logLevel
+	prevPersisted := persistedLogLevel()
+	defer func() {
+		static.InhiveOptions = prev
+		static.logLevel = prevLevel
+		setPersistedLogLevel(prevPersisted)
+	}()
+
+	base := config.DefaultInhiveOptions()
+	base.LogLevel = "warn"
+	static.InhiveOptions = base
+	setPersistedLogLevel("warn")
+
+	storedLevel := func() string {
+		t.Helper()
+		row, err := db.GetTable[hcommon.AppSettings]().Get("InHiveSettingsJson")
+		if err != nil || row == nil {
+			return "<none>"
+		}
+		var o config.InhiveOptions
+		if err := json.Unmarshal([]byte(row.Value.(string)), &o); err != nil {
+			t.Fatalf("stored settings unmarshal: %v", err)
+		}
+		return o.LogLevel
+	}
+	change := func(js string) {
+		t.Helper()
+		if _, err := ChangeInhiveSettings(&ChangeInhiveSettingsRequest{InhiveSettingsJson: js}, true); err != nil {
+			t.Fatalf("ChangeInhiveSettings(%s): %v", js, err)
+		}
+	}
+
+	for _, verbose := range []string{"debug", "trace"} {
+		change(`{"log-level":"` + verbose + `"}`)
+		if static.InhiveOptions.LogLevel != verbose {
+			t.Fatalf("in-memory level = %q, want %q (filter must still apply live)", static.InhiveOptions.LogLevel, verbose)
+		}
+		if got := storedLevel(); got == verbose {
+			t.Fatalf("verbose log filter %q was persisted to the core DB", verbose)
+		}
+		// Другая настройка поверх verbose-фильтра: поле пишется, уровень — последний явный.
+		change(`{"region":"ru"}`)
+		if got := storedLevel(); got != "warn" {
+			t.Fatalf("after unrelated setting stored log-level = %q, want warn", got)
+		}
+	}
+	// Не-verbose фильтр персистится (и лечит ранее отравленную БД).
+	change(`{"log-level":"error"}`)
+	if got := storedLevel(); got != "error" {
+		t.Fatalf("non-verbose filter stored log-level = %q, want error", got)
 	}
 }
