@@ -80,9 +80,9 @@ if (-not $version) { $version = "unknown" }
 
 # -checklinkname=0 обязателен для форка (см. tfogo_checklinkname0 в тегах).
 # Версий две и обе объявлены "unknown": апстримная sing-box/constant.Version
-# (её отдаёт clashapi и libbox) и наша v2/hcommon/constants.Version (её печатает
-# `InhiveCli version`). Проставляются обе — иначе диагностика врёт в одном из
-# двух мест, куда смотрят при разборе инцидента.
+# (её отдаёт clashapi и libbox) и наша v2/hcommon/constants.Version (CLI, который
+# её печатал, снесён 2026-09-23; флаг оставлен, чтобы бинарь не нёс "unknown").
+# Проставляются обе — иначе диагностика врёт там, куда смотрят при инциденте.
 $ldflags = "-checklinkname=0 -buildid= " +
            "-X github.com/sagernet/sing-box/constant.Version=$version " +
            "-X github.com/twilgate/inhive-core/v2/hcommon/constants.Version=$version " +

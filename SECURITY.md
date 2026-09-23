@@ -77,7 +77,7 @@ we need upstream input before public disclosure.
 
 In-scope:
 - `inhive-core` source (this repo, including our patches)
-- gRPC control-plane API (`SetupMode=4`, port 17078)
+- gRPC control-plane API (`SetupMode=4`, port 18078)
 - Build artefacts shipped in `inhive-app` (DLL, AAR, iOS framework)
 - UTProto protocol implementation (our fork of MTProto FakeTLS)
 - Reality / VLESS / Trojan / NaiveProxy outbound implementations
