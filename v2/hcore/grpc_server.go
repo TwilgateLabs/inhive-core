@@ -164,45 +164,6 @@ func Setup(params *SetupRequest, platformInterface libbox.PlatformInterface) err
 	return InitInhiveService()
 }
 
-func StartGrpcServer(listenAddressG string, service string) (*grpc.Server, error) {
-	lis, err := net.Listen("tcp", listenAddressG)
-	if err != nil {
-		log.Error("failed to listen: %v", err)
-		return nil, err
-	}
-	s := grpc.NewServer(
-		grpc.UnaryInterceptor(recoveryUnaryInterceptor),
-		grpc.StreamInterceptor(recoveryStreamInterceptor),
-	)
-	if service == "core" {
-		RegisterCoreServer(s, &CoreService{})
-	}
-	log.Info("Server listening on %s", listenAddressG)
-	// TEMPORARY диагностика (2026-07-22) бага «ядро не отвечает 10с» на iOS NE:
-	// баг транзиентный, воспроизвести не удаётся, а `log.Info` выше идёт в
-	// sing-box logger и в наш core.log НЕ попадает. Эта строка на WARNING
-	// (клиент держит уровень warn) фиксирует В core.log момент, когда gRPC
-	// listener РЕАЛЬНО начал слушать — чтобы при следующем сбое отделить
-	// «listener не встал» от «app не достучался/RPC завис». Снять, когда баг
-	// пойман. Парная строка — первый входящий GetSystemInfo (commands.go).
-	Log(LogLevel_WARNING, LogType_CORE, "gRPC listener ready on "+listenAddressG+" (diag: awaiting first app RPC)")
-	go func() {
-		defer config.RecoverPanicToError("StartGrpcServer.Serve", func(err error) {
-			log.Error(err.Error())
-		})
-		if err := s.Serve(lis); err != nil {
-			log.Error("failed to serve: %v", err)
-		}
-		log.Info("Server stopped")
-		// cancel()
-	}()
-	return s, nil
-}
-
-func StartCoreGrpcServer(listenAddressG string) (*grpc.Server, error) {
-	return StartGrpcServer(listenAddressG, "core")
-}
-
 var (
 	certpair   *hutils.CertificatePair
 	grpcServer map[SetupMode]*grpc.Server = make(map[SetupMode]*grpc.Server)

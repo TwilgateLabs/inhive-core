@@ -1,5 +1,8 @@
 // urltest_watcher.go — Phase 2 mode-switch health detector.
 //
+// RESERVED(2026-09-23, Nikita): не удалять, см. project_olcrtc_utproto_disabled_2026_09_06 / project_olcrtc_implementation
+// (olcrtc Mode 2 запаркован, SwitchMode / ModeStateListener живут ради него).
+//
 // Watches the existing OutboundMonitoring URL-test stream (created by
 // sing-box itself) for the main outbound group, accumulates a sliding
 // window of probe verdicts and emits a Mode-2 recommendation event on the

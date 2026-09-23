@@ -63,10 +63,9 @@ func resolveRealOutboundTag(om outboundLookup, tag string) string {
 func (h *InhiveInstance) readStatus(prev *SystemInfo) *SystemInfo {
 	var message SystemInfo
 	// memlite.Inuse == memory.Inuse по смыслу и цифре (см. пакет memlite), но
-	// без stop-the-world: этот метод тикает 1/с на КАЖДОГО подписчика
-	// GetSystemInfoStream всё время, пока открыто окно приложения, и
-	// секундный ReadMemStats-STW здесь был микро-джиттером поверх туннеля
-	// (особенно iOS NE с GOMAXPROCS=1).
+	// без stop-the-world: этот метод зовётся на каждый поллинг GetSystemInfo
+	// всё время, пока открыто окно приложения, и ReadMemStats-STW здесь был
+	// микро-джиттером поверх туннеля (особенно iOS NE с GOMAXPROCS=1).
 	message.Memory = int64(memlite.Inuse())
 	message.Goroutines = int32(runtime.NumGoroutine())
 
@@ -114,8 +113,8 @@ func (h *InhiveInstance) readStatus(prev *SystemInfo) *SystemInfo {
 		}
 
 		if prev == nil || prev.CurrentProfile == "" || message.UplinkTotal < 1000000 {
-			// Кеш вместо db.Get: этот метод тикает 1/сек из
-			// GetSystemInfoStream, а goleveldb open/close на каждый тик —
+			// Кеш вместо db.Get: этот метод зовётся на каждый поллинг
+			// GetSystemInfo, а goleveldb open/close на каждый вызов —
 			// alloc-churn под 32MB memory-limit iOS NE (см. start.go,
 			// cachedLastStartRequestName).
 			message.CurrentProfile = cachedLastStartRequestName()
@@ -130,10 +129,11 @@ func (h *InhiveInstance) readStatus(prev *SystemInfo) *SystemInfo {
 // diagFirstRPCLogged — one-shot гейт для TEMPORARY-диагностики бага «ядро не
 // отвечает 10с» (2026-07-22). GetSystemInfo — первый RPC, которым app проверяет
 // готовность ядра (bridge.dart _ensureCoreReady поллит его). Логируем ПЕРВЫЙ
-// вызов на WARNING (в core.log): пара к «gRPC listener ready» из grpc_server.go
-// даёт при следующем сбое однозначную картину — дошёл ли RPC вообще и через
-// сколько после старта listener'а. atomic-once, чтобы не спамить (poll идёт
-// каждые 200мс). Снять вместе с парной строкой, когда баг пойман.
+// вызов на WARNING (в core.log). Задумывалась пара к «gRPC listener ready», но та
+// строка стояла в StartGrpcServer — пути, которым app никогда не поднимал сервер
+// (боевой — StartGrpcServerByMode); функция снесена 2026-09-23 как мёртвая, так
+// что пары в core.log не было и нет. atomic-once, чтобы не спамить (poll идёт
+// каждые 200мс). Снять, когда баг пойман.
 var diagFirstRPCLogged atomic.Bool
 
 func (s *CoreService) GetSystemInfo(ctx context.Context, req *hcommon.Empty) (resp *SystemInfo, err error) {
@@ -143,59 +143,6 @@ func (s *CoreService) GetSystemInfo(ctx context.Context, req *hcommon.Empty) (re
 	return static.readStatus(nil), nil
 
 }
-func (s *CoreService) GetSystemInfoStream(req *hcommon.Empty, stream grpc.ServerStreamingServer[SystemInfo]) (err error) {
-	return static.GetSystemInfo(stream)
-
-}
-func (h *InhiveInstance) MakeSureContextIsNew(streamContext context.Context) {
-	for range 10 {
-		if ctx := h.Context(); ctx != nil {
-			select {
-			case <-ctx.Done(): //if old context is done waiting for new context
-			default:
-				return
-			}
-		}
-		select {
-		case <-streamContext.Done():
-			return
-		case <-time.After(time.Millisecond * 500):
-		}
-	}
-}
-func (h *InhiveInstance) GetSystemInfo(stream grpc.ServerStreamingServer[SystemInfo]) error {
-	h.MakeSureContextIsNew(stream.Context())
-
-	ticker := time.NewTicker(1 * time.Second)
-	defer ticker.Stop()
-
-	deadline := time.NewTimer(10 * time.Second)
-	defer deadline.Stop()
-
-	ctx := h.Context()
-	if ctx == nil {
-		return E.New("service not ready")
-	}
-	current_status := h.readStatus(nil)
-	if err := stream.Send(current_status); err != nil {
-		Log(LogLevel_ERROR, LogType_CORE, "send System Info failed", err)
-	}
-	for {
-		select {
-		case <-stream.Context().Done():
-			return nil
-		case <-ctx.Done():
-			return ctx.Err()
-		case <-ticker.C:
-			current_status = h.readStatus(current_status)
-			if err := stream.Send(current_status); err != nil {
-				Log(LogLevel_ERROR, LogType_CORE, "send System Info failed", err)
-			}
-		}
-	}
-
-}
-
 func (s *CoreService) SelectOutbound(ctx context.Context, in *SelectOutboundRequest) (resp *hcommon.Response, err error) {
 	defer config.RecoverPanicToError("CoreService.SelectOutbound", func(e error) {
 		Log(LogLevel_FATAL, LogType_CORE, e.Error())
@@ -491,6 +438,10 @@ func (h *InhiveInstance) UrlTest(in *UrlTestRequest) (*hcommon.Response, error) 
 	}, nil
 }
 
+// RESERVED(2026-09-23, Nikita): SwitchMode / ModeStateListener (+ urltest_watcher.go,
+// currentMode / modeStateObserver) — нет вызывающего в app, но не удалять:
+// olcrtc Mode 2 запаркован, см. project_olcrtc_utproto_disabled_2026_09_06 / project_olcrtc_implementation.
+//
 // SwitchMode records the new desired mode and broadcasts an ack on the
 // ModeStateListener stream. It deliberately does NOT stop or reconfigure
 // the running sing-box service: a Mode-1↔Mode-2 transition is implemented
@@ -529,8 +480,8 @@ func (h *InhiveInstance) SwitchMode(in *SwitchModeRequest) (*hcommon.Response, e
 	return &hcommon.Response{Code: hcommon.ResponseCode_OK, Message: ""}, nil
 }
 
-// ModeStateListener — server-streaming endpoint. Pattern mirrors
-// GetSystemInfoStream: emit a snapshot immediately, then forward events
+// ModeStateListener — server-streaming endpoint: emit a snapshot immediately,
+// then forward events
 // from the broadcaster until either the gRPC client or the daemon context
 // goes away.
 //

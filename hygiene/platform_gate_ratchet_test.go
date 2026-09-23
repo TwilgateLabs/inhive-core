@@ -62,7 +62,9 @@ var baseline = map[string]int{
 	// целиком (порог-проверка в том же месте делала ту же работу), а
 	// оставшаяся проверка бюджета сузилась до Apple — там процесс и убивают
 	// за footprint, Android платил ни за что. Ratchet крутится только вниз.
-	"v2": 8,
+	// 2026-09-23: 8 → 7. Необъяснённый `if C.IsAndroid && …EnableTun` ушёл
+	// вместе с v2/hcore/restart.go (мёртвый RPC Restart + desktop-экспорт).
+	"v2": 7,
 	// 2026-09-14: 34 -> 35 при мерже апстрима v1.13.21. Ровно один новый гейт, и он
 	// ЧУЖОЙ: protocol/direct/outbound.go isMyLoopbackAddress, `if !C.IsDarwin &&
 	// prefix.Addr() == address { continue }` из апстримного 7da573f18 «direct: Fix
@@ -83,7 +85,8 @@ var baseline = map[string]int{
 // 2026-09-14: 42 -> 43 вместе с per-каталожным sing-box 34 -> 35 — тот же один
 // апстримный гейт из v1.13.21 (protocol/direct/outbound.go, !C.IsDarwin),
 // обоснование см. в комментарии к baseline["sing-box"] выше.
-const totalBaseline = 43
+// 2026-09-23: 43 -> 42 — тот же гейт, что и v2 8 -> 7 (снос restart.go).
+const totalBaseline = 42
 
 // ─────────────────────────────────────────────────────────────────────────────
 // Что сканер СОЗНАТЕЛЬНО не смотрит.

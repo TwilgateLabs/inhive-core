@@ -5,9 +5,6 @@ package hutils
 import (
 	"fmt"
 	"os"
-	"os/exec"
-	"path/filepath"
-	"strings"
 
 	"github.com/sagernet/sing-box/experimental/libbox"
 	"golang.org/x/sys/unix"
@@ -32,46 +29,4 @@ func TunAllowed() bool {
 		return false //, fmt.Errorf("failed to get capabilities: %v", err)
 	}
 	return (data.Effective & (1 << unix.CAP_NET_ADMIN)) != 0
-}
-
-func ExecuteCmd(executablePath string, background bool, args ...string) (string, error) {
-	cwd := filepath.Dir(executablePath)
-	if appimage := os.Getenv("APPIMAGE"); appimage != "" {
-		executablePath = appimage
-		if !background {
-			return "Fail", fmt.Errorf("appimage cannot have service")
-		}
-	}
-
-	commands := [][]string{
-		{"cocoasudo", "--prompt=InHive needs root for tunneling.", executablePath},
-		{"gksu", executablePath},
-		{"pkexec", executablePath},
-		{"xterm", "-e", "sudo", executablePath, strings.Join(args, " ")},
-		{"sudo", executablePath},
-	}
-
-	var err error
-	var cmd *exec.Cmd
-	for _, command := range commands {
-		cmd = exec.Command(command[0], command[1:]...)
-		cmd.Dir = cwd
-		cmd.Stdout = os.Stdout
-		cmd.Stderr = os.Stderr
-		fmt.Printf("Running command: %v\n", command)
-		if background {
-			err = cmd.Start()
-		} else {
-			err = cmd.Run()
-		}
-		if err == nil {
-			return "Ok", nil
-		}
-	}
-
-	return "", fmt.Errorf("Error executing run as root shell command")
-}
-
-func Chmod(path string, mode os.FileMode) error {
-	return os.Chmod(path, mode)
 }

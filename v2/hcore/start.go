@@ -33,16 +33,8 @@ func Start(ctx context.Context, in *StartRequest) (*CoreInfoResponse, error) {
 	return StartService(ctx, in)
 }
 
-func (s *CoreService) StartService(ctx context.Context, in *StartRequest) (resp *CoreInfoResponse, err error) {
-	defer config.RecoverPanicToError("CoreService.StartService", func(e error) {
-		Log(LogLevel_FATAL, LogType_CORE, e.Error())
-		resp, err = errorWrapper(MessageType_UNEXPECTED_ERROR, e)
-	})
-	return StartService(ctx, in)
-}
-
-// Кеш lastStartRequestName. GetSystemInfoStream тикает 1/сек, и пока
-// UplinkTotal < 1MB (или профиль пуст) readStatus раньше КАЖДЫЙ тик ходил в
+// Кеш lastStartRequestName. App поллит GetSystemInfo, и пока
+// UplinkTotal < 1MB (или профиль пуст) readStatus раньше КАЖДЫЙ вызов ходил в
 // goleveldb (db.GetTable().Get = полный open/close: аллокации, manifest, fd) —
 // секундный alloc-churn под 32MB memory-limit iOS NE. Имя меняется только в
 // StartService, так что кешируем при записи; DB трогаем максимум один раз
@@ -219,6 +211,8 @@ func StartService(ctx context.Context, in *StartRequest) (coreResponse *CoreInfo
 	libbox.SetMemoryLimit(C.IsIos || !in.DisableMemoryLimit)
 	WriteSharedLog("StartService: SetMemoryLimit done")
 
+	// RESERVED(2026-09-23, Nikita): olcrtc-ветка — не удалять, см. project_olcrtc_utproto_disabled_2026_09_06 / project_olcrtc_implementation.
+	//
 	// Отменяемый старт: оборачиваем ctx в startCtx и сохраняем cancel ДО
 	// NewService. Блокирующий olcrtc-старт (primary awaitReady, до ~30с) идёт
 	// ВНУТРИ NewService и держит static.lock; static.StartedService (со своим

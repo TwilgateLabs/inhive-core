@@ -58,6 +58,7 @@ func BuildConfig(ctx context.Context, in *StartRequest) (*option.Options, error)
 	return config.ReadSingOptions(ctx, readOpt)
 }
 
+// RESERVED(2026-09-23, Nikita): DAITA — не удалять, см. daita_machines.go.
 func initDaita(ctx context.Context) context.Context {
 	opts := static.InhiveOptions
 	if !opts.DaitaEnabled {
@@ -211,30 +212,6 @@ func ChangeInhiveSettings(in *ChangeInhiveSettingsRequest, insert bool) (*CoreIn
 	}
 
 	return &CoreInfoResponse{}, nil
-}
-
-func (s *CoreService) GenerateConfig(ctx context.Context, in *GenerateConfigRequest) (resp *GenerateConfigResponse, err error) {
-	return GenerateConfig(libbox.FromContext(ctx, nil), in)
-}
-
-func GenerateConfig(ctx context.Context, in *GenerateConfigRequest) (resp *GenerateConfigResponse, err error) {
-	// Same rationale as Parse: never StopAndAlert from a config-build helper.
-	// CoreService.GenerateConfig wraps with its own RecoverPanicToError.
-	defer config.RecoverPanicToError("generateConfig", func(panicErr error) {
-		Log(LogLevel_FATAL, LogType_CONFIG, panicErr.Error())
-		err = panicErr
-	})
-	if static.InhiveOptions == nil {
-		static.InhiveOptions = config.DefaultInhiveOptions()
-	}
-	config, err := config.ParseBuildConfigBytes(ctx, static.InhiveOptions, &config.ReadOptions{Path: in.Path})
-	if err != nil {
-		return nil, err
-	}
-
-	return &GenerateConfigResponse{
-		ConfigContent: string(config),
-	}, nil
 }
 
 func removeTunnelIfNeeded(options *option.Options) (tuninb *option.TunInboundOptions) {

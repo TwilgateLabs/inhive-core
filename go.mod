@@ -27,8 +27,7 @@ require (
 )
 
 require (
-	github.com/google/uuid v1.6.0
-	github.com/hectane/go-acl v0.0.0-20230122075934-ca0b05cb1adb
+	github.com/google/uuid v1.6.0 // indirect
 	github.com/syndtr/goleveldb v1.0.1-0.20200815110645-5c35d600f0ca
 	github.com/tendermint/tm-db v0.6.7
 )

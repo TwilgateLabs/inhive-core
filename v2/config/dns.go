@@ -17,17 +17,6 @@ import (
 	M "github.com/sagernet/sing/common/metadata"
 )
 
-var DnsDirectTags = []string{
-	DNSStaticTag,
-	DNSDirectTag,
-	DNSLocalTag,
-}
-var DnsRemoteTags = []string{
-	DNSRemoteTag,
-	DNSRemoteTagFallback,
-	DNSTricksDirectTag,
-}
-
 var DEFAULT_DNS_TTL = uint32(60 * 60 * 24)
 
 func getDnsAddress(d string) string {

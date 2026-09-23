@@ -23,11 +23,11 @@ type InhiveInstance struct {
 	CoreState        CoreStates
 	logObserver      *monitoring.Broadcaster[*LogMessage]
 	// systemInfoObserver/outboundsInfoObserver/mainOutboundsInfoObserver
-	// удалены (NE-quiescence 2026-07-19): dead code. Соответствующие RPC идут
-	// другим путём — SystemInfo через per-subscriber тикер (commands.go),
-	// Outbounds/MainOutbounds через AllProxiesInfoStream (proxy_info.go). Эти
-	// три Broadcaster'а никто не Publish/Subscribe, но каждый держал горутину
-	// watchContext навсегда.
+	// удалены (NE-quiescence 2026-07-19): dead code — эти три Broadcaster'а никто
+	// не Publish/Subscribe, но каждый держал горутину watchContext навсегда.
+	// Сами стримы GetSystemInfoStream / OutboundsInfo / MainOutboundsInfo
+	// удалены 2026-09-23 вместе с CLI ядра (app их не звал; SystemInfo app
+	// поллит unary GetSystemInfo).
 	lock                    sync.Mutex
 	globalPlatformInterface libbox.PlatformInterface
 	previousStartRequest    *StartRequest
@@ -66,6 +66,8 @@ type InhiveInstance struct {
 	memSamplerCancel context.CancelFunc
 	memSamplerMu     sync.Mutex
 
+	// RESERVED(2026-09-23, Nikita): olcrtc-ветка — не удалять, см. project_olcrtc_utproto_disabled_2026_09_06 / project_olcrtc_implementation.
+	//
 	// startCancel отменяет блокирующий olcrtc-старт (primary awaitReady, до ~30с)
 	// когда юзер отменяет connect повторным тапом (Dart → Stop). Хранится ОТДЕЛЬНО
 	// от lock: StartService держит static.lock весь блокирующий старт, поэтому Stop

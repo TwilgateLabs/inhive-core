@@ -1,5 +1,9 @@
 package hcore
 
+// RESERVED(2026-09-23, Nikita): DAITA / maybenot (этот файл, initDaita в
+// buildconfighelper.go, опции daita-*, сабмодуль maybenot) — не удалять, см.
+// аудит фундамента §5.5 (app/docs/foundation/2026-09-19-audit-and-program.md).
+
 // DefaultDaitaMachines contains the bundled maybenot machine definitions
 // for DAITA (Defence Against Traffic Analysis).
 // Source: Mullvad VPN dist-assets/maybenot_machines

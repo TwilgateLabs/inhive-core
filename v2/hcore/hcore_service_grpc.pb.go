@@ -20,35 +20,26 @@ import (
 const _ = grpc.SupportPackageIsVersion9
 
 const (
-	Core_Start_FullMethodName                 = "/hcore.Core/Start"
-	Core_CoreInfoListener_FullMethodName      = "/hcore.Core/CoreInfoListener"
-	Core_OutboundsInfo_FullMethodName         = "/hcore.Core/OutboundsInfo"
-	Core_MainOutboundsInfo_FullMethodName     = "/hcore.Core/MainOutboundsInfo"
-	Core_GetSystemInfo_FullMethodName         = "/hcore.Core/GetSystemInfo"
-	Core_GetSystemInfoStream_FullMethodName   = "/hcore.Core/GetSystemInfoStream"
-	Core_Setup_FullMethodName                 = "/hcore.Core/Setup"
-	Core_Parse_FullMethodName                 = "/hcore.Core/Parse"
-	Core_BootstrapFetch_FullMethodName        = "/hcore.Core/BootstrapFetch"
-	Core_UrlTestConfig_FullMethodName         = "/hcore.Core/UrlTestConfig"
-	Core_UrlTestConfigWarm_FullMethodName     = "/hcore.Core/UrlTestConfigWarm"
-	Core_ReleaseWarmProbe_FullMethodName      = "/hcore.Core/ReleaseWarmProbe"
-	Core_ChangeInhiveSettings_FullMethodName  = "/hcore.Core/ChangeInhiveSettings"
-	Core_StartService_FullMethodName          = "/hcore.Core/StartService"
-	Core_Stop_FullMethodName                  = "/hcore.Core/Stop"
-	Core_Restart_FullMethodName               = "/hcore.Core/Restart"
-	Core_SelectOutbound_FullMethodName        = "/hcore.Core/SelectOutbound"
-	Core_AddOutbound_FullMethodName           = "/hcore.Core/AddOutbound"
-	Core_RemoveOutbound_FullMethodName        = "/hcore.Core/RemoveOutbound"
-	Core_UrlTest_FullMethodName               = "/hcore.Core/UrlTest"
-	Core_UrlTestActive_FullMethodName         = "/hcore.Core/UrlTestActive"
-	Core_SpeedTest_FullMethodName             = "/hcore.Core/SpeedTest"
-	Core_GenerateWarpConfig_FullMethodName    = "/hcore.Core/GenerateWarpConfig"
-	Core_GetSystemProxyStatus_FullMethodName  = "/hcore.Core/GetSystemProxyStatus"
-	Core_SetSystemProxyEnabled_FullMethodName = "/hcore.Core/SetSystemProxyEnabled"
-	Core_LogListener_FullMethodName           = "/hcore.Core/LogListener"
-	Core_Close_FullMethodName                 = "/hcore.Core/Close"
-	Core_SwitchMode_FullMethodName            = "/hcore.Core/SwitchMode"
-	Core_ModeStateListener_FullMethodName     = "/hcore.Core/ModeStateListener"
+	Core_Start_FullMethodName                = "/hcore.Core/Start"
+	Core_CoreInfoListener_FullMethodName     = "/hcore.Core/CoreInfoListener"
+	Core_GetSystemInfo_FullMethodName        = "/hcore.Core/GetSystemInfo"
+	Core_Setup_FullMethodName                = "/hcore.Core/Setup"
+	Core_Parse_FullMethodName                = "/hcore.Core/Parse"
+	Core_BootstrapFetch_FullMethodName       = "/hcore.Core/BootstrapFetch"
+	Core_UrlTestConfig_FullMethodName        = "/hcore.Core/UrlTestConfig"
+	Core_ChangeInhiveSettings_FullMethodName = "/hcore.Core/ChangeInhiveSettings"
+	Core_Stop_FullMethodName                 = "/hcore.Core/Stop"
+	Core_SelectOutbound_FullMethodName       = "/hcore.Core/SelectOutbound"
+	Core_AddOutbound_FullMethodName          = "/hcore.Core/AddOutbound"
+	Core_RemoveOutbound_FullMethodName       = "/hcore.Core/RemoveOutbound"
+	Core_UrlTest_FullMethodName              = "/hcore.Core/UrlTest"
+	Core_UrlTestActive_FullMethodName        = "/hcore.Core/UrlTestActive"
+	Core_SpeedTest_FullMethodName            = "/hcore.Core/SpeedTest"
+	Core_GenerateWarpConfig_FullMethodName   = "/hcore.Core/GenerateWarpConfig"
+	Core_LogListener_FullMethodName          = "/hcore.Core/LogListener"
+	Core_Close_FullMethodName                = "/hcore.Core/Close"
+	Core_SwitchMode_FullMethodName           = "/hcore.Core/SwitchMode"
+	Core_ModeStateListener_FullMethodName    = "/hcore.Core/ModeStateListener"
 )
 
 // CoreClient is the client API for Core service.
@@ -57,10 +48,7 @@ const (
 type CoreClient interface {
 	Start(ctx context.Context, in *StartRequest, opts ...grpc.CallOption) (*CoreInfoResponse, error)
 	CoreInfoListener(ctx context.Context, in *hcommon.Empty, opts ...grpc.CallOption) (grpc.ServerStreamingClient[CoreInfoResponse], error)
-	OutboundsInfo(ctx context.Context, in *hcommon.Empty, opts ...grpc.CallOption) (grpc.ServerStreamingClient[OutboundGroupList], error)
-	MainOutboundsInfo(ctx context.Context, in *hcommon.Empty, opts ...grpc.CallOption) (grpc.ServerStreamingClient[OutboundGroupList], error)
 	GetSystemInfo(ctx context.Context, in *hcommon.Empty, opts ...grpc.CallOption) (*SystemInfo, error)
-	GetSystemInfoStream(ctx context.Context, in *hcommon.Empty, opts ...grpc.CallOption) (grpc.ServerStreamingClient[SystemInfo], error)
 	Setup(ctx context.Context, in *SetupRequest, opts ...grpc.CallOption) (*hcommon.Response, error)
 	Parse(ctx context.Context, in *ParseRequest, opts ...grpc.CallOption) (*ParseResponse, error)
 	// Wave 13D — see BootstrapFetchRequest in hcore.proto for the full contract.
@@ -68,17 +56,8 @@ type CoreClient interface {
 	// Honest per-server ping via a side-instance — see UrlTestConfigRequest in
 	// hcore.proto. Works while the VPN is disconnected, no main-box dependency.
 	UrlTestConfig(ctx context.Context, in *UrlTestConfigRequest, opts ...grpc.CallOption) (*UrlTestConfigResponse, error)
-	// Ping v2 — warm persistent probe-instance. One long-lived side-instance holds
-	// all servers' outbounds and is reused across probe cycles. See
-	// UrlTestConfigWarmRequest in hcore.proto. Same disconnected moat as UrlTestConfig.
-	UrlTestConfigWarm(ctx context.Context, in *UrlTestConfigWarmRequest, opts ...grpc.CallOption) (*UrlTestConfigWarmResponse, error)
-	// Tear down a warm probe instance early (server-list screen closed).
-	ReleaseWarmProbe(ctx context.Context, in *ReleaseWarmProbeRequest, opts ...grpc.CallOption) (*hcommon.Response, error)
 	ChangeInhiveSettings(ctx context.Context, in *ChangeInhiveSettingsRequest, opts ...grpc.CallOption) (*CoreInfoResponse, error)
-	// rpc GenerateConfig (GenerateConfigRequest) returns (GenerateConfigResponse);
-	StartService(ctx context.Context, in *StartRequest, opts ...grpc.CallOption) (*CoreInfoResponse, error)
 	Stop(ctx context.Context, in *hcommon.Empty, opts ...grpc.CallOption) (*CoreInfoResponse, error)
-	Restart(ctx context.Context, in *StartRequest, opts ...grpc.CallOption) (*CoreInfoResponse, error)
 	SelectOutbound(ctx context.Context, in *SelectOutboundRequest, opts ...grpc.CallOption) (*hcommon.Response, error)
 	// Hot-add: добавить outbound в живой box + в селекторы без рестарта
 	// (кросс-подписочный dual без реконнекта). См. AddOutboundRequest.
@@ -92,10 +71,13 @@ type CoreClient interface {
 	// proxy port — на iOS (двухпроцессная арх) тот не работал.
 	SpeedTest(ctx context.Context, in *SpeedTestRequest, opts ...grpc.CallOption) (*SpeedTestResponse, error)
 	GenerateWarpConfig(ctx context.Context, in *GenerateWarpConfigRequest, opts ...grpc.CallOption) (*WarpGenerationResponse, error)
-	GetSystemProxyStatus(ctx context.Context, in *hcommon.Empty, opts ...grpc.CallOption) (*SystemProxyStatus, error)
-	SetSystemProxyEnabled(ctx context.Context, in *SetSystemProxyEnabledRequest, opts ...grpc.CallOption) (*hcommon.Response, error)
 	LogListener(ctx context.Context, in *LogRequest, opts ...grpc.CallOption) (grpc.ServerStreamingClient[LogMessage], error)
 	Close(ctx context.Context, in *CloseRequest, opts ...grpc.CallOption) (*hcommon.Empty, error)
+	// RESERVED(2026-09-23, Nikita): SwitchMode / ModeStateListener have no caller in
+	// ../app/lib today and are kept on purpose — olcrtc Mode 2 is parked, not dropped.
+	// Do not delete; see memory project_olcrtc_utproto_disabled_2026_09_06 and
+	// project_olcrtc_implementation.
+	//
 	// Phase 2 — generic mode switching.
 	//
 	// SwitchMode records the new desired mode + broadcasts an ack event on the
@@ -148,44 +130,6 @@ func (c *coreClient) CoreInfoListener(ctx context.Context, in *hcommon.Empty, op
 // This type alias is provided for backwards compatibility with existing code that references the prior non-generic stream type by name.
 type Core_CoreInfoListenerClient = grpc.ServerStreamingClient[CoreInfoResponse]
 
-func (c *coreClient) OutboundsInfo(ctx context.Context, in *hcommon.Empty, opts ...grpc.CallOption) (grpc.ServerStreamingClient[OutboundGroupList], error) {
-	cOpts := append([]grpc.CallOption{grpc.StaticMethod()}, opts...)
-	stream, err := c.cc.NewStream(ctx, &Core_ServiceDesc.Streams[1], Core_OutboundsInfo_FullMethodName, cOpts...)
-	if err != nil {
-		return nil, err
-	}
-	x := &grpc.GenericClientStream[hcommon.Empty, OutboundGroupList]{ClientStream: stream}
-	if err := x.ClientStream.SendMsg(in); err != nil {
-		return nil, err
-	}
-	if err := x.ClientStream.CloseSend(); err != nil {
-		return nil, err
-	}
-	return x, nil
-}
-
-// This type alias is provided for backwards compatibility with existing code that references the prior non-generic stream type by name.
-type Core_OutboundsInfoClient = grpc.ServerStreamingClient[OutboundGroupList]
-
-func (c *coreClient) MainOutboundsInfo(ctx context.Context, in *hcommon.Empty, opts ...grpc.CallOption) (grpc.ServerStreamingClient[OutboundGroupList], error) {
-	cOpts := append([]grpc.CallOption{grpc.StaticMethod()}, opts...)
-	stream, err := c.cc.NewStream(ctx, &Core_ServiceDesc.Streams[2], Core_MainOutboundsInfo_FullMethodName, cOpts...)
-	if err != nil {
-		return nil, err
-	}
-	x := &grpc.GenericClientStream[hcommon.Empty, OutboundGroupList]{ClientStream: stream}
-	if err := x.ClientStream.SendMsg(in); err != nil {
-		return nil, err
-	}
-	if err := x.ClientStream.CloseSend(); err != nil {
-		return nil, err
-	}
-	return x, nil
-}
-
-// This type alias is provided for backwards compatibility with existing code that references the prior non-generic stream type by name.
-type Core_MainOutboundsInfoClient = grpc.ServerStreamingClient[OutboundGroupList]
-
 func (c *coreClient) GetSystemInfo(ctx context.Context, in *hcommon.Empty, opts ...grpc.CallOption) (*SystemInfo, error) {
 	cOpts := append([]grpc.CallOption{grpc.StaticMethod()}, opts...)
 	out := new(SystemInfo)
@@ -195,25 +139,6 @@ func (c *coreClient) GetSystemInfo(ctx context.Context, in *hcommon.Empty, opts 
 	}
 	return out, nil
 }
-
-func (c *coreClient) GetSystemInfoStream(ctx context.Context, in *hcommon.Empty, opts ...grpc.CallOption) (grpc.ServerStreamingClient[SystemInfo], error) {
-	cOpts := append([]grpc.CallOption{grpc.StaticMethod()}, opts...)
-	stream, err := c.cc.NewStream(ctx, &Core_ServiceDesc.Streams[3], Core_GetSystemInfoStream_FullMethodName, cOpts...)
-	if err != nil {
-		return nil, err
-	}
-	x := &grpc.GenericClientStream[hcommon.Empty, SystemInfo]{ClientStream: stream}
-	if err := x.ClientStream.SendMsg(in); err != nil {
-		return nil, err
-	}
-	if err := x.ClientStream.CloseSend(); err != nil {
-		return nil, err
-	}
-	return x, nil
-}
-
-// This type alias is provided for backwards compatibility with existing code that references the prior non-generic stream type by name.
-type Core_GetSystemInfoStreamClient = grpc.ServerStreamingClient[SystemInfo]
 
 func (c *coreClient) Setup(ctx context.Context, in *SetupRequest, opts ...grpc.CallOption) (*hcommon.Response, error) {
 	cOpts := append([]grpc.CallOption{grpc.StaticMethod()}, opts...)
@@ -255,26 +180,6 @@ func (c *coreClient) UrlTestConfig(ctx context.Context, in *UrlTestConfigRequest
 	return out, nil
 }
 
-func (c *coreClient) UrlTestConfigWarm(ctx context.Context, in *UrlTestConfigWarmRequest, opts ...grpc.CallOption) (*UrlTestConfigWarmResponse, error) {
-	cOpts := append([]grpc.CallOption{grpc.StaticMethod()}, opts...)
-	out := new(UrlTestConfigWarmResponse)
-	err := c.cc.Invoke(ctx, Core_UrlTestConfigWarm_FullMethodName, in, out, cOpts...)
-	if err != nil {
-		return nil, err
-	}
-	return out, nil
-}
-
-func (c *coreClient) ReleaseWarmProbe(ctx context.Context, in *ReleaseWarmProbeRequest, opts ...grpc.CallOption) (*hcommon.Response, error) {
-	cOpts := append([]grpc.CallOption{grpc.StaticMethod()}, opts...)
-	out := new(hcommon.Response)
-	err := c.cc.Invoke(ctx, Core_ReleaseWarmProbe_FullMethodName, in, out, cOpts...)
-	if err != nil {
-		return nil, err
-	}
-	return out, nil
-}
-
 func (c *coreClient) ChangeInhiveSettings(ctx context.Context, in *ChangeInhiveSettingsRequest, opts ...grpc.CallOption) (*CoreInfoResponse, error) {
 	cOpts := append([]grpc.CallOption{grpc.StaticMethod()}, opts...)
 	out := new(CoreInfoResponse)
@@ -285,30 +190,10 @@ func (c *coreClient) ChangeInhiveSettings(ctx context.Context, in *ChangeInhiveS
 	return out, nil
 }
 
-func (c *coreClient) StartService(ctx context.Context, in *StartRequest, opts ...grpc.CallOption) (*CoreInfoResponse, error) {
-	cOpts := append([]grpc.CallOption{grpc.StaticMethod()}, opts...)
-	out := new(CoreInfoResponse)
-	err := c.cc.Invoke(ctx, Core_StartService_FullMethodName, in, out, cOpts...)
-	if err != nil {
-		return nil, err
-	}
-	return out, nil
-}
-
 func (c *coreClient) Stop(ctx context.Context, in *hcommon.Empty, opts ...grpc.CallOption) (*CoreInfoResponse, error) {
 	cOpts := append([]grpc.CallOption{grpc.StaticMethod()}, opts...)
 	out := new(CoreInfoResponse)
 	err := c.cc.Invoke(ctx, Core_Stop_FullMethodName, in, out, cOpts...)
-	if err != nil {
-		return nil, err
-	}
-	return out, nil
-}
-
-func (c *coreClient) Restart(ctx context.Context, in *StartRequest, opts ...grpc.CallOption) (*CoreInfoResponse, error) {
-	cOpts := append([]grpc.CallOption{grpc.StaticMethod()}, opts...)
-	out := new(CoreInfoResponse)
-	err := c.cc.Invoke(ctx, Core_Restart_FullMethodName, in, out, cOpts...)
 	if err != nil {
 		return nil, err
 	}
@@ -385,29 +270,9 @@ func (c *coreClient) GenerateWarpConfig(ctx context.Context, in *GenerateWarpCon
 	return out, nil
 }
 
-func (c *coreClient) GetSystemProxyStatus(ctx context.Context, in *hcommon.Empty, opts ...grpc.CallOption) (*SystemProxyStatus, error) {
-	cOpts := append([]grpc.CallOption{grpc.StaticMethod()}, opts...)
-	out := new(SystemProxyStatus)
-	err := c.cc.Invoke(ctx, Core_GetSystemProxyStatus_FullMethodName, in, out, cOpts...)
-	if err != nil {
-		return nil, err
-	}
-	return out, nil
-}
-
-func (c *coreClient) SetSystemProxyEnabled(ctx context.Context, in *SetSystemProxyEnabledRequest, opts ...grpc.CallOption) (*hcommon.Response, error) {
-	cOpts := append([]grpc.CallOption{grpc.StaticMethod()}, opts...)
-	out := new(hcommon.Response)
-	err := c.cc.Invoke(ctx, Core_SetSystemProxyEnabled_FullMethodName, in, out, cOpts...)
-	if err != nil {
-		return nil, err
-	}
-	return out, nil
-}
-
 func (c *coreClient) LogListener(ctx context.Context, in *LogRequest, opts ...grpc.CallOption) (grpc.ServerStreamingClient[LogMessage], error) {
 	cOpts := append([]grpc.CallOption{grpc.StaticMethod()}, opts...)
-	stream, err := c.cc.NewStream(ctx, &Core_ServiceDesc.Streams[4], Core_LogListener_FullMethodName, cOpts...)
+	stream, err := c.cc.NewStream(ctx, &Core_ServiceDesc.Streams[1], Core_LogListener_FullMethodName, cOpts...)
 	if err != nil {
 		return nil, err
 	}
@@ -446,7 +311,7 @@ func (c *coreClient) SwitchMode(ctx context.Context, in *SwitchModeRequest, opts
 
 func (c *coreClient) ModeStateListener(ctx context.Context, in *hcommon.Empty, opts ...grpc.CallOption) (grpc.ServerStreamingClient[ModeStateResponse], error) {
 	cOpts := append([]grpc.CallOption{grpc.StaticMethod()}, opts...)
-	stream, err := c.cc.NewStream(ctx, &Core_ServiceDesc.Streams[5], Core_ModeStateListener_FullMethodName, cOpts...)
+	stream, err := c.cc.NewStream(ctx, &Core_ServiceDesc.Streams[2], Core_ModeStateListener_FullMethodName, cOpts...)
 	if err != nil {
 		return nil, err
 	}
@@ -469,10 +334,7 @@ type Core_ModeStateListenerClient = grpc.ServerStreamingClient[ModeStateResponse
 type CoreServer interface {
 	Start(context.Context, *StartRequest) (*CoreInfoResponse, error)
 	CoreInfoListener(*hcommon.Empty, grpc.ServerStreamingServer[CoreInfoResponse]) error
-	OutboundsInfo(*hcommon.Empty, grpc.ServerStreamingServer[OutboundGroupList]) error
-	MainOutboundsInfo(*hcommon.Empty, grpc.ServerStreamingServer[OutboundGroupList]) error
 	GetSystemInfo(context.Context, *hcommon.Empty) (*SystemInfo, error)
-	GetSystemInfoStream(*hcommon.Empty, grpc.ServerStreamingServer[SystemInfo]) error
 	Setup(context.Context, *SetupRequest) (*hcommon.Response, error)
 	Parse(context.Context, *ParseRequest) (*ParseResponse, error)
 	// Wave 13D — see BootstrapFetchRequest in hcore.proto for the full contract.
@@ -480,17 +342,8 @@ type CoreServer interface {
 	// Honest per-server ping via a side-instance — see UrlTestConfigRequest in
 	// hcore.proto. Works while the VPN is disconnected, no main-box dependency.
 	UrlTestConfig(context.Context, *UrlTestConfigRequest) (*UrlTestConfigResponse, error)
-	// Ping v2 — warm persistent probe-instance. One long-lived side-instance holds
-	// all servers' outbounds and is reused across probe cycles. See
-	// UrlTestConfigWarmRequest in hcore.proto. Same disconnected moat as UrlTestConfig.
-	UrlTestConfigWarm(context.Context, *UrlTestConfigWarmRequest) (*UrlTestConfigWarmResponse, error)
-	// Tear down a warm probe instance early (server-list screen closed).
-	ReleaseWarmProbe(context.Context, *ReleaseWarmProbeRequest) (*hcommon.Response, error)
 	ChangeInhiveSettings(context.Context, *ChangeInhiveSettingsRequest) (*CoreInfoResponse, error)
-	// rpc GenerateConfig (GenerateConfigRequest) returns (GenerateConfigResponse);
-	StartService(context.Context, *StartRequest) (*CoreInfoResponse, error)
 	Stop(context.Context, *hcommon.Empty) (*CoreInfoResponse, error)
-	Restart(context.Context, *StartRequest) (*CoreInfoResponse, error)
 	SelectOutbound(context.Context, *SelectOutboundRequest) (*hcommon.Response, error)
 	// Hot-add: добавить outbound в живой box + в селекторы без рестарта
 	// (кросс-подписочный dual без реконнекта). См. AddOutboundRequest.
@@ -504,10 +357,13 @@ type CoreServer interface {
 	// proxy port — на iOS (двухпроцессная арх) тот не работал.
 	SpeedTest(context.Context, *SpeedTestRequest) (*SpeedTestResponse, error)
 	GenerateWarpConfig(context.Context, *GenerateWarpConfigRequest) (*WarpGenerationResponse, error)
-	GetSystemProxyStatus(context.Context, *hcommon.Empty) (*SystemProxyStatus, error)
-	SetSystemProxyEnabled(context.Context, *SetSystemProxyEnabledRequest) (*hcommon.Response, error)
 	LogListener(*LogRequest, grpc.ServerStreamingServer[LogMessage]) error
 	Close(context.Context, *CloseRequest) (*hcommon.Empty, error)
+	// RESERVED(2026-09-23, Nikita): SwitchMode / ModeStateListener have no caller in
+	// ../app/lib today and are kept on purpose — olcrtc Mode 2 is parked, not dropped.
+	// Do not delete; see memory project_olcrtc_utproto_disabled_2026_09_06 and
+	// project_olcrtc_implementation.
+	//
 	// Phase 2 — generic mode switching.
 	//
 	// SwitchMode records the new desired mode + broadcasts an ack event on the
@@ -537,17 +393,8 @@ func (UnimplementedCoreServer) Start(context.Context, *StartRequest) (*CoreInfoR
 func (UnimplementedCoreServer) CoreInfoListener(*hcommon.Empty, grpc.ServerStreamingServer[CoreInfoResponse]) error {
 	return status.Error(codes.Unimplemented, "method CoreInfoListener not implemented")
 }
-func (UnimplementedCoreServer) OutboundsInfo(*hcommon.Empty, grpc.ServerStreamingServer[OutboundGroupList]) error {
-	return status.Error(codes.Unimplemented, "method OutboundsInfo not implemented")
-}
-func (UnimplementedCoreServer) MainOutboundsInfo(*hcommon.Empty, grpc.ServerStreamingServer[OutboundGroupList]) error {
-	return status.Error(codes.Unimplemented, "method MainOutboundsInfo not implemented")
-}
 func (UnimplementedCoreServer) GetSystemInfo(context.Context, *hcommon.Empty) (*SystemInfo, error) {
 	return nil, status.Error(codes.Unimplemented, "method GetSystemInfo not implemented")
-}
-func (UnimplementedCoreServer) GetSystemInfoStream(*hcommon.Empty, grpc.ServerStreamingServer[SystemInfo]) error {
-	return status.Error(codes.Unimplemented, "method GetSystemInfoStream not implemented")
 }
 func (UnimplementedCoreServer) Setup(context.Context, *SetupRequest) (*hcommon.Response, error) {
 	return nil, status.Error(codes.Unimplemented, "method Setup not implemented")
@@ -561,23 +408,11 @@ func (UnimplementedCoreServer) BootstrapFetch(context.Context, *BootstrapFetchRe
 func (UnimplementedCoreServer) UrlTestConfig(context.Context, *UrlTestConfigRequest) (*UrlTestConfigResponse, error) {
 	return nil, status.Error(codes.Unimplemented, "method UrlTestConfig not implemented")
 }
-func (UnimplementedCoreServer) UrlTestConfigWarm(context.Context, *UrlTestConfigWarmRequest) (*UrlTestConfigWarmResponse, error) {
-	return nil, status.Error(codes.Unimplemented, "method UrlTestConfigWarm not implemented")
-}
-func (UnimplementedCoreServer) ReleaseWarmProbe(context.Context, *ReleaseWarmProbeRequest) (*hcommon.Response, error) {
-	return nil, status.Error(codes.Unimplemented, "method ReleaseWarmProbe not implemented")
-}
 func (UnimplementedCoreServer) ChangeInhiveSettings(context.Context, *ChangeInhiveSettingsRequest) (*CoreInfoResponse, error) {
 	return nil, status.Error(codes.Unimplemented, "method ChangeInhiveSettings not implemented")
 }
-func (UnimplementedCoreServer) StartService(context.Context, *StartRequest) (*CoreInfoResponse, error) {
-	return nil, status.Error(codes.Unimplemented, "method StartService not implemented")
-}
 func (UnimplementedCoreServer) Stop(context.Context, *hcommon.Empty) (*CoreInfoResponse, error) {
 	return nil, status.Error(codes.Unimplemented, "method Stop not implemented")
-}
-func (UnimplementedCoreServer) Restart(context.Context, *StartRequest) (*CoreInfoResponse, error) {
-	return nil, status.Error(codes.Unimplemented, "method Restart not implemented")
 }
 func (UnimplementedCoreServer) SelectOutbound(context.Context, *SelectOutboundRequest) (*hcommon.Response, error) {
 	return nil, status.Error(codes.Unimplemented, "method SelectOutbound not implemented")
@@ -599,12 +434,6 @@ func (UnimplementedCoreServer) SpeedTest(context.Context, *SpeedTestRequest) (*S
 }
 func (UnimplementedCoreServer) GenerateWarpConfig(context.Context, *GenerateWarpConfigRequest) (*WarpGenerationResponse, error) {
 	return nil, status.Error(codes.Unimplemented, "method GenerateWarpConfig not implemented")
-}
-func (UnimplementedCoreServer) GetSystemProxyStatus(context.Context, *hcommon.Empty) (*SystemProxyStatus, error) {
-	return nil, status.Error(codes.Unimplemented, "method GetSystemProxyStatus not implemented")
-}
-func (UnimplementedCoreServer) SetSystemProxyEnabled(context.Context, *SetSystemProxyEnabledRequest) (*hcommon.Response, error) {
-	return nil, status.Error(codes.Unimplemented, "method SetSystemProxyEnabled not implemented")
 }
 func (UnimplementedCoreServer) LogListener(*LogRequest, grpc.ServerStreamingServer[LogMessage]) error {
 	return status.Error(codes.Unimplemented, "method LogListener not implemented")
@@ -668,28 +497,6 @@ func _Core_CoreInfoListener_Handler(srv interface{}, stream grpc.ServerStream) e
 // This type alias is provided for backwards compatibility with existing code that references the prior non-generic stream type by name.
 type Core_CoreInfoListenerServer = grpc.ServerStreamingServer[CoreInfoResponse]
 
-func _Core_OutboundsInfo_Handler(srv interface{}, stream grpc.ServerStream) error {
-	m := new(hcommon.Empty)
-	if err := stream.RecvMsg(m); err != nil {
-		return err
-	}
-	return srv.(CoreServer).OutboundsInfo(m, &grpc.GenericServerStream[hcommon.Empty, OutboundGroupList]{ServerStream: stream})
-}
-
-// This type alias is provided for backwards compatibility with existing code that references the prior non-generic stream type by name.
-type Core_OutboundsInfoServer = grpc.ServerStreamingServer[OutboundGroupList]
-
-func _Core_MainOutboundsInfo_Handler(srv interface{}, stream grpc.ServerStream) error {
-	m := new(hcommon.Empty)
-	if err := stream.RecvMsg(m); err != nil {
-		return err
-	}
-	return srv.(CoreServer).MainOutboundsInfo(m, &grpc.GenericServerStream[hcommon.Empty, OutboundGroupList]{ServerStream: stream})
-}
-
-// This type alias is provided for backwards compatibility with existing code that references the prior non-generic stream type by name.
-type Core_MainOutboundsInfoServer = grpc.ServerStreamingServer[OutboundGroupList]
-
 func _Core_GetSystemInfo_Handler(srv interface{}, ctx context.Context, dec func(interface{}) error, interceptor grpc.UnaryServerInterceptor) (interface{}, error) {
 	in := new(hcommon.Empty)
 	if err := dec(in); err != nil {
@@ -707,17 +514,6 @@ func _Core_GetSystemInfo_Handler(srv interface{}, ctx context.Context, dec func(
 	}
 	return interceptor(ctx, in, info, handler)
 }
-
-func _Core_GetSystemInfoStream_Handler(srv interface{}, stream grpc.ServerStream) error {
-	m := new(hcommon.Empty)
-	if err := stream.RecvMsg(m); err != nil {
-		return err
-	}
-	return srv.(CoreServer).GetSystemInfoStream(m, &grpc.GenericServerStream[hcommon.Empty, SystemInfo]{ServerStream: stream})
-}
-
-// This type alias is provided for backwards compatibility with existing code that references the prior non-generic stream type by name.
-type Core_GetSystemInfoStreamServer = grpc.ServerStreamingServer[SystemInfo]
 
 func _Core_Setup_Handler(srv interface{}, ctx context.Context, dec func(interface{}) error, interceptor grpc.UnaryServerInterceptor) (interface{}, error) {
 	in := new(SetupRequest)
@@ -791,42 +587,6 @@ func _Core_UrlTestConfig_Handler(srv interface{}, ctx context.Context, dec func(
 	return interceptor(ctx, in, info, handler)
 }
 
-func _Core_UrlTestConfigWarm_Handler(srv interface{}, ctx context.Context, dec func(interface{}) error, interceptor grpc.UnaryServerInterceptor) (interface{}, error) {
-	in := new(UrlTestConfigWarmRequest)
-	if err := dec(in); err != nil {
-		return nil, err
-	}
-	if interceptor == nil {
-		return srv.(CoreServer).UrlTestConfigWarm(ctx, in)
-	}
-	info := &grpc.UnaryServerInfo{
-		Server:     srv,
-		FullMethod: Core_UrlTestConfigWarm_FullMethodName,
-	}
-	handler := func(ctx context.Context, req interface{}) (interface{}, error) {
-		return srv.(CoreServer).UrlTestConfigWarm(ctx, req.(*UrlTestConfigWarmRequest))
-	}
-	return interceptor(ctx, in, info, handler)
-}
-
-func _Core_ReleaseWarmProbe_Handler(srv interface{}, ctx context.Context, dec func(interface{}) error, interceptor grpc.UnaryServerInterceptor) (interface{}, error) {
-	in := new(ReleaseWarmProbeRequest)
-	if err := dec(in); err != nil {
-		return nil, err
-	}
-	if interceptor == nil {
-		return srv.(CoreServer).ReleaseWarmProbe(ctx, in)
-	}
-	info := &grpc.UnaryServerInfo{
-		Server:     srv,
-		FullMethod: Core_ReleaseWarmProbe_FullMethodName,
-	}
-	handler := func(ctx context.Context, req interface{}) (interface{}, error) {
-		return srv.(CoreServer).ReleaseWarmProbe(ctx, req.(*ReleaseWarmProbeRequest))
-	}
-	return interceptor(ctx, in, info, handler)
-}
-
 func _Core_ChangeInhiveSettings_Handler(srv interface{}, ctx context.Context, dec func(interface{}) error, interceptor grpc.UnaryServerInterceptor) (interface{}, error) {
 	in := new(ChangeInhiveSettingsRequest)
 	if err := dec(in); err != nil {
@@ -845,24 +605,6 @@ func _Core_ChangeInhiveSettings_Handler(srv interface{}, ctx context.Context, de
 	return interceptor(ctx, in, info, handler)
 }
 
-func _Core_StartService_Handler(srv interface{}, ctx context.Context, dec func(interface{}) error, interceptor grpc.UnaryServerInterceptor) (interface{}, error) {
-	in := new(StartRequest)
-	if err := dec(in); err != nil {
-		return nil, err
-	}
-	if interceptor == nil {
-		return srv.(CoreServer).StartService(ctx, in)
-	}
-	info := &grpc.UnaryServerInfo{
-		Server:     srv,
-		FullMethod: Core_StartService_FullMethodName,
-	}
-	handler := func(ctx context.Context, req interface{}) (interface{}, error) {
-		return srv.(CoreServer).StartService(ctx, req.(*StartRequest))
-	}
-	return interceptor(ctx, in, info, handler)
-}
-
 func _Core_Stop_Handler(srv interface{}, ctx context.Context, dec func(interface{}) error, interceptor grpc.UnaryServerInterceptor) (interface{}, error) {
 	in := new(hcommon.Empty)
 	if err := dec(in); err != nil {
@@ -877,24 +619,6 @@ func _Core_Stop_Handler(srv interface{}, ctx context.Context, dec func(interface
 	}
 	handler := func(ctx context.Context, req interface{}) (interface{}, error) {
 		return srv.(CoreServer).Stop(ctx, req.(*hcommon.Empty))
-	}
-	return interceptor(ctx, in, info, handler)
-}
-
-func _Core_Restart_Handler(srv interface{}, ctx context.Context, dec func(interface{}) error, interceptor grpc.UnaryServerInterceptor) (interface{}, error) {
-	in := new(StartRequest)
-	if err := dec(in); err != nil {
-		return nil, err
-	}
-	if interceptor == nil {
-		return srv.(CoreServer).Restart(ctx, in)
-	}
-	info := &grpc.UnaryServerInfo{
-		Server:     srv,
-		FullMethod: Core_Restart_FullMethodName,
-	}
-	handler := func(ctx context.Context, req interface{}) (interface{}, error) {
-		return srv.(CoreServer).Restart(ctx, req.(*StartRequest))
 	}
 	return interceptor(ctx, in, info, handler)
 }
@@ -1025,42 +749,6 @@ func _Core_GenerateWarpConfig_Handler(srv interface{}, ctx context.Context, dec 
 	return interceptor(ctx, in, info, handler)
 }
 
-func _Core_GetSystemProxyStatus_Handler(srv interface{}, ctx context.Context, dec func(interface{}) error, interceptor grpc.UnaryServerInterceptor) (interface{}, error) {
-	in := new(hcommon.Empty)
-	if err := dec(in); err != nil {
-		return nil, err
-	}
-	if interceptor == nil {
-		return srv.(CoreServer).GetSystemProxyStatus(ctx, in)
-	}
-	info := &grpc.UnaryServerInfo{
-		Server:     srv,
-		FullMethod: Core_GetSystemProxyStatus_FullMethodName,
-	}
-	handler := func(ctx context.Context, req interface{}) (interface{}, error) {
-		return srv.(CoreServer).GetSystemProxyStatus(ctx, req.(*hcommon.Empty))
-	}
-	return interceptor(ctx, in, info, handler)
-}
-
-func _Core_SetSystemProxyEnabled_Handler(srv interface{}, ctx context.Context, dec func(interface{}) error, interceptor grpc.UnaryServerInterceptor) (interface{}, error) {
-	in := new(SetSystemProxyEnabledRequest)
-	if err := dec(in); err != nil {
-		return nil, err
-	}
-	if interceptor == nil {
-		return srv.(CoreServer).SetSystemProxyEnabled(ctx, in)
-	}
-	info := &grpc.UnaryServerInfo{
-		Server:     srv,
-		FullMethod: Core_SetSystemProxyEnabled_FullMethodName,
-	}
-	handler := func(ctx context.Context, req interface{}) (interface{}, error) {
-		return srv.(CoreServer).SetSystemProxyEnabled(ctx, req.(*SetSystemProxyEnabledRequest))
-	}
-	return interceptor(ctx, in, info, handler)
-}
-
 func _Core_LogListener_Handler(srv interface{}, stream grpc.ServerStream) error {
 	m := new(LogRequest)
 	if err := stream.RecvMsg(m); err != nil {
@@ -1151,28 +839,12 @@ var Core_ServiceDesc = grpc.ServiceDesc{
 			Handler:    _Core_UrlTestConfig_Handler,
 		},
 		{
-			MethodName: "UrlTestConfigWarm",
-			Handler:    _Core_UrlTestConfigWarm_Handler,
-		},
-		{
-			MethodName: "ReleaseWarmProbe",
-			Handler:    _Core_ReleaseWarmProbe_Handler,
-		},
-		{
 			MethodName: "ChangeInhiveSettings",
 			Handler:    _Core_ChangeInhiveSettings_Handler,
 		},
 		{
-			MethodName: "StartService",
-			Handler:    _Core_StartService_Handler,
-		},
-		{
 			MethodName: "Stop",
 			Handler:    _Core_Stop_Handler,
-		},
-		{
-			MethodName: "Restart",
-			Handler:    _Core_Restart_Handler,
 		},
 		{
 			MethodName: "SelectOutbound",
@@ -1203,14 +875,6 @@ var Core_ServiceDesc = grpc.ServiceDesc{
 			Handler:    _Core_GenerateWarpConfig_Handler,
 		},
 		{
-			MethodName: "GetSystemProxyStatus",
-			Handler:    _Core_GetSystemProxyStatus_Handler,
-		},
-		{
-			MethodName: "SetSystemProxyEnabled",
-			Handler:    _Core_SetSystemProxyEnabled_Handler,
-		},
-		{
 			MethodName: "Close",
 			Handler:    _Core_Close_Handler,
 		},
@@ -1223,21 +887,6 @@ var Core_ServiceDesc = grpc.ServiceDesc{
 		{
 			StreamName:    "CoreInfoListener",
 			Handler:       _Core_CoreInfoListener_Handler,
-			ServerStreams: true,
-		},
-		{
-			StreamName:    "OutboundsInfo",
-			Handler:       _Core_OutboundsInfo_Handler,
-			ServerStreams: true,
-		},
-		{
-			StreamName:    "MainOutboundsInfo",
-			Handler:       _Core_MainOutboundsInfo_Handler,
-			ServerStreams: true,
-		},
-		{
-			StreamName:    "GetSystemInfoStream",
-			Handler:       _Core_GetSystemInfoStream_Handler,
 			ServerStreams: true,
 		},
 		{

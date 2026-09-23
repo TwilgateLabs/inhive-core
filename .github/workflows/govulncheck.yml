@@ -80,7 +80,7 @@ jobs:
             exit 1
           fi
           MODULES='./... github.com/sagernet/sing-box/... github.com/twilgate/xray2sing/...'
-          EXCL='(inhive-core/cmd/bydll|inhive-core/platform/desktop)'
+          EXCL='(inhive-core/platform/desktop)'
           EXCL="$EXCL|(sing-box/cmd/sing-box|sing-box/cmd/internal/app_store_connect|sing-box/cmd/internal/update_apple_version|sing-box/cmd/internal/merge_apple_xcframework|sing-box/common/geoip|sing-box/protocol/psiphon)"
           # (tailscale/derp больше не исключены — сабмодули бампнуты 2026-09-15)
 

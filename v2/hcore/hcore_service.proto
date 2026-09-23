@@ -9,10 +9,7 @@ import "v2/hcore/hcore.proto";
 service Core {
   rpc Start (StartRequest) returns (CoreInfoResponse);
   rpc CoreInfoListener (hcommon.Empty) returns (stream CoreInfoResponse);
-  rpc OutboundsInfo (hcommon.Empty) returns (stream OutboundGroupList);
-  rpc MainOutboundsInfo (hcommon.Empty) returns (stream OutboundGroupList);
   rpc GetSystemInfo (hcommon.Empty) returns (SystemInfo);
-  rpc GetSystemInfoStream (hcommon.Empty) returns (stream SystemInfo);
   rpc Setup (SetupRequest) returns (hcommon.Response);
   rpc Parse (ParseRequest) returns (ParseResponse);
   // Wave 13D — see BootstrapFetchRequest in hcore.proto for the full contract.
@@ -20,17 +17,8 @@ service Core {
   // Honest per-server ping via a side-instance — see UrlTestConfigRequest in
   // hcore.proto. Works while the VPN is disconnected, no main-box dependency.
   rpc UrlTestConfig (UrlTestConfigRequest) returns (UrlTestConfigResponse);
-  // Ping v2 — warm persistent probe-instance. One long-lived side-instance holds
-  // all servers' outbounds and is reused across probe cycles. See
-  // UrlTestConfigWarmRequest in hcore.proto. Same disconnected moat as UrlTestConfig.
-  rpc UrlTestConfigWarm (UrlTestConfigWarmRequest) returns (UrlTestConfigWarmResponse);
-  // Tear down a warm probe instance early (server-list screen closed).
-  rpc ReleaseWarmProbe (ReleaseWarmProbeRequest) returns (hcommon.Response);
   rpc ChangeInhiveSettings (ChangeInhiveSettingsRequest) returns (CoreInfoResponse);
-  //rpc GenerateConfig (GenerateConfigRequest) returns (GenerateConfigResponse);
-  rpc StartService (StartRequest) returns (CoreInfoResponse);
   rpc Stop (hcommon.Empty) returns (CoreInfoResponse);
-  rpc Restart (StartRequest) returns (CoreInfoResponse);
   rpc SelectOutbound (SelectOutboundRequest) returns (hcommon.Response);
   // Hot-add: добавить outbound в живой box + в селекторы без рестарта
   // (кросс-подписочный dual без реконнекта). См. AddOutboundRequest.
@@ -44,10 +32,13 @@ service Core {
   // proxy port — на iOS (двухпроцессная арх) тот не работал.
   rpc SpeedTest (SpeedTestRequest) returns (SpeedTestResponse);
   rpc GenerateWarpConfig (GenerateWarpConfigRequest) returns (WarpGenerationResponse);
-  rpc GetSystemProxyStatus (hcommon.Empty) returns (SystemProxyStatus);
-  rpc SetSystemProxyEnabled (SetSystemProxyEnabledRequest) returns (hcommon.Response);
   rpc LogListener (LogRequest) returns (stream LogMessage);
   rpc Close (CloseRequest) returns (hcommon.Empty);
+  // RESERVED(2026-09-23, Nikita): SwitchMode / ModeStateListener have no caller in
+  // ../app/lib today and are kept on purpose — olcrtc Mode 2 is parked, not dropped.
+  // Do not delete; see memory project_olcrtc_utproto_disabled_2026_09_06 and
+  // project_olcrtc_implementation.
+  //
   // Phase 2 — generic mode switching.
   //
   // SwitchMode records the new desired mode + broadcasts an ack event on the

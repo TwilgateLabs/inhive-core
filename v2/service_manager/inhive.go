@@ -4,18 +4,14 @@ import (
 	"github.com/sagernet/sing-box/option"
 )
 
+// Регистраторов нет: Register / RegisterPreService снесены 2026-09-23 (0 вызовов
+// в core и app — наследие hiddify-расширений). Списки ниже всегда пусты, так что
+// хуки Start/Dispose/OnMainService* сейчас no-op. Пакет держится только ради
+// этих вызовов из hcore; снос целиком — отдельным заходом.
 var (
 	services    = []HService{}
 	preservices = []HService{}
 )
-
-func RegisterPreService(service HService) {
-	preservices = append(preservices, service)
-}
-
-func Register(service HService) {
-	services = append(services, service)
-}
 
 func StartServices() error {
 	DisposeServices()

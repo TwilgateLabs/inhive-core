@@ -8,16 +8,16 @@ RPC or protocol*. The *why* lives in memory (`feedback_arch_*`,
 in `../app/docs/foundation/2026-09-19-audit-and-program.md` (§3.4, §4, §5.5).
 Machine-checked rules live in `hygiene/` — they win over this text.
 
-Line numbers are as of 2026-09-19; confirm with `grep -n` before relying on one.
+Line numbers are as of 2026-09-23; confirm with `grep -n` before relying on one.
 
 ## 1. Layout and dependency direction
 
 ```
 core/
-  v2/hcore/            gRPC service `Core` + lifecycle: Start/Stop/Restart, UrlTest*, warm probe,
-                       log stream, system proxy, speed test. 40 files around a process-wide `static`
-                       (static_data.go). grpc_server.go: Setup (:41), StartGrpcServerByMode (:214),
-                       RegisterCoreServer (:178 / :286).
+  v2/hcore/            gRPC service `Core` + lifecycle: Start/Stop, UrlTest*, per-server ping
+                       (url_test_config.go + probe_helpers.go), log stream, speed test. Files around a
+                       process-wide `static` (static_data.go). grpc_server.go: Setup (:41),
+                       StartGrpcServerByMode (:175), RegisterCoreServer (:247).
   v2/config/           sing-box config builder from InhiveOptions: builder_*.go, outbound.go
                        (patchOutbound :108, patchEndpoint :98), parser.go (patchConfigOptions :229), warp.go
                        InhiveOptions itself is a hand-written Go struct (inhive_option.go:14), not generated
@@ -28,7 +28,7 @@ core/
                        (ray2sing/convert.go registries, ray2sing_test/ corpus)
   sing-box/            vendored sing-box fork (upstream.toml entry `sing-box`, replace/* forks below it)
   platform/            gomobile (mobile/) and desktop (DLL) entry points over hcore
-  cmd/                 CLI (cmd_inhive_run.go: default listen 127.0.0.1:17078 — the app does NOT use this)
+                       (the core CLI `cmd/` + `cmd/bydll` was deleted 2026-09-23 — there is no CLI)
   hygiene/             fitness tests (Go), read the source tree only
   scripts/             build wrappers (build-dll-windows.ps1, verify-aar-abi.ps1, check-upstream-drift.py…)
   Makefile             BASE_TAGS (:24) — the single source of truth for build tags; protos target (:86)
@@ -38,7 +38,7 @@ core/
 Dependency direction (arrows = may import):
 
 ```
-platform/, cmd/  →  v2/hcore  →  v2/config  →  v2/hcommon, v2/db
+platform/        →  v2/hcore  →  v2/config  →  v2/hcommon, v2/db
                                     ↓
                                  xray2sing (module, via go.mod replace)
                                     ↓
@@ -56,15 +56,15 @@ platform/, cmd/  →  v2/hcore  →  v2/config  →  v2/hcommon, v2/db
 | Kind | Where (file:line) |
 |---|---|
 | RPC surface | `v2/hcore/hcore_service.proto:9` `service Core` (+ request/response messages in `hcore.proto`) |
-| RPC implementation | `func (s *CoreService) <Rpc>` — one method per RPC, grouped by file: `commands.go` (SelectOutbound :199, AddOutbound :249, UrlTest :417, SwitchMode :503…), `start.go:24`, `stop.go:12`, `restart.go:13`, `setup.go:24`, `url_test_config.go:47`, `warm_probe.go:297`, `speedtest.go:40`, `logproto.go:33`, `bootstrap_fetch.go:40`, `buildconfighelper.go:86/:135`, `warp.go:11`, `pause.go:54`, `proxy_info.go:182` |
-| RPC codegen (Go) | `Makefile:86` target `protos` (protoc-gen-go + grpc; `.pb.go` next to the `.proto`) |
-| RPC codegen (Dart) | `../app/lib/generated/proto/core_generated/` (protoc dart plugin, invoked by hand today) |
-| RPC consumer | `../app/lib/core/bridge.dart` (gRPC channel 127.0.0.1:18078, `bridge.dart:150`) |
+| RPC implementation | `func (s *CoreService) <Rpc>` — one method per RPC, grouped by file: `commands.go` (GetSystemInfo :138, SelectOutbound :145, AddOutbound :195, UrlTest :363, SwitchMode :453…), `start.go:24`, `stop.go:12`, `setup.go:24`, `url_test_config.go:47`, `speedtest.go:40`, `logproto.go:33`, `coreinfo.go:28`, `bootstrap_fetch.go:40`, `buildconfighelper.go:87/:136`, `warp.go:11`, `pause.go:54` |
+| RPC codegen (Go) | protoc v34.1 (`libprotoc 34.1`, header says `v7.34.1`) + protoc-gen-go v1.36.11 + protoc-gen-go-grpc v1.6.1, from `core/`: `protoc --go_opt=paths=source_relative --go-grpc_opt=paths=source_relative --go_out=./ --go-grpc_out=./ v2/hcore/hcore.proto v2/hcore/hcore_service.proto`. The `Makefile:83` target `protos` is stale (it still globs a non-existent `extension/` and installs `protoc-gen-doc@latest`) — do not rely on it |
+| RPC codegen (Dart) | `../app/lib/generated/proto/core_generated/generated/` — protoc_plugin 22.4.0 (`dart pub global activate protoc_plugin`): `protoc --plugin=protoc-gen-dart=<pub-cache>/bin/protoc-gen-dart.bat --dart_out=grpc:<tmp> v2/hcommon/common.proto v2/hcore/hcore.proto v2/hcore/hcore_service.proto`, then `dart format <tmp>` **outside** `app/` (default 80 columns — the checked-in hcore files are formatted that way, not with the app's 120) and copy `v2/hcore/*` over. Verified byte-identical to the checked-in files on 2026-09-23 |
+| RPC consumer | `../app/lib/core/bridge.dart` (gRPC channel 127.0.0.1:18078, `bridge.dart:154`) |
 | Share-link parser | `xray2sing/ray2sing/convert.go:19` `configTypes` (single outbound), `:65` `endpointParsers` (WireGuard-family endpoints), `:78` `pairParsers` (one link → main + helper outbound) |
 | Per-protocol config patch | `v2/config/outbound.go:108` `patchOutbound` (called from `builder_outbound.go:28`), `outbound.go:98` `patchEndpoint` (`builder_outbound.go:79/:112`) |
 | Ping probe target | `v2/hcore/url_test_config.go:212` `probeTag` (first non-group outbound / first endpoint) |
-| Build tags | `Makefile:24` `BASE_TAGS`, `:45` `IOS_ADD_TAGS`, `:50` `WINDOWS_ADD_TAGS`. Scripts and CI read them with a regex (`.github/workflows/build.yml:108`); never copy the list |
-| Packages excluded from `go vet` | `.github/workflows/build.yml:137` (core) and `:150` (sing-box) `EXCL` — with an assert that nothing else fails |
+| Build tags | `Makefile:23` `BASE_TAGS`, `:44` `IOS_ADD_TAGS`, `:48` `WINDOWS_ADD_TAGS`. Scripts and CI read them with a regex (`.github/workflows/build.yml:108`); never copy the list |
+| Packages excluded from `go vet` | `.github/workflows/build.yml:136` (core) and `:149` (sing-box) `EXCL` — with an assert that nothing else fails |
 | Vendored versions | `upstream.toml` (`sing-box` = v1.13.21 @ 628cb31f, verified 2026-09-14); check with `python3 scripts/check-upstream-drift.py` **before** any diff against upstream |
 
 ## 3. How to add
@@ -87,8 +87,8 @@ Do not touch: `static_data.go`, `grpc_server.go` (registration is generated), bu
 beyond the one new method.
 
 Planned gate: `hygiene/rpc_surface_test` — an RPC with no consumer in `../app/lib` and no
-`// RESERVED(<date>, <who>): <why>` marker in the proto is red. `SwitchMode` / `ModeStateListener` are the
-first RESERVED candidates (see §5).
+`// RESERVED(<date>, <who>): <why>` marker in the proto is red. `SwitchMode` / `ModeStateListener` carry
+that marker since 2026-09-23 (see §5); every other RPC in `hcore_service.proto` has a caller in the app.
 
 ### 3.2 A protocol
 
@@ -99,7 +99,7 @@ first RESERVED candidates (see §5).
    `patchOutbound` (`v2/config/outbound.go:108`; target: a `map[type]patchFn` table instead of an if-chain).
 3. Probe: confirm `probeTag` (`url_test_config.go:212`) picks the right outbound; add
    `url_test_config_<proto>_test.go` like the awg/mieru/naive ones.
-4. Build tag: if the upstream protocol is behind a tag, add it to `BASE_TAGS` in `Makefile:24` **only**.
+4. Build tag: if the upstream protocol is behind a tag, add it to `BASE_TAGS` in `Makefile:23` **only**.
    `build.yml` and the PowerShell wrappers read it from there.
 5. Vendored code: if the protocol comes with a fork or a new `replace`, add the `upstream.toml` entry in the
    same commit (path, upstream, tag, commit, divergences).
@@ -123,7 +123,10 @@ in the `v2/config/builder_*.go` that owns the section → mirror on the app side
 
 * `hygiene/platform_gate_ratchet_test.go` — every `runtime.GOOS` / `C.IsIos` style gate carries a
   “why these OSes” comment; baseline only goes down. Twin of the app's test.
-* Planned (`hygiene/`): `rpc_surface_test`, `file_size_ratchet` (warm_probe 869, commands 591…),
+* `hygiene/xray2sing_cli_deps.go` (build tag `tools`, never compiled) — keeps `spf13/cobra` in core's
+  `go.mod`: `xray2sing/cmd` needs it and is vetted from `core/`, and after the core CLI was deleted
+  `go mod tidy` (`make prepare`) would drop it. Delete together with `xray2sing/cmd`.
+* Planned (`hygiene/`): `rpc_surface_test`, `file_size_ratchet` (commands 541, url_test_config 240…),
   `build_tags_single_source` (a second tag list in ps1/CI is red), `no_root_build_scripts`
   (the 8 untracked `build-aar*.ps1` copies at the root were deleted 2026-09-20; only the canonical
   `build-aar6.ps1` is left, and it still belongs in `scripts/`), unit tests for `v2/db`.
@@ -139,27 +142,30 @@ in the `v2/config/builder_*.go` that owns the section → mirror on the app side
 
 From the audit §5.5 — keep, mark with `// RESERVED(<date>, <who>): <why>` where a gate would otherwise flag it:
 
-* olcrtc / UTProto branches in hcore (`static_data.go:75-82` startCancel, `start.go`, `stop.go`,
-  `url_test_config.go`, `warm_probe.go`, `commands.go`, build tag `with_olcrtc`) — memory
+Items marked † carry a `RESERVED(2026-09-23, Nikita)` comment in the code (grep `RESERVED(2026-09-23`).
+
+* † olcrtc / UTProto branches in hcore (`static_data.go` startCancel, `start.go`, `stop.go`,
+  `url_test_config.go`, `commands.go`, build tag `with_olcrtc`) — memory
   `project_olcrtc_utproto_disabled_2026_09_06`: “nothing deleted”.
-* `SwitchMode` / `ModeStateListener` (+ `urltest_watcher.go`, `currentMode` / `modeStateObserver`) —
-  `project_olcrtc_implementation` “do not touch”; needs the RESERVED marker in the proto.
-* DAITA / maybenot: `daita_machines.go`, `initDaita` (`buildconfighelper.go:61-83`), `daita-*` options,
+* † `SwitchMode` / `ModeStateListener` (+ `urltest_watcher.go`, `currentMode` / `modeStateObserver`) —
+  `project_olcrtc_implementation` “do not touch”; RESERVED marker in `hcore_service.proto` and `commands.go`.
+* † DAITA / maybenot: `daita_machines.go`, `initDaita` (`buildconfighelper.go`), `daita-*` options,
   the submodule, `scripts/build_libmaybenot_ios.sh`.
 * `bootstrap_fetch.go` on the legacy side instance (`project_ping_audit_2026_07_12`: deliberate).
 * iOS scripts and targets: `ios_preflight.sh`, `fix_xcframework_ios.sh`, `verify-native-freshness.sh`,
-  `Makefile:186-218`, `Info.plist`.
-* libcronet / naive pipeline: `Makefile:250-290`, `verify-cronet-pin.ps1`, CI naive liveness
-  (`build.yml:249-284`).
+  `Makefile:185-213` (`ios`, `ios-deploy`), `Info.plist`.
+* libcronet / naive pipeline: `Makefile:226-289` (`windows-naive-lib`, `windows-amd64`), `verify-cronet-pin.ps1`, CI naive liveness
+  (`build.yml:247-283`).
 * `xray2sing` as a whole (out of scope for the cut).
-* mTLS branches for `SetupMode` 1/2 in `grpc_server.go:202-290`.
+* mTLS branches for `SetupMode` 1/2 in `grpc_server.go:175-269` (`StartGrpcServerByMode`).
 * Platform-specific tuning that is not to be unified: Android gvisor, iOS `GOMAXPROCS`/`SetMemoryLimit`,
   `DisablePathMTUDiscovery`; `uploadBudget` / `streamSlots` (do not revive).
 
 ## 6. Facts that are often misremembered
 
-* The app connects on **18078**; `17078` appears only in `cmd/` and `hcore/standalone.go:195` as the CLI
-  default (and in old CHANGELOG/SECURITY lines). `SetupMode=4` = `GRPC_NORMAL_INSECURE` on loopback; the
+* The app connects on **18078**. `17078` was the CLI default (`cmd/`, `hcore/standalone.go`), both
+  deleted 2026-09-23; it survives only in old CHANGELOG lines, a comment in `platform/mobile/mobile.go:43`
+  and `SECURITY.md:80` (stale). `SetupMode=4` = `GRPC_NORMAL_INSECURE` on loopback; the
   lack of auth on that port is an open question (§11 of the audit), not an oversight to “fix” in passing.
 * Vendored sing-box is **v1.13.21** (`upstream.toml`), sing 0.8 line; the 1.14 / sing 0.9 move is a
   separate project (re-fork as a patch series, not a merge).

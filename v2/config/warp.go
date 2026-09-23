@@ -19,18 +19,6 @@ import (
 	T "github.com/sagernet/sing-box/option"
 )
 
-type SingboxConfig struct {
-	Type          string   `json:"type"`
-	Tag           string   `json:"tag"`
-	Server        string   `json:"server"`
-	ServerPort    int      `json:"server_port"`
-	LocalAddress  []string `json:"local_address"`
-	PrivateKey    string   `json:"private_key"`
-	PeerPublicKey string   `json:"peer_public_key"`
-	Reserved      []int    `json:"reserved"`
-	MTU           int      `json:"mtu"`
-}
-
 func wireGuardToSingbox(wgConfig WarpWireguardConfig, server string, port uint16) (*T.Endpoint, error) {
 	clientID, _ := base64.StdEncoding.DecodeString(wgConfig.ClientID)
 	if len(clientID) < 2 {

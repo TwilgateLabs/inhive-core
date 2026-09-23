@@ -3,7 +3,6 @@ PRODUCT_NAME=inhive-core
 BASENAME=$(PRODUCT_NAME)
 BINDIR=bin
 LIBNAME=$(PRODUCT_NAME)
-CLINAME=InhiveCli
 
 BRANCH=$(shell git branch --show-current)
 # 2>/dev/null + single-word fallback: старое "unknown version" содержало ПРОБЕЛ и,
@@ -26,7 +25,7 @@ BASE_TAGS=with_gvisor,with_quic,with_wireguard,with_utls,with_clash_api,with_grp
 # CI (.github/workflows/build.yml) читает этот список sed'ом так же, как
 # BASE_TAGS — не дублировать его строкой ни в workflow, ни в скриптах.
 # Что внутри и что снаружи (проверено по факту 2026-07-19):
-#   v2/ cmd/ platform/ hygiene/ — наш код core-модуля;
+#   v2/ platform/ hygiene/ — наш код core-модуля (cmd/ снесён 2026-09-23);
 #   xray2sing/ — тоже НАШ (upstream.toml: «не форк — оригинальный код»,
 #     Xray для него лишь семантический эталон), мержей апстрима не бывает;
 #   sing-box/ НЕ входит НАМЕРЕННО: вендоренный форк, регулярно
@@ -35,7 +34,7 @@ BASE_TAGS=with_gvisor,with_quic,with_wireguard,with_utls,with_clash_api,with_grp
 #   .claude/ не входит: служебный каталог, не собирается.
 # *.pb.go внутри FMT_DIRS исключаются фильтром в fmt/fmt-check: их владелец —
 # protoc-gen-go (цель protos), ручная правка перезаписывается генератором.
-FMT_DIRS=./v2 ./cmd ./platform ./hygiene ./xray2sing
+FMT_DIRS=./v2 ./platform ./hygiene ./xray2sing
 TAGS=$(BASE_TAGS)
 IOS_TAGS=$(BASE_TAGS)
 # with_dhcp убран из iOS-тагов (2026-07-02): DHCP-DNS discovery в iOS NE не
@@ -43,7 +42,6 @@ IOS_TAGS=$(BASE_TAGS)
 # сам не эмитит, а dhcp://-сервер из чужого конфига получит понятную ошибку
 # стаба вместо тихо неработающего резолвера.
 IOS_ADD_TAGS=with_low_memory
-MACOS_ADD_TAGS=with_dhcp
 # make ios IOS_TARGET=ios — device-only сборка (без симуляторного слайса:
 # он ~241MB из 362MB xcframework и удваивает время сборки).
 IOS_TARGET ?= ios,iossimulator
@@ -74,15 +72,13 @@ WINDOWS_ADD_TAGS=with_purego
 #   Версий ДВЕ, и обе объявлены как "unknown":
 #     sing-box/constant.Version                    — апстримная (clashapi, libbox)
 #     v2/hcommon/constants.Version                 — наша, инхайвовская
-#   Вторая сегодня читается только в cmd/cmd_version.go ("inhive-core version
-#   <...> sing-box version <...>"), но проставлять надо обе: иначе `InhiveCli
-#   version` рапортует "unknown" ровно там, куда смотрят при разборе инцидента.
+#   Вторую читал только CLI ядра (cmd/cmd_version.go), снесённый 2026-09-23;
+#   сейчас её не читает никто. -X безвреден и дублируется в
+#   scripts/build-dll-windows.ps1 — снимать оба места одним коммитом.
 VERSION_LDFLAGS=-X github.com/sagernet/sing-box/constant.Version=$(VERSION) -X github.com/twilgate/inhive-core/v2/hcommon/constants.Version=$(VERSION) -X internal/godebug.defaultGODEBUG=multipathtcp=0
 LDFLAGS=-w -s -checklinkname=0 -buildid= $(VERSION_LDFLAGS)
 GOBUILDLIB=CGO_ENABLED=1 go build -trimpath -ldflags="$(LDFLAGS)" -buildmode=c-shared
-GOBUILDSRV=CGO_ENABLED=1 go build -ldflags="$(LDFLAGS)" -trimpath -tags $(TAGS)
 
-CRONET_DIR=./cronet
 .PHONY: protos
 protos:
 	go install github.com/pseudomuto/protoc-gen-doc/cmd/protoc-gen-doc@latest
@@ -285,122 +281,19 @@ windows-amd64: prepare windows-naive-lib
 	# пином go.mod и работает без кросс-тулчейна.
 	mkdir -p $(APP_CORE_BIN)
 	cp -f $(BINDIR)/$(LIBNAME).dll $(APP_CORE_BIN)/$(LIBNAME).dll
-	echo "core built, now building cli" 
-	ls -R $(BINDIR)/
-	go install -mod=readonly github.com/akavel/rsrc@latest ||echo "rsrc error in installation"
-	go run ./cli tunnel exit
-	cp $(BINDIR)/$(LIBNAME).dll ./$(LIBNAME).dll
-	$$(go env GOPATH)/bin/rsrc -ico ./assets/inhive-cli.ico -o ./cmd/bydll/cli.syso ||echo "rsrc error in syso"
-	env GOOS=windows GOARCH=amd64 CC=x86_64-w64-mingw32-gcc CGO_LDFLAGS="$(LIBNAME).dll" $(GOBUILDSRV) -o $(BINDIR)/$(CLINAME).exe ./cmd/bydll
-	rm ./*.dll
-	if [ ! -f $(BINDIR)/$(LIBNAME).dll -o ! -f $(BINDIR)/$(CLINAME).exe ]; then \
-		echo "Error: $(LIBNAME).dll or $(CLINAME).exe not built"; \
+	if [ ! -f $(BINDIR)/$(LIBNAME).dll ]; then \
+		echo "Error: $(LIBNAME).dll not built"; \
 		exit 1; \
 	fi
 
-# 	make webui
-	
-
-
-
-cronet-%:
-	$(MAKE) ARCH=$* build-cronet
-
-build-cronet:
-# 	rm -rf $(CRONET_DIR)
-	git init $(CRONET_DIR) || echo "dir exist"
-	cd $(CRONET_DIR) && \
-	git remote add origin https://github.com/sagernet/cronet-go.git ||echo "remote exist"; \
-	git fetch --depth=1 origin $(CRONET_GO_VERSION) && \
-	git checkout FETCH_HEAD && \
-	git submodule update --init --recursive --depth=1 && \
-	if [ "$${VARIANT}" = "musl" ]; then \
-		go run ./cmd/build-naive --target=linux/$(ARCH) --libc=musl download-toolchain && \
-		go run ./cmd/build-naive --target=linux/$(ARCH) --libc=musl env > cronet.env; \
-	else \
-		go run ./cmd/build-naive --target=linux/$(ARCH) download-toolchain && \
-		go run ./cmd/build-naive --target=linux/$(ARCH) env > cronet.env; \
-	fi
-
-################################
-# Generic Linux Builder
-################################
-linux-%:
-	$(MAKE) ARCH=$* build-linux
-
-define load_cronet_env
-set -a; \
-while IFS= read -r line; do \
-    key=$${line%%=*}; \
-    value=$${line#*=}; \
-    export "$$key=$$value"; \
-	echo "$$key=$$value"; \
-done < $(CRONET_DIR)/cronet.env; \
-set +a;
-endef
-
-build-linux: prepare
-	mkdir -p $(BINDIR)/lib
-
-	$(load_cronet_env)
-	FINAL_TAGS=$(TAGS); \
-	if [ "$${VARIANT}" = "musl" ]; then \
-		FINAL_TAGS=$${FINAL_TAGS},with_musl; \
-	elif [ "$${VARIANT}" = "purego" ]; then \
-		FINAL_TAGS="$${FINAL_TAGS},with_purego"; \
-	fi; \
-	echo "FinalTags: $$FINAL_TAGS"; \
-	GOOS=linux GOARCH=$(ARCH) $(GOBUILDLIB) -tags $${FINAL_TAGS} -o $(BINDIR)/lib/$(LIBNAME).so ./platform/desktop ;\
-	
-	echo "Core library built, now building CLI with CGO linking to core library"
-	mkdir lib
-	cp $(BINDIR)/lib/$(LIBNAME).so ./lib/$(LIBNAME).so
-
-	GOOS=linux GOARCH=$(ARCH) CGO_LDFLAGS="./lib/$(LIBNAME).so -Wl,-rpath,\$$ORIGIN/lib -fuse-ld=lld" $(GOBUILDSRV) -o $(BINDIR)/$(CLINAME) ./cmd/bydll
-	
-	rm -rf ./lib/*.so
-	chmod +x $(BINDIR)/$(CLINAME)
-	if [ ! -f $(BINDIR)/lib/$(LIBNAME).so -o ! -f $(BINDIR)/$(CLINAME) ]; then \
-		echo "Error: $(LIBNAME).so or $(CLINAME) not built"; \
-		ls -R $(BINDIR); \
-		exit 1; \
-	fi
-# 	make webui
-
-
-linux-custom: prepare  install_cronet
-	mkdir -p $(BINDIR)/
-	#env GOARCH=mips $(GOBUILDSRV) -o $(BINDIR)/$(CLINAME) ./cmd/
-	$(load_cronet_env)
-	go build -ldflags="$(LDFLAGS)" -trimpath -tags $(TAGS) -o $(BINDIR)/$(CLINAME) ./cmd/main
-	chmod +x $(BINDIR)/$(CLINAME)
-
-macos-amd64:
-	env GOOS=darwin GOARCH=amd64 CGO_CFLAGS="-mmacosx-version-min=10.11 -O2" CGO_LDFLAGS="-mmacosx-version-min=10.11 -O2 -lpthread" CGO_ENABLED=1 go build -trimpath -tags $(TAGS),$(MACOS_ADD_TAGS) -buildmode=c-shared -o $(BINDIR)/$(LIBNAME)-amd64.dylib ./platform/desktop
-macos-arm64:
-	env GOOS=darwin GOARCH=arm64 CGO_CFLAGS="-mmacosx-version-min=10.11 -O2" CGO_LDFLAGS="-mmacosx-version-min=10.11 -O2 -lpthread" CGO_ENABLED=1 go build -trimpath -tags $(TAGS),$(MACOS_ADD_TAGS) -buildmode=c-shared -o $(BINDIR)/$(LIBNAME)-arm64.dylib ./platform/desktop
-	
-macos: prepare macos-amd64 macos-arm64 
-	
-	lipo -create $(BINDIR)/$(LIBNAME)-amd64.dylib $(BINDIR)/$(LIBNAME)-arm64.dylib -output $(BINDIR)/$(LIBNAME).dylib
-	cp $(BINDIR)/$(LIBNAME).dylib ./$(LIBNAME).dylib 
-	mv $(BINDIR)/$(LIBNAME)-arm64.h $(BINDIR)/desktop.h 
-	# env GOOS=darwin GOARCH=amd64 CGO_CFLAGS="-mmacosx-version-min=10.15" CGO_LDFLAGS="-mmacosx-version-min=10.15" CGO_LDFLAGS="bin/$(LIBNAME).dylib"  CGO_ENABLED=1 $(GOBUILDSRV)  -o $(BINDIR)/$(CLINAME) ./cmd/bydll
-	# rm ./$(LIBNAME).dylib
-	# chmod +x $(BINDIR)/$(CLINAME)
+# Linux/macOS (linux-*, build-linux, linux-custom, cronet-*/build-cronet,
+# macos-*) и CLI InhiveCli снесены 2026-09-23 вместе с наследием hiddify ops
+# (installer.sh, release/config, platform/wrt, .fpm_*, .github/change_version.sh):
+# ни одна из этих целей не собиралась и не поставлялась. Порты Linux/macOS
+# придут в 4.9/5.0 со своими скриптами (project_linux_port_readiness_2026_07_19).
 
 prepare: 
 	go mod tidy
 
 clean:
 	rm $(BINDIR)/*
-
-
-
-
-.PHONY: release
-release: # Create a new tag for release.	
-	@bash -c '.github/change_version.sh'
-	
-
-

@@ -21,7 +21,7 @@ func TestUrlTestConfig_Direct(t *testing.T) {
 	// translator that used to inject a working DNS is gone, so a bare config would
 	// fall back to the system resolver. Real app ping configs carry the multi-DoH
 	// directDns fan; mirror it with a single direct DoH-over-IP so `direct` resolves
-	// gstatic. (Matches testProbeDNS in warm_probe_test.go.)
+	// gstatic.
 	cfg := `{"dns":{"servers":[{"tag":"dns-direct","type":"https","server":"1.1.1.1","detour":"direct"}],"final":"dns-direct"},` +
 		`"outbounds":[{"type":"direct","tag":"t"},{"type":"direct","tag":"direct"}]}`
 	resp, err := (&CoreService{}).UrlTestConfig(context.Background(), &UrlTestConfigRequest{

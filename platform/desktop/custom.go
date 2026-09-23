@@ -152,24 +152,6 @@ func stop() (result *C.char) {
 	return emptyOrErrorC(err)
 }
 
-//export restart
-func restart(configPath *C.char, disableMemoryLimit bool) (result *C.char) {
-	defer func() {
-		if r := recover(); r != nil {
-			msg := fmt.Sprintf("restart panic: %v\n%s", r, string(debug.Stack()))
-			log.Error(msg)
-			result = C.CString(msg)
-		}
-	}()
-	ctx := libbox.BaseContext(nil)
-	_, err := hcore.Restart(ctx, &hcore.StartRequest{
-		ConfigPath:             C.GoString(configPath),
-		EnableOldCommandServer: true,
-		DisableMemoryLimit:     bool(disableMemoryLimit),
-	})
-	return emptyOrErrorC(err)
-}
-
 //export GetServerPublicKey
 func GetServerPublicKey() (result *C.char) {
 	defer func() {

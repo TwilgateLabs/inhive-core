@@ -22,6 +22,8 @@ func Stop() (coreResponse *CoreInfoResponse, err error) {
 		coreResponse, err = errorWrapper(MessageType_UNEXPECTED_ERROR, recovered_err)
 	})
 
+	// RESERVED(2026-09-23, Nikita): olcrtc-ветка — не удалять, см. project_olcrtc_utproto_disabled_2026_09_06 / project_olcrtc_implementation.
+	//
 	// Кроссплатформенная отмена connect: прерываем идущий блокирующий старт
 	// (olcrtc primary awaitReady, до ~30с) ДО взятия static.lock — иначе Stop
 	// повиснет за StartService, который держит lock весь старт. No-op если старта

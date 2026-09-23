@@ -4,15 +4,12 @@ package hcore
 import (
 	"context"
 	"fmt"
-	"io"
 	"net"
-	"net/http"
 	"net/netip"
 	"os"
 	"time"
 
 	"github.com/twilgate/inhive-core/v2/config"
-	"golang.org/x/net/proxy"
 
 	"github.com/sagernet/sing-box/adapter"
 	C "github.com/sagernet/sing-box/constant"
@@ -111,18 +108,6 @@ func sideInstanceContext(serviceCtx context.Context) context.Context {
 	return ctx
 }
 
-func RunInstanceString(ctx context.Context, inhiveSettings *config.InhiveOptions, proxiesInput string) (*InhiveInstance, error) {
-	if inhiveSettings == nil {
-		inhiveSettings = config.DefaultInhiveOptions()
-	}
-
-	singconfigs, err := config.ParseConfig(ctx, &config.ReadOptions{Content: proxiesInput}, true, inhiveSettings, false)
-	if err != nil {
-		return nil, err
-	}
-	return RunInstance(ctx, inhiveSettings, singconfigs)
-}
-
 // RunInstanceRaw brings up a side-instance from a FULLY-BUILT sing-box config
 // (the app's own buildMultiServerConfig / buildSingboxConfig output) WITHOUT
 // running it through the legacy hiddify InhiveOptions translator (config.BuildConfig
@@ -163,27 +148,12 @@ func RunInstanceRaw(ctx context.Context, opts *option.Options) (instance *Inhive
 // shows blank, never a red ×.
 const bringUpBudget = 8 * time.Second
 
-func RunInstance(ctx context.Context, inhiveSettings *config.InhiveOptions, singconfig *option.Options) (instance *InhiveInstance, err error) {
-	defer config.RecoverPanicToError("RunInstance", func(panicErr error) { err = panicErr })
-	hservice, err := runInstanceCore(ctx, func(serviceCtx, bringUpCtx context.Context) (*InhiveInstance, error) {
-		return runInstanceCoreBlocking(serviceCtx, bringUpCtx, inhiveSettings, singconfig)
-	})
-	if err != nil {
-		return nil, err
-	}
-	// Warm-up probe — verifies that the freshly started side-instance can actually
-	// reach the open Internet through its outbound chain. Used by cmd_instance and
-	// profile_repository which want a hard "is this config alive" signal.
-	hservice.PingCloudflare()
-	return hservice, nil
-}
-
-// RunInstanceQuiet is the same as RunInstance but skips the PingCloudflare end-of-boot
-// probe. The probe targets cp.cloudflare.com which is blocked on RU LTE carriers
-// (Megafon / Beeline / MTS / Tele2 / Yota) — the 4-second timeout would be charged
-// to every BootstrapFetch call on our main audience. Callers that already plan to
-// drive their own HTTP request through the side-instance (Wave 13D BootstrapFetch)
-// do not need the probe and should use this variant.
+// RunInstanceQuiet brings up a side-instance WITHOUT an end-of-boot probe. Its
+// sibling RunInstance (removed 2026-09-23 with the core CLI, its last caller)
+// pinged cp.cloudflare.com after boot — blocked on RU LTE carriers (Megafon /
+// Beeline / MTS / Tele2 / Yota), so the 4-second timeout would be charged to every
+// BootstrapFetch call on our main audience. Callers drive their own HTTP request
+// through the side-instance (Wave 13D BootstrapFetch).
 func RunInstanceQuiet(ctx context.Context, inhiveSettings *config.InhiveOptions, singconfig *option.Options) (instance *InhiveInstance, err error) {
 	defer config.RecoverPanicToError("RunInstanceQuiet", func(panicErr error) { err = panicErr })
 	return runInstanceCore(ctx, func(serviceCtx, bringUpCtx context.Context) (*InhiveInstance, error) {
@@ -433,98 +403,6 @@ func sanitizeSideInstance(opts *option.Options) (uint16, error) {
 
 func (s *InhiveInstance) Close() error {
 	return s.StartedService.CloseService()
-}
-
-func (s *InhiveInstance) GetContent(url string) (string, error) {
-	return s.ContentFromURL("GET", url, 10*time.Second)
-}
-
-func (s *InhiveInstance) ContentFromURL(method string, url string, timeout time.Duration) (string, error) {
-	if method == "" {
-		return "", fmt.Errorf("empty method")
-	}
-	if url == "" {
-		return "", fmt.Errorf("empty url")
-	}
-
-	req, err := http.NewRequest(method, url, nil)
-	if err != nil {
-		return "", err
-	}
-
-	dialer, err := proxy.SOCKS5("tcp", fmt.Sprintf("127.0.0.1:%d", s.ListenPort), nil, proxy.Direct)
-	if err != nil {
-		return "", err
-	}
-
-	transport := &http.Transport{
-		Dial: dialer.Dial,
-	}
-
-	client := &http.Client{
-		Transport: transport,
-		Timeout:   timeout,
-	}
-
-	resp, err := client.Do(req)
-	if err != nil {
-		return "", err
-	}
-	defer resp.Body.Close()
-
-	if resp.StatusCode != http.StatusOK && resp.StatusCode != http.StatusNoContent {
-		return "", fmt.Errorf("request failed with status code: %d", resp.StatusCode)
-	}
-
-	body, err := io.ReadAll(resp.Body)
-	if err != nil {
-		return "", err
-	}
-
-	if body == nil {
-		return "", fmt.Errorf("empty body")
-	}
-
-	return string(body), nil
-}
-
-func (s *InhiveInstance) PingCloudflare() (time.Duration, error) {
-	return s.Ping("http://cp.cloudflare.com")
-}
-
-func (s *InhiveInstance) PingAverage(url string, count int) (time.Duration, error) {
-	if count <= 0 {
-		return -1, fmt.Errorf("count must be greater than 0")
-	}
-
-	var sum int64
-	realCount := 0
-	for i := 0; i < count; i++ {
-		delay, err := s.Ping(url)
-		if err == nil {
-			realCount++
-			sum += delay.Milliseconds()
-		} else if realCount == 0 && i > count/2 {
-			return -1, fmt.Errorf("ping average failed")
-		}
-	}
-	if realCount == 0 {
-		// Все пинги failed — возвращаем error, иначе division by zero ниже.
-		return -1, fmt.Errorf("all %d pings failed", count)
-	}
-	// time.Duration(sum) is in nanoseconds; we have ms — multiply BEFORE divide
-	// to avoid integer truncation (sum=15ms, count=2 → 7.5ms not 7ms).
-	return time.Duration(sum) * time.Millisecond / time.Duration(realCount), nil
-}
-
-func (s *InhiveInstance) Ping(url string) (time.Duration, error) {
-	startTime := time.Now()
-	_, err := s.ContentFromURL("HEAD", url, 4*time.Second)
-	if err != nil {
-		return -1, err
-	}
-	duration := time.Since(startTime)
-	return duration, nil
 }
 
 // noopPlatformHandler implements daemon.PlatformHandler with no-ops.

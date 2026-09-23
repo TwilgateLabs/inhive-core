@@ -7,7 +7,6 @@ import (
 	"fmt"
 	"os"
 
-	"github.com/sagernet/sing-box/experimental/libbox"
 	"github.com/sagernet/sing-box/option"
 )
 
@@ -114,36 +113,4 @@ func entryTag(entry json.RawMessage, index int) string {
 		return meta.Tag + "/" + meta.Type
 	}
 	return fmt.Sprintf("#%d", index)
-}
-func BuildConfigJson(ctx context.Context, configOpt *InhiveOptions, input *ReadOptions) ([]byte, error) {
-	options, err := BuildConfig(ctx, configOpt, input)
-	if err != nil {
-		return nil, err
-	}
-	if err := libbox.CheckConfigOptions(options); err != nil {
-		return nil, err
-	}
-
-	return options.MarshalJSONContext(ctx)
-
-}
-func ParseBuildConfigBytes(ctx context.Context, hopts *InhiveOptions, input *ReadOptions) ([]byte, error) {
-
-	options, err := ParseBuildConfig(ctx, hopts, input)
-	if err != nil {
-		return nil, err
-	}
-	return options.MarshalJSONContext(ctx)
-}
-func ParseBuildConfig(ctx context.Context, hopts *InhiveOptions, input *ReadOptions) (*option.Options, error) {
-	options := input.Options
-	if options == nil {
-		var err error
-		options, err = ParseConfig(ctx, input, false, hopts, false)
-		if err != nil {
-			return nil, err
-		}
-
-	}
-	return BuildConfig(ctx, hopts, &ReadOptions{Options: options})
 }

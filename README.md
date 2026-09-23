@@ -18,42 +18,12 @@
 
 ---
 
-## Quick Setup
-
-Install `inhive-core` on any Linux platform (Ubuntu, Debian, CentOS, OpenWrt, and more) with a single command:
-
-```bash
-bash <(curl -Ls https://raw.githubusercontent.com/TwilgateLabs/inhive-core/main/installer.sh)
-```
-
-> **Note:** This script automatically detects your OS and architecture, installs the appropriate binary, and configures the service manager (Systemd or Procd).
-
----
-
 ## Key Features
 
 - **Multi-Protocol Support**: VLESS (Reality / XHTTP / XTLS-Vision), VMess, Trojan, Shadowsocks, ShadowTLS, WireGuard, AmneziaWG, Hysteria2, TUIC, SOCKS, NaiveProxy, Mieru, DNSTT, Tor, and more.
 - **UTProto (FakeTLS)**: Custom MTProto-derived transport that mimics TLS handshake, invisible to DPI — developed in-house.
 - **Cross-Platform**: Powering InHive on Android, macOS, Linux, Windows, and iOS.
 - **High Performance**: Optimized core built on top of `sing-box` for maximum speed and stability.
-- **Router Ready**: Native support for OpenWrt and other router platforms.
-
----
-
-## Installation Methods
-
-### Docker
-```bash
-docker pull ghcr.io/TwilgateLabs/inhive-core:latest
-
-# Or using Docker Compose
-git clone https://github.com/TwilgateLabs/inhive-core
-cd inhive-core/platform/docker
-docker-compose up -d
-```
-
-### OpenWrt
-Install via the universal installer script — it auto-detects OpenWrt and configures procd service.
 
 ---
 
@@ -86,11 +56,10 @@ Install via the universal installer script — it auto-detects OpenWrt and confi
 
 ## Building
 
-### Desktop (C shared library)
+### Windows (C shared library)
 ```bash
-make windows-amd64
-make linux-amd64
-make macos
+make windows-amd64                              # WSL/Linux cross-compile
+powershell -File scripts/build-dll-windows.ps1  # on the Windows builder
 ```
 
 ### Mobile (gomobile)
