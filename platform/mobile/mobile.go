@@ -89,15 +89,43 @@ func ConvertToShareLinks(content string) (records string, err error) {
 	return out, nil
 }
 
+// Start starts the core for a CONNECT intent (iOS NE, Android headless tile
+// replay Start("","")): the core saves the request as last-start. A background
+// ping-only core (standalone VPN-off) must use StartPingOnly instead, otherwise
+// its inbound-less lite config becomes last-start and the tile replays it
+// instead of the tunnel.
+//
+// Doc comments of exported funcs here are copied by gomobile into Java/ObjC
+// sources; javac on the Windows builder reads them as windows-1251 (byte 0x98,
+// e.g. inside UTF-8 Cyrillic, is unmappable there and fails the build), so keep
+// them ASCII (a non-ASCII comment broke `gomobile bind`, 2026-09-25).
 func Start(configPath string, configContent string) (err error) {
+	return start(configPath, configContent, false, "mobile.Start")
+}
+
+// StartPingOnly starts a background core for pings/speedtest only (standalone
+// VPN-off: Android StandaloneCore, iOS MainAppCore). The only difference from
+// Start: StartRequest.PingOnly=true, so the core does NOT write it to
+// last-start (see hcore.saveLastStartRequest). A separate export rather than
+// a Start parameter keeps the NE/connect signature unchanged.
+func StartPingOnly(configContent string) (err error) {
+	return start("", configContent, true, "mobile.StartPingOnly")
+}
+
+// startService — шов для теста mobile_start_test.go (перехват StartRequest);
+// в проде всегда hcore.StartService. Неэкспортируемый — gomobile его не видит.
+var startService = hcore.StartService
+
+func start(configPath string, configContent string, pingOnly bool, name string) (err error) {
 	defer func() {
 		if r := recover(); r != nil {
-			err = fmt.Errorf("mobile.Start panic: %v\n%s", r, string(debug.Stack()))
+			err = fmt.Errorf("%s panic: %v\n%s", name, r, string(debug.Stack()))
 		}
 	}()
-	_, err = hcore.StartService(libbox.BaseContext(nil), &hcore.StartRequest{
+	_, err = startService(libbox.BaseContext(nil), &hcore.StartRequest{
 		ConfigPath:    configPath,
 		ConfigContent: configContent,
+		PingOnly:      pingOnly,
 		// Dart-side singbox_config_builder.dart строит готовый sing-box JSON
 		// напрямую — НЕ нужно rebuild через InhiveOptions builder (который на
 		// iOS падал с "outbound/balancer[balance]: unknown load balance

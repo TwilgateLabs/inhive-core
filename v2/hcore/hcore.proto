@@ -46,6 +46,12 @@ message StartRequest {
   bool enable_old_command_server = 5;
   bool enable_raw_config = 6;
   string config_name = 7; 
+  // true = старт НЕ ради подключения (фоновое ядро для пингов/спидтеста,
+  // без TUN). Такой запрос ядро НЕ сохраняет как last-start: его реплеит
+  // headless-старт (Android QS-плитка, always-on/START_STICKY), и реплей
+  // ping-only конфига давал «плитка горит, TUN нет, трафик мимо VPN».
+  // Единственный писатель last-start — connect-путь (ping_only=false).
+  bool ping_only = 8;
 }
 
 

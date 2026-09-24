@@ -9,6 +9,9 @@ shipped standalone).
 
 ## [Unreleased]
 
+### Changed
+- `StartRequest` has a new field `ping_only` (8), and the mobile binding has a new `StartPingOnly(configContent)`. A start marked this way (a background core that only pings servers) is not saved as the last start request. The saved request is what an empty start replays: the Android Quick Settings tile and always-on VPN use it. Before, a ping-only start overwrote it, and the replay brought up a core without a tunnel. `Start` keeps its signature and still saves the request, so the iOS extension and a normal connect behave as before. Tests: `v2/hcore/start_ping_only_test.go`, `platform/mobile/mobile_start_test.go`.
+
 ### Fixed
 - Every started engine instance leaked five goroutines and a 256-slot event buffer, because the service wrapper was stopped but never closed. That happened on every connect and disconnect and, on Windows and Android, on every cold server ping, so a long session piled up hundreds of idle goroutines. The wrapper is now closed on every stop path, including failed and timed-out ping bring-ups. A test runs five ping instances and checks that the goroutine count does not grow.
 - Removing a server that came with a helper connection (the utproto pair) now removes the helper too, as long as nothing else uses it. Before, every add and remove left one live helper behind.

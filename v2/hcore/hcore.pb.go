@@ -391,8 +391,14 @@ type StartRequest struct {
 	EnableOldCommandServer bool                   `protobuf:"varint,5,opt,name=enable_old_command_server,json=enableOldCommandServer,proto3" json:"enable_old_command_server,omitempty"`
 	EnableRawConfig        bool                   `protobuf:"varint,6,opt,name=enable_raw_config,json=enableRawConfig,proto3" json:"enable_raw_config,omitempty"`
 	ConfigName             string                 `protobuf:"bytes,7,opt,name=config_name,json=configName,proto3" json:"config_name,omitempty"`
-	unknownFields          protoimpl.UnknownFields
-	sizeCache              protoimpl.SizeCache
+	// true = старт НЕ ради подключения (фоновое ядро для пингов/спидтеста,
+	// без TUN). Такой запрос ядро НЕ сохраняет как last-start: его реплеит
+	// headless-старт (Android QS-плитка, always-on/START_STICKY), и реплей
+	// ping-only конфига давал «плитка горит, TUN нет, трафик мимо VPN».
+	// Единственный писатель last-start — connect-путь (ping_only=false).
+	PingOnly      bool `protobuf:"varint,8,opt,name=ping_only,json=pingOnly,proto3" json:"ping_only,omitempty"`
+	unknownFields protoimpl.UnknownFields
+	sizeCache     protoimpl.SizeCache
 }
 
 func (x *StartRequest) Reset() {
@@ -472,6 +478,13 @@ func (x *StartRequest) GetConfigName() string {
 		return x.ConfigName
 	}
 	return ""
+}
+
+func (x *StartRequest) GetPingOnly() bool {
+	if x != nil {
+		return x.PingOnly
+	}
+	return false
 }
 
 type CloseRequest struct {
@@ -2539,7 +2552,7 @@ const file_v2_hcore_hcore_proto_rawDesc = "" +
 	"\n" +
 	"core_state\x18\x01 \x01(\x0e2\x11.hcore.CoreStatesR\tcoreState\x125\n" +
 	"\fmessage_type\x18\x02 \x01(\x0e2\x12.hcore.MessageTypeR\vmessageType\x12\x18\n" +
-	"\amessage\x18\x03 \x01(\tR\amessage\"\xb1\x02\n" +
+	"\amessage\x18\x03 \x01(\tR\amessage\"\xce\x02\n" +
 	"\fStartRequest\x12\x1f\n" +
 	"\vconfig_path\x18\x01 \x01(\tR\n" +
 	"configPath\x12%\n" +
@@ -2550,7 +2563,8 @@ const file_v2_hcore_hcore_proto_rawDesc = "" +
 	"\x19enable_old_command_server\x18\x05 \x01(\bR\x16enableOldCommandServer\x12*\n" +
 	"\x11enable_raw_config\x18\x06 \x01(\bR\x0fenableRawConfig\x12\x1f\n" +
 	"\vconfig_name\x18\a \x01(\tR\n" +
-	"configName\"4\n" +
+	"configName\x12\x1b\n" +
+	"\tping_only\x18\b \x01(\bR\bpingOnly\"4\n" +
 	"\fCloseRequest\x12$\n" +
 	"\x04mode\x18\x01 \x01(\x0e2\x10.hcore.SetupModeR\x04mode\"\xaf\x02\n" +
 	"\fSetupRequest\x12\x1b\n" +

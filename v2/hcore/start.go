@@ -71,7 +71,18 @@ func cachedLastStartRequestName() string {
 	return lastStartNameValue
 }
 
+// saveLastStartRequest — единственное место, где пишется last-start, который
+// потом реплеит headless-старт (Android QS-плитка, always-on/START_STICKY:
+// пустой запрос → loadLastStartRequestIfNeeded). Писать сюда имеет право
+// только НАМЕРЕНИЕ «подключиться»: ping-only старт (фоновое ядро для пингов
+// без TUN — boot-core с пинг-конфигом, standalone-ядро VPN-off) реплеить
+// нельзя, иначе плитка «горит», а TUN не поднят и трафик идёт мимо VPN
+// (аудит 2026-09-25, топ №1). Признак приходит от вызывающего по обоим
+// транспортам: gRPC StartRequest.ping_only и mobile.StartPingOnly.
 func saveLastStartRequest(in *StartRequest) error {
+	if in.GetPingOnly() {
+		return nil
+	}
 	if in.ConfigContent == "" && in.ConfigPath == "" {
 		return nil
 	}
