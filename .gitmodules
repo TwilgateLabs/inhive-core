@@ -1,6 +1,6 @@
 [submodule "sing-box"]
 	path = sing-box
-	url = https://github.com/twilgate/inhive-sing-box
+	url = https://github.com/TwilgateLabs/inhive-sing-box
 	branch = main
 [submodule "maybenot"]
 	path = maybenot

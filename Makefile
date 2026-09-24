@@ -69,30 +69,27 @@ WINDOWS_ADD_TAGS=with_purego
 # ${CODE_VERSION}, которую НИКТО никогда не выставлял (grep по репозиторию даёт
 # ровно одно вхождение — это самое). Мёртвая подстановка в пустую строку.
 #
-#   Версий ДВЕ, и обе объявлены как "unknown":
+#   Версия была ДВЕ, обе объявлены как "unknown":
 #     sing-box/constant.Version                    — апстримная (clashapi, libbox)
-#     v2/hcommon/constants.Version                 — наша, инхайвовская
-#   Вторую читал только CLI ядра (cmd/cmd_version.go), снесённый 2026-09-23;
-#   сейчас её не читает никто. -X безвреден и дублируется в
-#   scripts/build-dll-windows.ps1 — снимать оба места одним коммитом.
-VERSION_LDFLAGS=-X github.com/sagernet/sing-box/constant.Version=$(VERSION) -X github.com/twilgate/inhive-core/v2/hcommon/constants.Version=$(VERSION) -X internal/godebug.defaultGODEBUG=multipathtcp=0
+#     v2/hcommon/constants.Version                 — наша, инхайвовская (СНЕСЕНА 2026-09-24)
+#   Вторую читал только CLI ядра (cmd/cmd_version.go), снесённый 2026-09-23; после
+#   этого её не читал никто (0 читателей в core/ и app/) — переменная и -X флаг
+#   снесены одним заходом, вместе со вторыми копиями флага в
+#   scripts/build-dll-windows.ps1 и build-aar6.ps1.
+VERSION_LDFLAGS=-X github.com/sagernet/sing-box/constant.Version=$(VERSION) -X internal/godebug.defaultGODEBUG=multipathtcp=0
 LDFLAGS=-w -s -checklinkname=0 -buildid= $(VERSION_LDFLAGS)
 GOBUILDLIB=CGO_ENABLED=1 go build -trimpath -ldflags="$(LDFLAGS)" -buildmode=c-shared
 
+# Go codegen for all v2/*.proto (hcommon/common.proto, hcore/hcore*.proto,
+# config/route_rule.proto). Требует protoc + protoc-gen-go + protoc-gen-go-grpc
+# на PATH (версии — ARCHITECTURE.md §"RPC codegen (Go)"). Прежняя версия этой
+# цели глобила несуществующий extension/ (снесён вместе с webui) и звала
+# protoc-gen-doc в никогда не создававшийся ./docs — обе ветки были мертворождённые
+# (найдено 2026-09-24, 0 вызовов из CI/скриптов). Dart-сторона генерится отдельно,
+# см. ARCHITECTURE.md §"RPC codegen (Dart)" — скрипт для неё ещё не написан.
 .PHONY: protos
 protos:
-	go install github.com/pseudomuto/protoc-gen-doc/cmd/protoc-gen-doc@latest
-	# protoc --go_out=./ --go-grpc_out=./ --proto_path=inhiverpc inhiverpc/*.proto
-	# for f in $(shell find v2 -name "*.proto"); do \
-	# 	protoc --go_opt=paths=source_relative --go-grpc_opt=paths=source_relative --go_out=./ --go-grpc_out=./  $$f; \
-	# done
-	# for f in $(shell find extension -name "*.proto"); do \
-	# 	protoc --go_opt=paths=source_relative --go-grpc_opt=paths=source_relative --go_out=./ --go-grpc_out=./  $$f; \
-	# done
-	protoc --go_opt=paths=source_relative --go-grpc_opt=paths=source_relative --go_out=./ --go-grpc_out=./  $(shell find v2 -name "*.proto") $(shell find extension -name "*.proto")
-	protoc --doc_out=./docs  --doc_opt=markdown,inhiverpc.md $(shell find v2 -name "*.proto") $(shell find extension -name "*.proto")
-	# protoc --js_out=import_style=commonjs,binary:./extension/html/rpc/ --grpc-web_out=import_style=commonjs,mode=grpcwebtext:./extension/html/rpc/ $(shell find v2 -name "*.proto") $(shell find extension -name "*.proto")
-	# npx browserify extension/html/rpc/extension.js >extension/html/rpc.js
+	protoc --go_opt=paths=source_relative --go-grpc_opt=paths=source_relative --go_out=./ --go-grpc_out=./ $(shell find v2 -name "*.proto")
 
 
 # fmt / fmt-check — форматирование НАШЕГО кода (границы и почему именно
@@ -125,9 +122,6 @@ lib_install: prepare
 	go install -v github.com/sagernet/gomobile/cmd/gomobile@v0.1.12
 	go install -v github.com/sagernet/gomobile/cmd/gobind@v0.1.12
 	npm install
-
-headers:
-	go build -buildmode=c-archive -o $(BINDIR)/ ./platform/desktop2
 
 android: lib_install
 	CGO_LDFLAGS="-O2 -s -w -Wl,-z,max-page-size=16384" \

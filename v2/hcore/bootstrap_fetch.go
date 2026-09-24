@@ -9,9 +9,11 @@
 // API and tproxy/redirect/direct ports all forced off, leaving only a SOCKS5
 // inbound on a random localhost port (see RunInstance in independent_instance.go).
 // We dial that SOCKS5 with our own http.Client so we get the precise status_code
-// back to the caller — InhiveInstance.ContentFromURL collapses non-2xx into a
-// generic error and is shared with Ping/PingAverage/PingCloudflare, so we keep
-// the dialer code local instead of widening the shared helper.
+// back to the caller instead of a collapsed non-2xx error, and so the dialer
+// stays local to this one-shot fetch rather than living in a shared helper.
+// (Pre-2026-09-23 this pointed at a shared InhiveInstance.ContentFromURL /
+// Ping/PingAverage/PingCloudflare helper set; that CLI-era code is gone, and
+// the local dialer below never depended on it.)
 //
 // Failure mode: gRPC always returns a successful response — caller inspects
 // BootstrapFetchResponse.Error / .StatusCode. Panics in the side-instance bring-up
@@ -86,7 +88,8 @@ func (s *CoreService) BootstrapFetch(ctx context.Context, in *BootstrapFetchRequ
 	// NB: BootstrapFetch deliberately keeps the LEGACY translated path (NOT the raw
 	// RunInstanceRaw the ping probes moved to). Its config (bootstrap_endpoint.dart)
 	// is a bare outbound list with NO inbound — the translator synthesises the mixed
-	// inbound whose SOCKS5 port ContentFromURL dials below. BootstrapFetch needs a
+	// inbound whose SOCKS5 port the http.Client below dials via proxy.SOCKS5.
+	// BootstrapFetch needs a
 	// working local proxy, not ping-honesty, so the translator is the right tool here;
 	// the raw path is reserved for the probe callers that ship a full app config.
 	inst, instErr := RunInstanceQuiet(ctx, nil, &opts)

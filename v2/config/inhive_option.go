@@ -2,11 +2,6 @@
 package config
 
 import (
-	"fmt"
-	reflect "reflect"
-	"strconv"
-	"strings"
-
 	C "github.com/sagernet/sing-box/constant"
 	"github.com/sagernet/sing-box/option"
 )
@@ -175,137 +170,9 @@ func DefaultInhiveOptions() *InhiveOptions {
 	}
 }
 
-// Recursively set the fields marked as overridable
-func setOverridableFields(v reflect.Value, t reflect.Type, overrides map[string]interface{}) {
-	for i := 0; i < v.NumField(); i++ {
-		field := v.Field(i)
-		fieldType := t.Field(i)
-
-		// Check if the field has an "overridable" tag set to "true"
-		overridableTag := fieldType.Tag.Get("overridable")
-		if overridableTag == "true" {
-			// Get the field's JSON tag name
-			jsonTag := strings.Split(fieldType.Tag.Get("json"), ",")[0]
-			if jsonTag == "" {
-				continue
-			}
-
-			// Check if an override exists for this field
-			if overrideValue, ok := overrides[jsonTag]; ok {
-				// Ensure the override value can be set to the field type
-				var parsedValue reflect.Value
-				switch field.Kind() {
-				case reflect.Bool:
-					if boolVal, err := parseBool(overrideValue); err == nil {
-						parsedValue = reflect.ValueOf(boolVal)
-					}
-				case reflect.Int, reflect.Int8, reflect.Int16, reflect.Int32, reflect.Int64:
-					if intVal, err := parseInt(overrideValue); err == nil {
-						parsedValue = reflect.ValueOf(intVal)
-					}
-				case reflect.Uint, reflect.Uint8, reflect.Uint16, reflect.Uint32, reflect.Uint64:
-					if uintVal, err := parseUint(overrideValue); err == nil {
-						parsedValue = reflect.ValueOf(uintVal)
-					}
-				case reflect.String:
-					parsedValue = reflect.ValueOf(overrideValue.(string))
-					// Add more cases for other types as needed
-				}
-
-				// Set the field if we have a parsed value
-				if parsedValue.IsValid() && parsedValue.Type().AssignableTo(field.Type()) {
-					field.Set(parsedValue)
-				}
-			}
-		}
-
-		// If the field is a nested struct, recurse into it
-		if field.Kind() == reflect.Struct {
-			jsonTag := strings.Split(fieldType.Tag.Get("json"), ",")[0]
-
-			data := overrides
-			if jsonTag != "" {
-				data1 := overrides[jsonTag]
-				if data1 == nil {
-					continue
-				}
-				data = data1.(map[string]interface{})
-			}
-			neastedType := fieldType.Type
-			if data != nil {
-				setOverridableFields(field, neastedType, data)
-			}
-
-		}
-	}
-}
-
-// Helper functions for parsing
-func parseBool(value interface{}) (bool, error) {
-	switch v := value.(type) {
-	case string:
-		return strconv.ParseBool(v)
-	case bool:
-		return v, nil
-	}
-	return false, fmt.Errorf("invalid bool value")
-}
-
-func parseInt(value interface{}) (int64, error) {
-	switch v := value.(type) {
-	case string:
-		return strconv.ParseInt(v, 10, 64)
-	case int, int8, int16, int32, int64:
-		return reflect.ValueOf(v).Int(), nil
-	}
-	return 0, fmt.Errorf("invalid int value")
-}
-
-func parseUint(value interface{}) (uint64, error) {
-	switch v := value.(type) {
-	case string:
-		return strconv.ParseUint(v, 10, 64)
-	case uint, uint8, uint16, uint32, uint64:
-		return reflect.ValueOf(v).Uint(), nil
-	}
-	return 0, fmt.Errorf("invalid uint value")
-}
-
-func GetOverridableInhiveOptions(overrides map[string][]string) *InhiveOptions {
-	override := InhiveOptions{}
-
-	// Convert flat overrides to nested structure
-	nestedOverrides := convertFlatToNested(overrides)
-
-	// Use reflection to iterate over the fields of InhiveOptions
-	v := reflect.ValueOf(&override).Elem()
-	t := reflect.TypeOf(override)
-
-	// Recursively set the fields that are marked as overridable
-	setOverridableFields(v, t, nestedOverrides)
-
-	return &override
-}
-
-// Converts the flat overrides map to a nested structure without removing underscores
-func convertFlatToNested(overrides map[string][]string) map[string]interface{} {
-	nested := make(map[string]interface{})
-	for key, value := range overrides {
-		keys := strings.Split(key, ".")
-		current := nested
-
-		for i, k := range keys {
-			if i == len(keys)-1 {
-				// Set the final value with underscores preserved
-				current[k] = value[0]
-			} else {
-				// Create nested maps if they do not exist
-				if _, exists := current[k]; !exists {
-					current[k] = make(map[string]interface{})
-				}
-				current = current[k].(map[string]interface{})
-			}
-		}
-	}
-	return nested
-}
+// GetOverridableInhiveOptions и весь reflect-стек, который её обслуживал
+// (setOverridableFields, convertFlatToNested, parseBool/parseInt/parseUint)
+// снесены 2026-09-24: 0 читателей в core/ и app/ (единственный вызывающий —
+// снесённый 2026-09-23 CLI override-флаг). Поля InhiveOptions, помеченные
+// `overridable:"true"`, теперь просто инертные теги — их читал только этот
+// стек.

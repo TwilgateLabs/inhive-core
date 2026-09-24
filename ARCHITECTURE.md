@@ -23,7 +23,7 @@ core/
                        InhiveOptions itself is a hand-written Go struct (inhive_option.go:14), not generated
                        from a .proto — there is exactly one definition of it.
   v2/hcommon/          common.proto (Empty/Response), shared helpers
-  v2/db/, v2/hutils/, v2/service_manager/
+  v2/db/, v2/hutils/
   xray2sing/           separate Go module: share links / subscription text → sing-box options
                        (ray2sing/convert.go registries, ray2sing_test/ corpus)
   sing-box/            vendored sing-box fork (upstream.toml entry `sing-box`, replace/* forks below it)
@@ -31,7 +31,7 @@ core/
                        (the core CLI `cmd/` + `cmd/bydll` was deleted 2026-09-23 — there is no CLI)
   hygiene/             fitness tests (Go), read the source tree only
   scripts/             build wrappers (build-dll-windows.ps1, verify-aar-abi.ps1, check-upstream-drift.py…)
-  Makefile             BASE_TAGS (:24) — the single source of truth for build tags; protos target (:86)
+  Makefile             BASE_TAGS (:24) — the single source of truth for build tags; protos target (:91)
   upstream.toml        registry of vendored trees: path, upstream, tag, commit, divergences
 ```
 
@@ -56,8 +56,8 @@ platform/        →  v2/hcore  →  v2/config  →  v2/hcommon, v2/db
 | Kind | Where (file:line) |
 |---|---|
 | RPC surface | `v2/hcore/hcore_service.proto:9` `service Core` (+ request/response messages in `hcore.proto`) |
-| RPC implementation | `func (s *CoreService) <Rpc>` — one method per RPC, grouped by file: `commands.go` (GetSystemInfo :138, SelectOutbound :145, AddOutbound :195, UrlTest :363, SwitchMode :453…), `start.go:24`, `stop.go:12`, `setup.go:24`, `url_test_config.go:47`, `speedtest.go:40`, `logproto.go:33`, `coreinfo.go:28`, `bootstrap_fetch.go:40`, `buildconfighelper.go:87/:136`, `warp.go:11`, `pause.go:54` |
-| RPC codegen (Go) | protoc v34.1 (`libprotoc 34.1`, header says `v7.34.1`) + protoc-gen-go v1.36.11 + protoc-gen-go-grpc v1.6.1, from `core/`: `protoc --go_opt=paths=source_relative --go-grpc_opt=paths=source_relative --go_out=./ --go-grpc_out=./ v2/hcore/hcore.proto v2/hcore/hcore_service.proto`. The `Makefile:83` target `protos` is stale (it still globs a non-existent `extension/` and installs `protoc-gen-doc@latest`) — do not rely on it |
+| RPC implementation | `func (s *CoreService) <Rpc>` — one method per RPC, grouped by file: `commands.go` (GetSystemInfo :138, SelectOutbound :145, AddOutbound :195, UrlTest :363, SwitchMode :453…), `start.go:23`, `stop.go:12`, `setup.go:28`, `url_test_config.go:47`, `speedtest.go:40`, `logproto.go:33`, `coreinfo.go:28`, `bootstrap_fetch.go:42`, `buildconfighelper.go:79/:128`, `warp.go:11`, `pause.go:54` |
+| RPC codegen (Go) | protoc v34.1 (`libprotoc 34.1`, header says `v7.34.1`) + protoc-gen-go v1.36.11 + protoc-gen-go-grpc v1.6.1, from `core/`: `protoc --go_opt=paths=source_relative --go-grpc_opt=paths=source_relative --go_out=./ --go-grpc_out=./ v2/hcore/hcore.proto v2/hcore/hcore_service.proto`. `make protos` (`Makefile:91`) now runs this same codegen for all `v2/*.proto` (Go side only — Dart still has no script, see below) |
 | RPC codegen (Dart) | `../app/lib/generated/proto/core_generated/generated/` — protoc_plugin 22.4.0 (`dart pub global activate protoc_plugin`): `protoc --plugin=protoc-gen-dart=<pub-cache>/bin/protoc-gen-dart.bat --dart_out=grpc:<tmp> v2/hcommon/common.proto v2/hcore/hcore.proto v2/hcore/hcore_service.proto`, then `dart format <tmp>` **outside** `app/` (default 80 columns — the checked-in hcore files are formatted that way, not with the app's 120) and copy `v2/hcore/*` over. Verified byte-identical to the checked-in files on 2026-09-23 |
 | RPC consumer | `../app/lib/core/bridge.dart` (gRPC channel 127.0.0.1:18078, `bridge.dart:154`) |
 | Share-link parser | `xray2sing/ray2sing/convert.go:19` `configTypes` (single outbound), `:65` `endpointParsers` (WireGuard-family endpoints), `:78` `pairParsers` (one link → main + helper outbound) |

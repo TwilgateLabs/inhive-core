@@ -18,7 +18,6 @@ import (
 	"github.com/twilgate/inhive-core/v2/config"
 	"github.com/twilgate/inhive-core/v2/db"
 	hcommon "github.com/twilgate/inhive-core/v2/hcommon"
-	service_manager "github.com/twilgate/inhive-core/v2/service_manager"
 )
 
 func (s *CoreService) Start(ctx context.Context, in *StartRequest) (resp *CoreInfoResponse, err error) {
@@ -171,14 +170,9 @@ func StartService(ctx context.Context, in *StartRequest) (coreResponse *CoreInfo
 	WriteSharedLog("StartService: BuildConfig done")
 	saveLastStartRequest(in)
 
-	Log(LogLevel_DEBUG, LogType_CORE, "Main Service pre start")
-	WriteSharedLog("StartService: OnMainServicePreStart begin")
-	if err := service_manager.OnMainServicePreStart(options); err != nil {
-		WriteSharedLogf("StartService: OnMainServicePreStart FAILED: %v", err)
-		return errorWrapper(MessageType_ERROR_EXTENSION, err)
-	}
-	WriteSharedLog("StartService: OnMainServicePreStart done")
-
+	// service_manager.OnMainServicePreStart снесён 2026-09-24: хуки
+	// Register/RegisterPreService снесли 2026-09-23, вызов был гарантированным
+	// no-op (списки services/preservices навсегда пустые).
 	currentBuildConfigPath := filepath.Join(sWorkingPath, "data/current-config.json")
 	Log(LogLevel_DEBUG, LogType_CORE, "Saving config to ", currentBuildConfigPath)
 	WriteSharedLogf("StartService: SaveCurrentConfig begin (%s)", currentBuildConfigPath)

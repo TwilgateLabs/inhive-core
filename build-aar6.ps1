@@ -8,8 +8,10 @@ $psi.UseShellExecute = $false
 $psi.RedirectStandardOutput = $true
 $psi.RedirectStandardError = $true
 $psi.WorkingDirectory = "F:\Desktop\inhive\core"
-# Version stamp (same three -X as Makefile VERSION_LDFLAGS / build-dll-windows.ps1):
-# without them the Android core reports 'unknown' in box.log and diagnostics.
+# Version stamp (same -X as Makefile VERSION_LDFLAGS / build-dll-windows.ps1):
+# without it the Android core reports 'unknown' in box.log and diagnostics.
+# (v2/hcommon/constants.Version — вторая, инхайвовская версия — снесена
+# 2026-09-24: 0 читателей после сноса CLI 2026-09-23; -X флаг снят здесь же.)
 $version = (& git describe --tags 2>$null | Out-String).Trim()
 if (-not $version) { $version = 'unknown' }
 Write-Output "VERSION_STAMP=$version"
@@ -17,7 +19,6 @@ $bindArgs = @('bind','-v','-androidapi=24','-javapkg=com.inhive.core','-libname=
   '-tags=with_gvisor,with_quic,with_wireguard,with_utls,with_clash_api,with_grpc,with_awg,tfogo_checklinkname0,with_naive_outbound,with_olcrtc',
   '-trimpath',('-ldflags=-w -s -checklinkname=0 -buildid= ' +
     '-X github.com/sagernet/sing-box/constant.Version=' + $version + ' ' +
-    '-X github.com/twilgate/inhive-core/v2/hcommon/constants.Version=' + $version + ' ' +
     '-X internal/godebug.defaultGODEBUG=multipathtcp=0'),
   '-target=android/arm,android/arm64,android/amd64',
   '-o','bin/inhive-core.aar',

@@ -57,7 +57,7 @@ Files:
 
 Public API:
 - Types: `DNSOptions`, `DurationInSeconds`, `InboundOptions`, `InhiveOptions`, `MuxOptions`, `Network`, `Outbound`, `Protocol`, `ReadOptions`, `RouteOptions`, `RouteRule`, `Rule`, `TLSTricks`, `URLTestOptions`, `WarpAccount`, `WarpGenerationResponse`, `WarpOptions`, `WarpWireguardConfig`
-- Functions: `BuildConfig`, `DefaultInhiveOptions`, `DeferPanicToError`, `Descriptor`, `Duration`, `Enum`, `EnumDescriptor`, `GenerateWarpAccount`, `GenerateWarpInfo`, `GenerateWarpSingbox`, `GenerateWarpSingboxNew`, `GetDomainKeywords`, `GetDomainRegexes`, `GetDomainSuffixes`, `GetDomains`, `GetEnabled`, `GetIpCidrs`, `GetListOrder`, `GetName`, `GetNetwork`, `GetOutbound`, `GetOverridableInhiveOptions`, `GetPackageNames`, `GetPortRanges`, `GetProcessNames`, `GetProcessPaths`, `GetProtocols`, `GetRuleSets`, `GetRules`, `GetSourceIpCidrs`, `GetSourcePortRanges`, `MarshalJSON`, `Number`, `ParseConfig`, `ParseConfigBytes`, `ProtoMessage`, `ProtoReflect`, `ReadContent`, `ReadSingOptions`, `RecoverPanicToError`, `Reset`, `SaveCurrentConfig`, `String`, `Type`, `UnmarshalJSON`
+- Functions: `BuildConfig`, `DefaultInhiveOptions`, `DeferPanicToError`, `Descriptor`, `Duration`, `Enum`, `EnumDescriptor`, `GenerateWarpAccount`, `GenerateWarpInfo`, `GenerateWarpSingbox`, `GenerateWarpSingboxNew`, `GetDomainKeywords`, `GetDomainRegexes`, `GetDomainSuffixes`, `GetDomains`, `GetEnabled`, `GetIpCidrs`, `GetListOrder`, `GetName`, `GetNetwork`, `GetOutbound`, `GetPackageNames`, `GetPortRanges`, `GetProcessNames`, `GetProcessPaths`, `GetProtocols`, `GetRuleSets`, `GetRules`, `GetSourceIpCidrs`, `GetSourcePortRanges`, `MarshalJSON`, `Number`, `ParseConfig`, `ParseConfigBytes`, `ProtoMessage`, `ProtoReflect`, `ReadContent`, `ReadSingOptions`, `RecoverPanicToError`, `Reset`, `SaveCurrentConfig`, `String`, `Type`, `UnmarshalJSON`
 
 Imported by: `v2/hcore`
 
@@ -95,11 +95,10 @@ Tests referencing this module: none found.
 
 ## `v2/hcommon/constants`
 
-Size: 11 lines across 2 file(s).
+Size: 7 lines across 1 file(s).
 
 Files:
 - `v2/hcommon/constants/constants.go` (7 lines)
-- `v2/hcommon/constants/version.go` (4 lines)
 
 Public API: none detected (private-only or generated file).
 
@@ -124,11 +123,11 @@ Tests referencing this module: none found.
 
 ## `v2/hcore`
 
-Size: 8490 lines across 32 file(s).
+Size: 8639 lines across 31 file(s).
 
 Files:
-- `v2/hcore/bootstrap_fetch.go` (147 lines)
-- `v2/hcore/buildconfighelper.go` (239 lines)
+- `v2/hcore/bootstrap_fetch.go` (149 lines)
+- `v2/hcore/buildconfighelper.go` (263 lines)
 - `v2/hcore/commands.go` (543 lines)
 - `v2/hcore/coreinfo.go` (45 lines)
 - `v2/hcore/crash_output.go` (51 lines)
@@ -140,7 +139,7 @@ Files:
 - `v2/hcore/hcore.pb.go` (2875 lines)
 - `v2/hcore/independent_instance.go` (418 lines)
 - `v2/hcore/log_file.go` (129 lines)
-- `v2/hcore/log_interface.go` (58 lines)
+- `v2/hcore/log_interface.go` (59 lines)
 - `v2/hcore/log_level.go` (55 lines)
 - `v2/hcore/log_shared.go` (77 lines)
 - `v2/hcore/logproto.go` (75 lines)
@@ -149,11 +148,10 @@ Files:
 - `v2/hcore/probe_helpers.go` (261 lines)
 - `v2/hcore/proxy_info.go` (14 lines)
 - `v2/hcore/recovery_interceptor.go` (36 lines)
-- `v2/hcore/service_manager_callback.go` (24 lines)
-- `v2/hcore/service.go` (112 lines)
-- `v2/hcore/setup.go` (40 lines)
+- `v2/hcore/service.go` (116 lines)
+- `v2/hcore/setup.go` (43 lines)
 - `v2/hcore/speedtest.go` (181 lines)
-- `v2/hcore/start.go` (289 lines)
+- `v2/hcore/start.go` (283 lines)
 - `v2/hcore/static_data.go` (127 lines)
 - `v2/hcore/stop.go` (59 lines)
 - `v2/hcore/url_test_config.go` (241 lines)
@@ -162,7 +160,7 @@ Files:
 
 Public API:
 - Types: `AddOutboundRequest`, `AddOutboundResponse`, `BootstrapFetchRequest`, `BootstrapFetchResponse`, `ChangeInhiveSettingsRequest`, `CloseRequest`, `CoreClient`, `CoreInfoResponse`, `CoreServer`, `CoreService`, `CoreStates`, `Core_CoreInfoListenerClient`, `Core_CoreInfoListenerServer`, `Core_LogListenerClient`, `Core_LogListenerServer`, `Core_ModeStateListenerClient`, `Core_ModeStateListenerServer`, `GenerateWarpConfigRequest`, `InhiveInstance`, `IpInfo`, `LogInterface`, `LogLevel`, `LogMessage`, `LogRequest`, `LogType`, `MessageType`, `ModeStateResponse`, `OutboundGroup`, `OutboundGroupList`, `OutboundInfo`, `ParseRequest`, `ParseResponse`, `RemoveOutboundRequest`, `SelectOutboundRequest`, `SetupMode`, `SetupRequest`, `SpeedTestRequest`, `SpeedTestResponse`, `StartRequest`, `SwitchModeRequest`, `SystemInfo`, `UnimplementedCoreServer`, `UnsafeCoreServer`, `UrlTestConfigRequest`, `UrlTestConfigResponse`, `UrlTestRequest`, `WarpAccount`, `WarpGenerationResponse`, `WarpWireguardConfig`
-- Functions: `AddGrpcClientPublicKey`, `AddOutbound`, `BootstrapFetch`, `Box`, `BuildConfig`, `BuildConfigJson`, `ChangeInhiveSettings`, `Close`, `CloseGrpcServer`, `ConnectionManager`, `Context`, `CoreInfoListener`, `Descriptor`, `Enum`, `EnumDescriptor`, `GenerateWarpConfig`, `GetAccessToken`, `GetAccount`, `GetAccountId`, `GetActiveTransport`, `GetAsn`, `GetBasePath`, `GetBody`, `GetBringUpFailed`, `GetBytesTransferred`, `GetCity`, `GetClientId`, `GetConfig`, `GetConfigContent`, `GetConfigJson`, `GetConfigName`, `GetConfigPath`, `GetConfigRejected`, `GetConnectionsIn`, `GetConnectionsOut`, `GetContent`, `GetCoreState`, `GetCountryCode`, `GetCurrentMode`, `GetCurrentOutbound`, `GetCurrentOutboundDown`, `GetCurrentProfile`, `GetDebug`, `GetDelayMs`, `GetDelayStart`, `GetDetour`, `GetDisableMemoryLimit`, `GetDownlink`, `GetDownlinkTotal`, `GetDownload`, `GetDurationMs`, `GetElapsedMs`, `GetEnableOldCommandServer`, `GetEnableRawConfig`, `GetError`, `GetFixAndroidStack`, `GetFlutterStatusPort`, `GetGoroutines`, `GetGroupSelectedTag`, `GetGroupSelectedTagDisplay`, `GetGroupTag`, `GetGrpcServerPublicKey`, `GetHost`, `GetInhiveSettingsJson`, `GetIp`, `GetIpinfo`, `GetIsExpand`, `GetIsGroup`, `GetIsSecure`, `GetIsSelected`, `GetIsVisible`, `GetItems`, `GetLatitude`, `GetLevel`, `GetLicenseKey`, `GetListen`, `GetLocalAddressIpv4`, `GetLocalAddressIpv6`, `GetLog`, `GetLongitude`, `GetMemory`, `GetMessage`, `GetMessageType`, `GetMode`, `GetOrg`, `GetOutboundTag`, `GetPeerPublicKey`, `GetPort`, `GetPostalCode`, `GetPrivateKey`, `GetRegion`, `GetResponseCode`, `GetSecret`, `GetSelectable`, `GetSelected`, `GetSelectorTags`, `GetSpeedKbps`, `GetStatusCode`, `GetSuccess`, `GetSystemInfo`, `GetTag`, `GetTagDisplay`, `GetTagOverride`, `GetTempDir`, `GetTempPath`, `GetTestBytes`, `GetTime`, `GetTimeoutMs`, `GetTimeoutSec`, `GetTimestampMs`, `GetTrafficAvailable`, `GetType`, `GetUplink`, `GetUplinkTotal`, `GetUpload`, `GetUrl`, `GetUrlTestDelay`, `GetUrlTestTime`, `GetWorkingDir`, `InitInhiveService`, `Instance`, `Log`, `LogListener`, `ModeStateListener`, `Name`, `NewCoreClient`, `NewService`, `Number`, `Parse`, `Pause`, `ProtoMessage`, `ProtoReflect`, `Read`, `RegisterCoreServer`, `RemoveOutbound`, `Reset`, `RunInstanceQuiet`, `RunInstanceRaw`, `SelectOutbound`, `ServiceReload`, `ServiceStop`, `SetCoreStatus`, `SetSystemProxyEnabled`, `Setup`, `SpeedTest`, `Start`, `StartGrpcServerByMode`, `StartService`, `Stop`, `StopAndAlert`, `String`, `SwitchMode`, `SystemProxyStatus`, `TrafficManager`, `TrimTagName`, `Type`, `UrlTest`, `UrlTestActive`, `UrlTestConfig`, `UrlTestHistory`, `Wake`, `WriteDebugMessage`, `WriteMessage`, `WriteSharedLog`, `WriteSharedLogf`
+- Functions: `AddGrpcClientPublicKey`, `AddOutbound`, `BootstrapFetch`, `Box`, `BuildConfig`, `ChangeInhiveSettings`, `Close`, `CloseGrpcServer`, `ConnectionManager`, `Context`, `CoreInfoListener`, `Descriptor`, `Enum`, `EnumDescriptor`, `GenerateWarpConfig`, `GetAccessToken`, `GetAccount`, `GetAccountId`, `GetActiveTransport`, `GetAsn`, `GetBasePath`, `GetBody`, `GetBringUpFailed`, `GetBytesTransferred`, `GetCity`, `GetClientId`, `GetConfig`, `GetConfigContent`, `GetConfigJson`, `GetConfigName`, `GetConfigPath`, `GetConfigRejected`, `GetConnectionsIn`, `GetConnectionsOut`, `GetContent`, `GetCoreState`, `GetCountryCode`, `GetCurrentMode`, `GetCurrentOutbound`, `GetCurrentOutboundDown`, `GetCurrentProfile`, `GetDebug`, `GetDelayMs`, `GetDelayStart`, `GetDetour`, `GetDisableMemoryLimit`, `GetDownlink`, `GetDownlinkTotal`, `GetDownload`, `GetDurationMs`, `GetElapsedMs`, `GetEnableOldCommandServer`, `GetEnableRawConfig`, `GetError`, `GetFixAndroidStack`, `GetFlutterStatusPort`, `GetGoroutines`, `GetGroupSelectedTag`, `GetGroupSelectedTagDisplay`, `GetGroupTag`, `GetGrpcServerPublicKey`, `GetHost`, `GetInhiveSettingsJson`, `GetIp`, `GetIpinfo`, `GetIsExpand`, `GetIsGroup`, `GetIsSecure`, `GetIsSelected`, `GetIsVisible`, `GetItems`, `GetLatitude`, `GetLevel`, `GetLicenseKey`, `GetListen`, `GetLocalAddressIpv4`, `GetLocalAddressIpv6`, `GetLog`, `GetLongitude`, `GetMemory`, `GetMessage`, `GetMessageType`, `GetMode`, `GetOrg`, `GetOutboundTag`, `GetPeerPublicKey`, `GetPort`, `GetPostalCode`, `GetPrivateKey`, `GetRegion`, `GetResponseCode`, `GetSecret`, `GetSelectable`, `GetSelected`, `GetSelectorTags`, `GetSpeedKbps`, `GetStatusCode`, `GetSuccess`, `GetSystemInfo`, `GetTag`, `GetTagDisplay`, `GetTagOverride`, `GetTempDir`, `GetTempPath`, `GetTestBytes`, `GetTime`, `GetTimeoutMs`, `GetTimeoutSec`, `GetTimestampMs`, `GetTrafficAvailable`, `GetType`, `GetUplink`, `GetUplinkTotal`, `GetUpload`, `GetUrl`, `GetUrlTestDelay`, `GetUrlTestTime`, `GetWorkingDir`, `InitInhiveService`, `Instance`, `Log`, `LogListener`, `ModeStateListener`, `Name`, `NewCoreClient`, `NewService`, `Number`, `Parse`, `Pause`, `ProtoMessage`, `ProtoReflect`, `Read`, `RegisterCoreServer`, `RemoveOutbound`, `Reset`, `RunInstanceQuiet`, `RunInstanceRaw`, `SelectOutbound`, `ServiceReload`, `ServiceStop`, `SetCoreStatus`, `SetSystemProxyEnabled`, `Setup`, `SpeedTest`, `Start`, `StartGrpcServerByMode`, `StartService`, `Stop`, `StopAndAlert`, `String`, `SwitchMode`, `SystemProxyStatus`, `TrafficManager`, `TrimTagName`, `Type`, `UrlTest`, `UrlTestActive`, `UrlTestConfig`, `UrlTestHistory`, `Wake`, `WriteDebugMessage`, `WriteMessage`, `WriteSharedLog`, `WriteSharedLogf`
 
 Imported by: `platform/desktop`, `platform/mobile`
 
@@ -182,22 +180,6 @@ Public API:
 - Functions: `GenerateCertificatePair`, `IsAdmin`, `IsPortInUse`, `RedirectStderr`
 
 Imported by: `v2/config`, `v2/hcore`
-
-Tests referencing this module: none found.
-
-## `v2/service_manager`
-
-Size: 101 lines across 2 file(s).
-
-Files:
-- `v2/service_manager/inhive.go` (86 lines)
-- `v2/service_manager/service.go` (15 lines)
-
-Public API:
-- Types: `HService`
-- Functions: `DisposeServices`, `OnMainServiceClose`, `OnMainServicePreStart`, `OnMainServiceStart`, `StartServices`
-
-Imported by: `v2/hcore`
 
 Tests referencing this module: none found.
 

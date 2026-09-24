@@ -79,13 +79,13 @@ $version = (& git -C $coreDir describe --tags 2>$null | Select-Object -First 1)
 if (-not $version) { $version = "unknown" }
 
 # -checklinkname=0 обязателен для форка (см. tfogo_checklinkname0 в тегах).
-# Версий две и обе объявлены "unknown": апстримная sing-box/constant.Version
+# Версия была две, обе объявлены "unknown": апстримная sing-box/constant.Version
 # (её отдаёт clashapi и libbox) и наша v2/hcommon/constants.Version (CLI, который
-# её печатал, снесён 2026-09-23; флаг оставлен, чтобы бинарь не нёс "unknown").
-# Проставляются обе — иначе диагностика врёт там, куда смотрят при инциденте.
+# её печатал, снесён 2026-09-23). Вторую больше никто не читал (0 читателей в
+# core/ и app/) — переменная и этот -X флаг снесены 2026-09-24 одним заходом с
+# Makefile:VERSION_LDFLAGS и build-aar6.ps1.
 $ldflags = "-checklinkname=0 -buildid= " +
            "-X github.com/sagernet/sing-box/constant.Version=$version " +
-           "-X github.com/twilgate/inhive-core/v2/hcommon/constants.Version=$version " +
            "-X internal/godebug.defaultGODEBUG=multipathtcp=0"
 if ($Configuration -eq "Release") { $ldflags = "-w -s " + $ldflags }
 

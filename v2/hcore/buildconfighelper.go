@@ -27,17 +27,9 @@ func init() {
 	}
 }
 
-func BuildConfigJson(ctx context.Context, in *StartRequest) (string, error) {
-	Log(LogLevel_DEBUG, LogType_CORE, "Stating Service ")
-
-	parsedContent, err := BuildConfig(ctx, in)
-	if err != nil {
-		return "", err
-	}
-	res, err := parsedContent.MarshalJSONContext(ctx)
-	return string(res), err
-}
-
+// BuildConfigJson (JSON-строка вместо *option.Options) снесена 2026-09-24:
+// 0 вызовов в core/ и app/ после сноса CLI 2026-09-23 (единственный читатель
+// был там же, где и config.BuildConfigJson — см. CHANGELOG.md [Unreleased]).
 func BuildConfig(ctx context.Context, in *StartRequest) (*option.Options, error) {
 	Log(LogLevel_DEBUG, LogType_CORE, "Building Config...")
 

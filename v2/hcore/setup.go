@@ -6,7 +6,6 @@ import (
 
 	"github.com/twilgate/inhive-core/v2/config"
 	"github.com/twilgate/inhive-core/v2/hcommon"
-	"github.com/twilgate/inhive-core/v2/service_manager"
 )
 
 var (
@@ -17,8 +16,13 @@ var (
 	statusPropagationPort int64
 )
 
+// InitInhiveService раньше звала service_manager.StartServices(); пакет
+// снесён 2026-09-24 как no-op (Register/RegisterPreService снесли 2026-09-23,
+// списки services/preservices были навсегда пустыми). Функция оставлена ради
+// единственного вызова из grpc_server.go — переписывать call site не стали,
+// чтобы не трогать код за пределами invariant-области этой правки.
 func InitInhiveService() error {
-	return service_manager.StartServices()
+	return nil
 }
 
 func (s *CoreService) Setup(ctx context.Context, req *SetupRequest) (resp *hcommon.Response, err error) {

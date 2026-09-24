@@ -4,19 +4,21 @@ package hcore
 import (
 	daemon "github.com/sagernet/sing-box/daemon"
 	"github.com/sagernet/sing-box/log"
-	"github.com/twilgate/inhive-core/v2/service_manager"
 )
 
 var _ log.PlatformWriter = (*LogInterface)(nil)
 
 type LogInterface struct{}
 
+// ServiceStop / ServiceReload: раньше проксировали в
+// service_manager.OnMainService{Close,Start}, снесённый 2026-09-24 как no-op
+// (Register/RegisterPreService снесли 2026-09-23, списки хуков были навсегда
+// пустыми). Методы остаются ради интерфейса log.PlatformWriter.
 func (h *LogInterface) ServiceStop() error {
-	return service_manager.OnMainServiceClose()
+	return nil
 }
 func (h *LogInterface) ServiceReload() error {
-	return service_manager.OnMainServiceStart()
-
+	return nil
 }
 func (h *LogInterface) SystemProxyStatus() (*daemon.SystemProxyStatus, error) {
 	return nil, nil

@@ -30,9 +30,10 @@ func NewService(ctx context.Context, options option.Options) (*daemon.StartedSer
 		// прибьёт packet-tunnel. Зеркалит command_server.go:63. Эффект только
 		// под darwin+cgo (iOS); на Windows/Android — no-op.
 		OOMKiller: C.IsIos,
-		ExtraServices: []adapter.LifecycleService{
-			&inhiveMainServiceManager{},
-		},
+		// ExtraServices пуст: inhiveMainServiceManager (обёртка над
+		// service_manager.OnMainService*) снесена 2026-09-24 вместе с пакетом
+		// v2/service_manager — Register/RegisterPreService снесли 2026-09-23,
+		// списки services/preservices были навсегда пустыми, хук был no-op.
 	}
 
 	WriteSharedLog("NewService: libbox.CheckConfigOptions begin")
